@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "toolkit-image-generation"
+version = "0.1.0"
+description = "Generic resumable command-line image generation batches"
+requires-python = ">=3.11"
+
+[project.scripts]
+toolkit-image-generate = "toolkit_image_generation.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/toolkit_image_generation"]

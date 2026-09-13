@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "toolkit-image-to-3d"
+version = "0.1.0"
+description = "Generic resumable image-to-GLB batch conversion"
+requires-python = ">=3.11"
+dependencies = ["gradio-client>=1.14"]
+
+[project.scripts]
+toolkit-image-to-3d = "toolkit_image_to_3d.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/toolkit_image_to_3d"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
