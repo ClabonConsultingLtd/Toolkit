@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {requestEdit} from '../src/handoff.mjs';
+test('provider helper retries then returns content',async()=>{let calls=0;const text=await requestEdit(async()=>{calls++;if(calls===1)throw new Error('temporary');return {ok:true,json:async()=>({choices:[{message:{content:'edit'}}]})}},'url','key','model','prompt');assert.equal(text,'edit');assert.equal(calls,2)});

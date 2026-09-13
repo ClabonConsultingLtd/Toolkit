@@ -1,0 +1,20 @@
+{
+  "name": "@toolkit/claude-token-optimisation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./hooks/guard-large-read.mjs": "./hooks/guard-large-read.mjs",
+    "./hooks/summarize-bash.mjs": "./hooks/summarize-bash.mjs"
+  },
+	"scripts": {
+		"install-assets": "node install.mjs",
+    "typecheck": "tsc --noEmit",
+		"test": "node --test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}
