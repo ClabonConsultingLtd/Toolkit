@@ -9,7 +9,10 @@ import { existsSync, readFileSync } from "node:fs";
 const DEFAULT_MIN_LINES = 350;
 
 function minimumLines() {
-	const configured = Number.parseInt(process.env.BULK_READER_MIN_LINES ?? "", 10);
+	const configured = Number.parseInt(
+		process.env.BULK_READER_MIN_LINES ?? "",
+		10,
+	);
 	return Number.isSafeInteger(configured) && configured > 0
 		? configured
 		: DEFAULT_MIN_LINES;
@@ -32,7 +35,12 @@ try {
 if (input.agent_id) process.exit(0);
 
 const { file_path: filePath, offset, limit } = input.tool_input ?? {};
-if (!filePath || offset !== undefined || limit !== undefined || !existsSync(filePath)) {
+if (
+	!filePath ||
+	offset !== undefined ||
+	limit !== undefined ||
+	!existsSync(filePath)
+) {
 	process.exit(0);
 }
 
