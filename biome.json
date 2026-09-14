@@ -1,9 +1,9 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
-  "files": {
-    "includes": ["**", "!**/node_modules/**", "!**/dist/**"]
-  },
-  "formatter": {
-    "indentStyle": "tab"
-  }
+	"$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
+	"files": {
+		"includes": ["**", "!**/node_modules", "!**/dist"]
+	},
+	"formatter": {
+		"indentStyle": "tab"
+	}
 }
