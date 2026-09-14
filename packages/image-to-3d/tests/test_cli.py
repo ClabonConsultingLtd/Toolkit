@@ -6,7 +6,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-from toolkit_image_to_3d.cli import atomic_json_write, load_queue, resolve_queue_path, update_ledger
+from toolkit_image_to_3d.cli import (
+    atomic_json_write,
+    load_queue,
+    resolve_queue_path,
+    update_ledger,
+)
 
 
 class QueueTests(unittest.TestCase):
@@ -14,11 +19,28 @@ class QueueTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             queue = root / "queue.json"
-            queue.write_text(json.dumps([{"id": "one", "reference": "input.png", "model": "models/output.glb"}]), encoding="utf-8")
+            queue.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "one",
+                            "reference": "input.png",
+                            "model": "models/output.glb",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
             resolved_root = root.resolve()
             self.assertEqual(
                 load_queue(queue, root),
-                [("one", resolved_root / "input.png", resolved_root / "models" / "output.glb")],
+                [
+                    (
+                        "one",
+                        resolved_root / "input.png",
+                        resolved_root / "models" / "output.glb",
+                    )
+                ],
             )
 
     def test_relative_traversal_is_rejected(self) -> None:
@@ -30,7 +52,15 @@ class QueueTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             queue = root / "queue.json"
-            queue.write_text(json.dumps([{ "id": "one", "reference": "a.png", "model": "a.glb" }, { "id": "one", "reference": "b.png", "model": "b.glb" }]), encoding="utf-8")
+            queue.write_text(
+                json.dumps(
+                    [
+                        {"id": "one", "reference": "a.png", "model": "a.glb"},
+                        {"id": "one", "reference": "b.png", "model": "b.glb"},
+                    ]
+                ),
+                encoding="utf-8",
+            )
             with self.assertRaisesRegex(ValueError, "duplicate"):
                 load_queue(queue, root)
 
@@ -39,7 +69,13 @@ class QueueTests(unittest.TestCase):
             ledger = Path(directory) / "ledger.json"
             atomic_json_write(ledger, {"assets": {"old": {"status": "converted"}}})
             update_ledger(ledger, [{"id": "new", "status": "skipped"}])
-            self.assertEqual(json.loads(ledger.read_text(encoding="utf-8"))["assets"], {"new": {"id": "new", "status": "skipped"}, "old": {"status": "converted"}})
+            self.assertEqual(
+                json.loads(ledger.read_text(encoding="utf-8"))["assets"],
+                {
+                    "new": {"id": "new", "status": "skipped"},
+                    "old": {"status": "converted"},
+                },
+            )
 
 
 if __name__ == "__main__":

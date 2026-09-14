@@ -1,5 +1,82 @@
-import {readFileSync,writeFileSync} from 'node:fs';import {resolve} from 'node:path';import {parseTask} from './task-file.mjs';import {parseBlocks,prepareEdits,applyEdits} from './blocks.mjs';
-export async function requestEdit(fetcher,url,key,model,prompt,retries=1){let last;for(let n=0;n<=retries;n++){try{const r=await fetcher(url,{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model,messages:[{role:'user',content:prompt}]})});if(!r.ok)throw new Error(`provider returned ${r.status}`);const text=(await r.json()).choices?.[0]?.message?.content;if(typeof text!=='string')throw new Error('provider returned no text');return text}catch(error){last=error}}throw last}
-export function promptFor(task,root){const files=[...task.editable].map(f=>`FILE: ${f}\n${readFileSync(resolve(root,f),'utf8')}`).join('\n\n');return `${task.instruction}\n\nReturn only blocks:\n@@ relative/file @@\n<<<<<<< SEARCH\nexact text\n=======\nreplacement\n>>>>>>> REPLACE\n\n${files}`}
-export async function main(args=process.argv.slice(2),env=process.env,fetcher=fetch){const [taskDir,...flags]=args;if(!taskDir)throw new Error('usage: node handoff.mjs TASK_DIRECTORY [--dry-run]');const root=resolve(env.TOOLKIT_ROOT??process.cwd()),directory=resolve(taskDir),task=parseTask(readFileSync(resolve(directory,'task.md'),'utf8'),root),prompt=promptFor(task,root);writeFileSync(resolve(directory,'request.json'),JSON.stringify({editable:[...task.editable],prompt},null,2));if(flags.includes('--dry-run'))return prompt;if(env.TOOLKIT_HANDOFF_ENABLED!=='on')throw new Error('TOOLKIT_HANDOFF_ENABLED must be on');if(!env.DEEPSEEK_API_KEY||!env.DEEPSEEK_MODEL)throw new Error('DEEPSEEK_API_KEY and DEEPSEEK_MODEL are required');const text=await requestEdit(fetcher,env.DEEPSEEK_API_URL??'https://api.deepseek.com/chat/completions',env.DEEPSEEK_API_KEY,env.DEEPSEEK_MODEL,prompt);writeFileSync(resolve(directory,'response.md'),text);applyEdits(prepareEdits(root,parseBlocks(text,task.editable)));return 'Applied bounded handoff edits. Review the diff.'}
-if(import.meta.url===`file://${process.argv[1].replaceAll('\\','/')}`)main().then(console.log).catch(error=>{console.error(error.message);process.exitCode=1});
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { applyEdits, parseBlocks, prepareEdits } from "./blocks.mjs";
+import { parseTask } from "./task-file.mjs";
+export async function requestEdit(
+	fetcher,
+	url,
+	key,
+	model,
+	prompt,
+	retries = 1,
+) {
+	let last;
+	for (let n = 0; n <= retries; n++) {
+		try {
+			const r = await fetcher(url, {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${key}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					model,
+					messages: [{ role: "user", content: prompt }],
+				}),
+			});
+			if (!r.ok) throw new Error(`provider returned ${r.status}`);
+			const text = (await r.json()).choices?.[0]?.message?.content;
+			if (typeof text !== "string")
+				throw new Error("provider returned no text");
+			return text;
+		} catch (error) {
+			last = error;
+		}
+	}
+	throw last;
+}
+export function promptFor(task, root) {
+	const files = [...task.editable]
+		.map((f) => `FILE: ${f}\n${readFileSync(resolve(root, f), "utf8")}`)
+		.join("\n\n");
+	return `${task.instruction}\n\nReturn only blocks:\n@@ relative/file @@\n<<<<<<< SEARCH\nexact text\n=======\nreplacement\n>>>>>>> REPLACE\n\n${files}`;
+}
+export async function main(
+	args = process.argv.slice(2),
+	env = process.env,
+	fetcher = fetch,
+) {
+	const [taskDir, ...flags] = args;
+	if (!taskDir)
+		throw new Error("usage: node handoff.mjs TASK_DIRECTORY [--dry-run]");
+	const root = resolve(env.TOOLKIT_ROOT ?? process.cwd()),
+		directory = resolve(taskDir),
+		task = parseTask(readFileSync(resolve(directory, "task.md"), "utf8"), root),
+		prompt = promptFor(task, root);
+	writeFileSync(
+		resolve(directory, "request.json"),
+		JSON.stringify({ editable: [...task.editable], prompt }, null, 2),
+	);
+	if (flags.includes("--dry-run")) return prompt;
+	if (env.TOOLKIT_HANDOFF_ENABLED !== "on")
+		throw new Error("TOOLKIT_HANDOFF_ENABLED must be on");
+	if (!env.DEEPSEEK_API_KEY || !env.DEEPSEEK_MODEL)
+		throw new Error("DEEPSEEK_API_KEY and DEEPSEEK_MODEL are required");
+	const text = await requestEdit(
+		fetcher,
+		env.DEEPSEEK_API_URL ?? "https://api.deepseek.com/chat/completions",
+		env.DEEPSEEK_API_KEY,
+		env.DEEPSEEK_MODEL,
+		prompt,
+	);
+	writeFileSync(resolve(directory, "response.md"), text);
+	applyEdits(prepareEdits(root, parseBlocks(text, task.editable)));
+	return "Applied bounded handoff edits. Review the diff.";
+}
+if (import.meta.url === `file://${process.argv[1].replaceAll("\\", "/")}`)
+	main()
+		.then(console.log)
+		.catch((error) => {
+			console.error(error.message);
+			process.exitCode = 1;
+		});

@@ -1,1 +1,13 @@
-{"name":"@toolkit/agent-workflow","version":"0.1.0","private":true,"type":"module","scripts":{"test":"node --test","handoff":"node src/handoff.mjs","ticket":"node src/ticket-launch.mjs","ticket-batch":"node src/ticket-batch.mjs","worktree":"node src/worktree-launch.mjs"}}
+{
+	"name": "@toolkit/agent-workflow",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"test": "node --test",
+		"handoff": "node src/handoff.mjs",
+		"ticket": "node src/ticket-launch.mjs",
+		"ticket-batch": "node src/ticket-batch.mjs",
+		"worktree": "node src/worktree-launch.mjs"
+	}
+}
