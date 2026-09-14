@@ -1,26 +1,26 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": ["YOUR_HOOK_DIRECTORY/guard-large-read.mjs"]
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": ["YOUR_HOOK_DIRECTORY/summarize-bash.mjs"]
-          }
-        ]
-      }
-    ]
-  }
+	"hooks": {
+		"PreToolUse": [
+			{
+				"matcher": "Read",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node",
+						"args": ["YOUR_HOOK_DIRECTORY/guard-large-read.mjs"]
+					}
+				]
+			},
+			{
+				"matcher": "Bash",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node",
+						"args": ["YOUR_HOOK_DIRECTORY/summarize-bash.mjs"]
+					}
+				]
+			}
+		]
+	}
 }

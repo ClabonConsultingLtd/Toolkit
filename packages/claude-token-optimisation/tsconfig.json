@@ -1,11 +1,11 @@
 {
-  "compilerOptions": {
-    "target": "ES2024",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "strict": true,
-    "noEmit": true,
-    "types": ["node"]
-  },
-  "include": ["**/*.ts"]
+	"compilerOptions": {
+		"target": "ES2024",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"strict": true,
+		"noEmit": true,
+		"types": ["node"]
+	},
+	"include": ["**/*.ts"]
 }

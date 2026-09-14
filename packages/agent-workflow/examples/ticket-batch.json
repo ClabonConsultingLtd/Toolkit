@@ -1,0 +1,10 @@
+{
+	"ticketConfig": "ticket-config.json",
+	"completeStatus": "done",
+	"state": ".toolkit/ticket-batch-state.json",
+	"tickets": [
+		"tasks/01-setup.md",
+		"tasks/02-import.md",
+		"tasks/03-validation.md"
+	]
+}

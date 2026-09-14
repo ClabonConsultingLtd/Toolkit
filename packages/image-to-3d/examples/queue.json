@@ -1,7 +1,7 @@
 [
-  {
-    "id": "sample-object",
-    "reference": "references/sample-object.png",
-    "model": "models/sample-object.glb"
-  }
+	{
+		"id": "sample-object",
+		"reference": "references/sample-object.png",
+		"model": "models/sample-object.glb"
+	}
 ]
