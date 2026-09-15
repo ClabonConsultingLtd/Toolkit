@@ -12,28 +12,28 @@ importers:
         specifier: ^2.5.11
         version: 2.5.13
       '@types/node':
-        specifier: ^24.13.3
-        version: 24.13.4
+        specifier: ^26.5.1
+        version: 26.5.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
       vitest:
         specifier: ^4.1.11
-        version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
+        version: 4.1.11(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1))
 
   packages/agent-workflow: {}
 
   packages/claude-token-optimisation:
     devDependencies:
       '@types/node':
-        specifier: ^24.13.3
-        version: 24.13.4
+        specifier: ^26.5.1
+        version: 26.5.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
       vitest:
         specifier: ^4.1.11
-        version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
+        version: 4.1.11(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1))
 
 packages:
 
@@ -211,8 +211,8 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
-  '@types/node@24.13.4':
-    resolution: {integrity: sha512-YJ7EqCstVTzIr0fMr7qul/977en+pQHrfmuKIo6Zr9i75Be21dr3MovcfvGtyvi2HAUrRerWps5sMO9I7WaxDw==}
+  '@types/node@26.5.1':
+    resolution: {integrity: sha512-CzNm2FezW4VR/LjG6yUdiEgLE/rAQ9Slj5gCu/C2VrdcW7I0ahNZ8DRbHT7zOZ6r3ONgd/bsQIeSaoDGrd1C6g==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -540,8 +540,8 @@ packages:
     engines: {node: '>=16.20.0'}
     hasBin: true
 
-  undici-types@7.18.2:
-    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+  undici-types@8.9.0:
+    resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
   vite@8.3.0:
     resolution: {integrity: sha512-lhZBVvEHefgE+HQZC9O7EBJgCU/nVzFNl7vkS4RE0APtWLP02/8QVIkQtzBxPquh7lq5/78NHipTj7ODQ6XuyQ==}
@@ -731,9 +731,9 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
-  '@types/node@24.13.4':
+  '@types/node@26.5.1':
     dependencies:
-      undici-types: 7.18.2
+      undici-types: 8.9.0
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -804,13 +804,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.1
 
-  '@vitest/mocker@4.1.11(vite@8.3.0(@types/node@24.13.4))':
+  '@vitest/mocker@4.1.11(vite@8.3.0(@types/node@26.5.1))':
     dependencies:
       '@vitest/spy': 4.1.11
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.3.0(@types/node@24.13.4)
+      vite: 8.3.0(@types/node@26.5.1)
 
   '@vitest/pretty-format@4.1.11':
     dependencies:
@@ -991,9 +991,9 @@ snapshots:
       '@typescript/typescript-win32-arm64': 7.0.2
       '@typescript/typescript-win32-x64': 7.0.2
 
-  undici-types@7.18.2: {}
+  undici-types@8.9.0: {}
 
-  vite@8.3.0(@types/node@24.13.4):
+  vite@8.3.0(@types/node@26.5.1):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -1001,13 +1001,13 @@ snapshots:
       rolldown: 1.2.8
       tinyglobby: 0.2.17
     optionalDependencies:
-      '@types/node': 24.13.4
+      '@types/node': 26.5.1
       fsevents: 2.3.3
 
-  vitest@4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4)):
+  vitest@4.1.11(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)):
     dependencies:
       '@vitest/expect': 4.1.11
-      '@vitest/mocker': 4.1.11(vite@8.3.0(@types/node@24.13.4))
+      '@vitest/mocker': 4.1.11(vite@8.3.0(@types/node@26.5.1))
       '@vitest/pretty-format': 4.1.11
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
@@ -1024,10 +1024,10 @@ snapshots:
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 8.3.0(@types/node@24.13.4)
+      vite: 8.3.0(@types/node@26.5.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
-      '@types/node': 24.13.4
+      '@types/node': 26.5.1
     transitivePeerDependencies:
       - msw
 
