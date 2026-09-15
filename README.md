@@ -1,23 +1,64 @@
 # Toolkit
 
-Toolkit is a clean, reusable collection of developer and creative-production tools. Each package is independently usable: it has no embedded project paths, asset taxonomy, infrastructure names, or product workflow assumptions.
+[![Verify](https://github.com/ClabonConsultingLtd/Toolkit/actions/workflows/verify.yml/badge.svg)](https://github.com/ClabonConsultingLtd/Toolkit/actions/workflows/verify.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Use the tools selectively. Toolkit is not a framework that takes ownership of a repository.
+Safety-first developer tooling for agent workflows, Claude Code context optimisation, image generation, and image-to-3D conversion.
+
+Toolkit is a collection of small, reusable packages—not a framework that takes over a repository. Every package keeps its paths, policies, credentials, and runtime state explicit.
+
+## Choose a tool
+
+| Need | Package | Outcome |
+| --- | --- | --- |
+| Keep Claude Code context focused | [`claude-token-optimisation`](packages/claude-token-optimisation/README.md) | Broad reads and routine passing command output are compressed without hiding failures. |
+| Delegate a mechanical edit safely | [`agent-workflow`](packages/agent-workflow/README.md) | Provider handoffs are limited to declared files, transcripted, and reviewable. |
+| Run a queue of implementation tickets | [`agent-workflow`](packages/agent-workflow/README.md#ticket-batches) | Tickets run serially, require a completion status, and resume from recorded state. |
+| Generate a batch of images | [`image-generation`](packages/image-generation/README.md) | A caller-chosen runner gains retries, quota stops, logs, and resumable state. |
+| Turn reference images into GLBs | [`image-to-3d`](packages/image-to-3d/README.md) | Explicit queues become auditable image-to-model batches through a Gradio-compatible service. |
+
+## Quick starts
+
+### Claude Code context optimisation
+
+```bash
+node packages/claude-token-optimisation/install.mjs path/to/your-repository
+```
+
+The installer writes a settings fragment for the repository owner to review and merge.
+
+### Ticket batches
+
+```bash
+pnpm --dir packages/agent-workflow ticket-batch ticket-batch.json --dry-run
+pnpm --dir packages/agent-workflow ticket-batch ticket-batch.json
+```
+
+The ticket tools are compatible with Markdown tickets created by Matt Pocock's `/grill-with-docs` → `/to-spec` → `/to-tickets` workflow. They use the ticket's `**Status:**` field as the launch and completion contract; they do not invoke those skills themselves.
+
+### Image generation
+
+```bash
+toolkit-image-generate prompts.txt --output-dir generated \
+  --runner image-runner --runner-arg run --runner-arg "{instruction}"
+```
+
+### Image to 3D
+
+```bash
+toolkit-image-to-3d queue.json --source-root . --dry-run
+```
 
 ## Prerequisites
 
-Install only the prerequisites needed by the packages you adopt:
-
-| Tooling | Needed for | Notes |
-| --- | --- | --- |
-| Node.js 24 or later | Claude token optimisation and agent workflow | Includes the Node test runner and `fetch` used by the handoff client. |
-| Corepack and pnpm 11 | Node package scripts | Run `corepack enable` if `pnpm` is not already available. |
-| Python 3.11 or later | Image generation and image-to-3D | The Python packages are managed and locked with `uv`. |
-| `uv` | Python dependency installation and lockfile updates | Install from [astral.sh/uv](https://docs.astral.sh/uv/). |
-| Git | Optional worktree helper | Required only for `pnpm worktree`; ordinary ticket launching does not require it. |
-| Claude Code | Claude token optimisation and optional skills | Required only when installing the `.claude` integration assets. |
-| Hugging Face token | Real image-to-3D conversion | Set `HF_TOKEN` (or select another token variable with `--token-env`); dry runs need no token. |
-| DeepSeek API key and chosen model | Real bounded handoffs | Set `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL`, and the explicit enable switch; dry runs need neither. |
+| Component | Requirement |
+| --- | --- |
+| Node packages | Node.js 24+, Corepack, and pnpm 11 |
+| Python packages | Python 3.11+ and [uv](https://docs.astral.sh/uv/) |
+| Claude integration | Claude Code, only when using the optional `.claude` assets |
+| Image-to-3D conversion | A user-supplied token, normally `HF_TOKEN` |
+| Provider handoff | Explicit opt-in, `DEEPSEEK_API_KEY`, and `DEEPSEEK_MODEL` |
+| Worktree helper | Git, only when deliberately creating a worktree |
 
 Install Node dependencies from the repository root:
 
@@ -26,164 +67,25 @@ corepack enable
 pnpm install --frozen-lockfile
 ```
 
-For either Python package, enter its directory and run `uv sync`.
+Use `uv sync` from either Python package directory when installing its dependencies.
 
-## What is included
+## Safety model
 
-| Package | What it does | Why it exists |
-| --- | --- | --- |
-| `@toolkit/claude-token-optimisation` | Claude Code agent, hooks, and installer for large reads and routine command output. | Keeps primary-agent context focused without suppressing failure diagnostics. |
-| `@toolkit/agent-workflow` | Bounded model handoff, configurable ticket launcher, and optional worktree helper. | Makes mechanical delegation reviewable and opt-in instead of giving a provider unrestricted repository access. |
-| `toolkit-image-generation` | Resumable prompt-file image batch runner around a caller-supplied executable. | Runs large image batches reliably without binding the toolkit to one model, art style, CLI, or storage system. |
-| `toolkit-image-to-3d` | Explicit image-reference to GLB queue conversion, initially for TRELLIS-compatible Gradio APIs. | Turns a repeatable API sequence into an auditable, resumable batch process. |
+- Credentials are supplied through environment variables and never written to source-controlled state.
+- Tools do not embed personal paths, network shares, project taxonomy, or hidden defaults.
+- Hooks fail open: an optimisation failure must not stop ordinary work.
+- Model handoffs require an explicit enable switch and may edit only task-declared files.
+- Image batches verify output before recording success and stop on quota or rate-limit signals.
 
-## Design principles
+## Project standards
 
-- Configuration is supplied through command-line options, environment variables, or checked-in project configuration—not hidden defaults.
-- Credentials are never generated, read from source files, or written to reports.
-- Runtime state, logs, generated images, model outputs, and provider transcripts belong outside source control.
-- Hooks fail open: a broken context-saving integration must not prevent normal work.
-- Model-assisted edits are bounded by an explicit editable-file list and require human diff review.
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Architecture](docs/architecture.md)
+- [Release process](docs/release.md)
+- [Changelog](CHANGELOG.md)
+- [MIT licence](LICENSE)
 
-## Claude token optimisation
+## Status
 
-Location: [`packages/claude-token-optimisation`](packages/claude-token-optimisation/README.md)
-
-This package is for repositories that use Claude Code and want to spend context where it matters.
-
-- **Bulk reader agent**: a read-only factual analyst for broad exploration of large files or file groups. It reports evidence and paths rather than pulling raw source into the primary session.
-- **Large-read guard**: detects an untargeted file read above a configurable line threshold (350 by default) and suggests delegating it to the bulk reader. Targeted reads and subagent reads remain available.
-- **Bash summarizer**: captures and summarizes a narrow allowlist of successful, routine commands such as a clean `git status` or a single passing test file. Any failed command keeps its raw output intact.
-
-Install it into a repository:
-
-```bash
-node packages/claude-token-optimisation/install.mjs path/to/your-repository
-```
-
-The installer copies the agent and hooks to `.claude/`, then writes a settings fragment for a project owner to merge deliberately. Set `BULK_READER_MIN_LINES` to adjust the broad-read threshold; set `TOOLKIT_STATE_DIR` to relocate the hook log directory.
-
-## Agent workflow
-
-Location: [`packages/agent-workflow`](packages/agent-workflow/README.md)
-
-This package separates helpful delegation from unreviewable delegation.
-
-### Bounded provider handoff
-
-Create a task directory containing `task.md`:
-
-```markdown
-Editable:
-- src/example.ts
-
-## Instruction
-
-Add the already-specified mechanical change.
-```
-
-Preview the exact repository context and prompt before any external call:
-
-```bash
-pnpm --dir packages/agent-workflow handoff path/to/task --dry-run
-```
-
-For a real call, explicitly set `TOOLKIT_HANDOFF_ENABLED=on`, `DEEPSEEK_API_KEY`, and `DEEPSEEK_MODEL`. The tool sends only the declared editable files, writes `request.json` and `response.md` in the task directory, accepts only file-qualified SEARCH/REPLACE blocks for declared files, and prepares all edits before writing. Review the completed diff every time.
-
-Use this for repetitive changes, established test cases, scaffolding, or direct format translation. Do not use it for architecture, API design, acceptance decisions, comments that carry reasoning, or anything you cannot independently review.
-
-### Ticket launcher and worktrees
-
-The ticket launcher and batch runner are designed around Markdown tickets generated by Matt Pocock's `/grill-with-docs` → `/to-spec` → `/to-tickets` flow. In particular, they expect each ticket to expose a `**Status:** <value>` declaration that can move from the configured ready state to the configured completion state. They do not invoke those skills themselves, but their ticket-status contract is intentionally compatible with that workflow.
-
-The launcher uses a portable JSON file rather than assuming an issue tracker or repository layout:
-
-```json
-{"readyStatus":"ready","command":"your-agent-launch-command"}
-```
-
-```bash
-pnpm --dir packages/agent-workflow ticket path/to/ticket.md --config ticket-config.json --dry-run
-```
-
-The optional worktree helper is separate, so a normal ticket launch never creates Git state implicitly:
-
-```bash
-pnpm --dir packages/agent-workflow worktree path/to/ticket.md .worktrees --dry-run
-```
-
-To process an ordered manifest serially, use `ticket-batch`. It waits for each launcher process, verifies that the ticket reached the configured completion status, records resumable state, and stops at the first problem by default:
-
-```bash
-pnpm --dir packages/agent-workflow ticket-batch ticket-batch.json --dry-run
-pnpm --dir packages/agent-workflow ticket-batch ticket-batch.json --max 1
-```
-
-See [`ticket-batch.json`](packages/agent-workflow/examples/ticket-batch.json) for the manifest shape. `--continue-on-failure` is available, but should be used only when tickets are genuinely independent.
-
-## Image generation
-
-Location: [`packages/image-generation`](packages/image-generation/README.md)
-
-This runner takes a simple blank-line-separated prompt file. The first line is a safe output identifier; the remaining lines are the prompt. The runner executable is supplied by the caller, so Toolkit works with whichever generation system a project approves.
-
-```text
-sample-image
-A neutral product image of a ceramic cup on a plain backdrop.
-```
-
-Install or run the package with a Python package manager, then provide the executable and its arguments:
-
-```bash
-toolkit-image-generate prompts.txt --output-dir generated \
-  --runner image-runner --runner-arg run --runner-arg "{instruction}"
-```
-
-Runner arguments may use `{instruction}`, `{prompt}`, and `{output}`. Toolkit builds an argument vector directly rather than constructing a shell command.
-
-Why use it: it records progress after each item, checks that a non-empty output was produced, retries ordinary failures, stops on quota/rate-limit messages, and resumes later without regenerating completed images. `--staging-dir` supports a local generation location followed by a copy to the final output directory. Use `--dry-run`, `--limit`, `--timeout`, `--log-dir`, and `--retry-failed` to control a batch.
-
-## Image to 3D
-
-Location: [`packages/image-to-3d`](packages/image-to-3d/README.md)
-
-This package converts a caller-defined JSON queue of reference images into GLB models through a Gradio-compatible service. Its first API preset targets TRELLIS, but queues and paths remain generic:
-
-```json
-[
-  {
-    "id": "sample-object",
-    "reference": "references/sample-object.png",
-    "model": "models/sample-object.glb"
-  }
-]
-```
-
-Validate the queue before spending service quota:
-
-```bash
-toolkit-image-to-3d queue.json --source-root . --dry-run
-```
-
-Then convert with a user-supplied service token (default environment variable: `HF_TOKEN`):
-
-```bash
-toolkit-image-to-3d queue.json --source-root . --results results.json --ledger ledger.json
-```
-
-Why use it: it normalizes queue records, rejects relative path traversal, skips existing models by default, retries transient failures, stops on quota exhaustion, writes a per-run report, and can maintain a cumulative ledger. `--overwrite` is explicit because replacing a generated model is a meaningful action. The optional Claude skill lives under `packages/image-to-3d/claude/`.
-
-## Development and verification
-
-The repository includes offline tests for every package, a GitHub Actions workflow, `pnpm-lock.yaml`, and a `uv.lock` per Python package.
-
-Run the same checks locally:
-
-```bash
-node --test "packages/agent-workflow/test/*.test.mjs"
-node --test "packages/claude-token-optimisation/test/*.test.mjs"
-python -m unittest discover -s packages/image-generation/tests -v
-python -m unittest discover -s packages/image-to-3d/tests -v
-```
-
-See [architecture](docs/architecture.md), [security boundaries](docs/security.md), and the [release process](docs/release.md) for the remaining maintenance details.
+Toolkit is pre-1.0. Command and manifest contracts may evolve. Pin revisions when adopting it in another project, and read package-level README files for the precise interface and safety boundaries.
