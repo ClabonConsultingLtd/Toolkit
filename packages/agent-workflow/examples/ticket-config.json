@@ -1,1 +1,5 @@
-{ "readyStatus": "ready", "command": "your-agent-launch-command" }
+{
+	"provider": "local-markdown",
+	"readyStatus": "ready",
+	"command": "your-agent-launch-command"
+}
