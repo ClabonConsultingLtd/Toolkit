@@ -53,13 +53,18 @@ test("github provider batch resolves status from labels", () => {
 	const root = mkdtempSync(join(tmpdir(), "ticket-batch-"));
 	writeFileSync(
 		join(root, "config.json"),
-		'{"provider":"github","readyStatus":"ready","command":"agent"}',
+		JSON.stringify({
+			provider: "github",
+			readyStatus: "ready-for-agent",
+			command: "agent",
+			statusLabels: ["ready-for-agent", "done"],
+		}),
 	);
 	writeFileSync(
 		join(root, "manifest.json"),
-		'{"ticketConfig":"config.json","tickets":["41","42"]}',
+		'{"ticketConfig":"config.json","completeStatus":"done","tickets":["41","42"]}',
 	);
-	const statuses = { 41: "ready", 42: "done" };
+	const statuses = { 41: "ready-for-agent", 42: "done" };
 	const state = runBatch({
 		manifestPath: join(root, "manifest.json"),
 		dryRun: false,
@@ -69,7 +74,7 @@ test("github provider batch resolves status from labels", () => {
 		},
 		providerOptions: {
 			exec: ([, , number]) =>
-				JSON.stringify({ labels: [{ name: `status:${statuses[number]}` }] }),
+				JSON.stringify({ labels: [{ name: statuses[number] }] }),
 		},
 	});
 	assert.equal(state.tickets["41"].status, "complete");
