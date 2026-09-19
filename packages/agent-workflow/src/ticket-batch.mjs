@@ -8,8 +8,7 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
-const STATUS = /^\*\*Status:\*\*\s*(.+)$/im;
+import { resolveProvider } from "./ticket-providers.mjs";
 
 function readJson(path, description) {
 	try {
@@ -35,12 +34,6 @@ export function loadManifest(path) {
 	return manifest;
 }
 
-function status(path) {
-	const found = STATUS.exec(readFileSync(path, "utf8"))?.[1]?.trim();
-	if (!found) throw new Error(`ticket has no Status declaration: ${path}`);
-	return found;
-}
-
 function saveState(path, state) {
 	mkdirSync(dirname(path), { recursive: true });
 	const temporary = `${path}.tmp`;
@@ -54,11 +47,14 @@ export function runBatch({
 	continueOnFailure,
 	max,
 	launcher = spawnSync,
+	providerOptions,
 }) {
 	const manifestFile = resolve(manifestPath);
 	const manifest = loadManifest(manifestFile);
 	const base = dirname(manifestFile);
-	const config = resolve(base, manifest.ticketConfig);
+	const configPath = resolve(base, manifest.ticketConfig);
+	const config = readJson(configPath, "ticket config");
+	const provider = resolveProvider(config, providerOptions);
 	const completeStatus = manifest.completeStatus ?? "done";
 	const statePath = resolve(
 		base,
@@ -75,8 +71,8 @@ export function runBatch({
 	let launched = 0;
 	for (const reference of manifest.tickets) {
 		if (max !== undefined && launched >= max) break;
-		const ticket = resolve(base, reference);
-		const current = status(ticket);
+		const ticketRef = provider.resolveReference(reference, base);
+		const current = provider.getStatus(ticketRef, config);
 		if (current === completeStatus) {
 			state.tickets[reference] = { status: "complete", ticketStatus: current };
 			if (!dryRun) saveState(statePath, state);
@@ -89,11 +85,11 @@ export function runBatch({
 		}
 		const result = launcher(
 			process.execPath,
-			[launchPath, ticket, "--config", config],
+			[launchPath, ticketRef, "--config", configPath],
 			{ stdio: "inherit" },
 		);
 		launched += 1;
-		const after = status(ticket);
+		const after = provider.getStatus(ticketRef, config);
 		const completed = result.status === 0 && after === completeStatus;
 		state.tickets[reference] = {
 			status: completed ? "complete" : "failed",

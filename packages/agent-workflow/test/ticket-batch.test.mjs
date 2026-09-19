@@ -48,3 +48,30 @@ test("completed launch records state and continues serially", () => {
 		"complete",
 	);
 });
+
+test("github provider batch resolves status from labels", () => {
+	const root = mkdtempSync(join(tmpdir(), "ticket-batch-"));
+	writeFileSync(
+		join(root, "config.json"),
+		'{"provider":"github","readyStatus":"ready","command":"agent"}',
+	);
+	writeFileSync(
+		join(root, "manifest.json"),
+		'{"ticketConfig":"config.json","tickets":["41","42"]}',
+	);
+	const statuses = { 41: "ready", 42: "done" };
+	const state = runBatch({
+		manifestPath: join(root, "manifest.json"),
+		dryRun: false,
+		launcher: () => {
+			statuses[41] = "done";
+			return { status: 0 };
+		},
+		providerOptions: {
+			exec: ([, , number]) =>
+				JSON.stringify({ labels: [{ name: `status:${statuses[number]}` }] }),
+		},
+	});
+	assert.equal(state.tickets["41"].status, "complete");
+	assert.equal(state.tickets["42"].status, "complete");
+});
