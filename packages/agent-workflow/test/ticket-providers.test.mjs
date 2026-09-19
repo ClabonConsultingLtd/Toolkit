@@ -27,7 +27,15 @@ test("local-markdown provider honors a custom statusPattern", () => {
 	);
 });
 
-test("github provider derives status from a status: label", () => {
+const STATUS_LABELS = [
+	"needs-triage",
+	"needs-info",
+	"ready-for-agent",
+	"ready-for-human",
+	"wontfix",
+];
+
+test("github provider derives status from the repo's triage label", () => {
 	const calls = [];
 	const provider = resolveProvider(
 		{ provider: "github" },
@@ -35,7 +43,7 @@ test("github provider derives status from a status: label", () => {
 			exec: (args) => {
 				calls.push(args);
 				return JSON.stringify({
-					labels: [{ name: "status:ready" }],
+					labels: [{ name: "ready-for-agent" }],
 					state: "OPEN",
 				});
 			},
@@ -43,7 +51,10 @@ test("github provider derives status from a status: label", () => {
 	);
 	const ref = provider.resolveReference("#42");
 	assert.equal(ref, "42");
-	assert.equal(provider.getStatus(ref, {}), "ready");
+	assert.equal(
+		provider.getStatus(ref, { statusLabels: STATUS_LABELS }),
+		"ready-for-agent",
+	);
 	assert.deepEqual(calls[0], ["issue", "view", "42", "--json", "labels,state"]);
 });
 
@@ -54,7 +65,13 @@ test("github provider falls back to closedStatus when unlabeled and closed", () 
 			exec: () => JSON.stringify({ labels: [], state: "CLOSED" }),
 		},
 	);
-	assert.equal(provider.getStatus("42", { closedStatus: "done" }), "done");
+	assert.equal(
+		provider.getStatus("42", {
+			statusLabels: STATUS_LABELS,
+			closedStatus: "done",
+		}),
+		"done",
+	);
 });
 
 test("github provider throws when no status label and issue is open", () => {
@@ -64,7 +81,21 @@ test("github provider throws when no status label and issue is open", () => {
 			exec: () => JSON.stringify({ labels: [], state: "OPEN" }),
 		},
 	);
-	assert.throws(() => provider.getStatus("42", {}), /no status: label/);
+	assert.throws(
+		() => provider.getStatus("42", { statusLabels: STATUS_LABELS }),
+		/no label from statusLabels/,
+	);
+});
+
+test("github provider requires a non-empty statusLabels array", () => {
+	const provider = resolveProvider(
+		{ provider: "github" },
+		{ exec: () => JSON.stringify({ labels: [], state: "OPEN" }) },
+	);
+	assert.throws(
+		() => provider.getStatus("42", {}),
+		/requires a non-empty statusLabels array/,
+	);
 });
 
 test("unknown provider is rejected", () => {

@@ -18,15 +18,20 @@ function defaultGhExec(args) {
 }
 
 function githubIssueStatus(ticketRef, config, { exec = defaultGhExec } = {}) {
-	const prefix = config.statusLabelPrefix ?? "status:";
+	const statusLabels = config.statusLabels;
+	if (!Array.isArray(statusLabels) || statusLabels.length === 0)
+		throw new Error(
+			"github provider requires a non-empty statusLabels array naming this repo's triage labels",
+		);
 	const raw = exec(["issue", "view", ticketRef, "--json", "labels,state"]);
 	const data = JSON.parse(raw);
-	const label = data.labels
-		?.map((entry) => entry.name)
-		.find((name) => name.startsWith(prefix));
-	if (label) return label.slice(prefix.length);
+	const names = data.labels?.map((entry) => entry.name) ?? [];
+	const found = statusLabels.find((label) => names.includes(label));
+	if (found) return found;
 	if (data.state === "CLOSED") return config.closedStatus ?? "closed";
-	throw new Error(`github issue has no ${prefix} label: #${ticketRef}`);
+	throw new Error(
+		`github issue has no label from statusLabels (${statusLabels.join(", ")}): #${ticketRef}`,
+	);
 }
 
 export const providers = {

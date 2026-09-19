@@ -16,14 +16,14 @@ Built for Markdown tickets, such as those produced by Matt Pocock's `/grill-with
 
 ### `github`
 
-Reads status from an issue's labels via the `gh` CLI. A ticket reference is a GitHub issue number (a leading `#` is stripped). Status is the suffix of whichever label starts with `statusLabelPrefix` (default `"status:"`, so a label `status:ready` yields status `ready`); a closed issue with no matching label falls back to `closedStatus` (default `"closed"`). `gh` must be authenticated and run inside a clone of the target repo.
+GitHub issues don't carry status in the body; repos track it as a triage label (see e.g. a repo's `docs/agents/triage-labels.md`). A ticket reference is a GitHub issue number (a leading `#` is stripped). Status is read via `gh issue view --json labels,state`: it's whichever entry of the required `statusLabels` array is present on the issue (list every triage label this repo actually uses, e.g. `needs-triage`, `ready-for-agent`, `wontfix`); a closed issue with none of those labels falls back to `closedStatus` (default `"closed"`, set it to match your `completeStatus` if the agent closes the issue on completion instead of relabeling it). `gh` must be authenticated and run inside a clone of the target repo.
 
 ```json
 {
 	"provider": "github",
-	"readyStatus": "ready",
+	"readyStatus": "ready-for-agent",
 	"command": "your-agent-launch-command",
-	"statusLabelPrefix": "status:",
+	"statusLabels": ["needs-triage", "needs-info", "ready-for-agent", "ready-for-human", "wontfix"],
 	"closedStatus": "done"
 }
 ```
