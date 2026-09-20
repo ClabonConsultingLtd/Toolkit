@@ -9,6 +9,7 @@
 		"ticket": "node src/ticket-launch.mjs",
 		"ticket-batch": "node src/ticket-batch.mjs",
 		"worktree": "node src/worktree-launch.mjs",
-		"orchestrate": "node src/orchestration-cli.mjs"
+		"orchestrate": "node src/orchestration-cli.mjs",
+		"triage": "node src/triage-cli.mjs"
 	}
 }

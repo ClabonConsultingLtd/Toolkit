@@ -147,3 +147,36 @@ lease. After interruptions the skill locates existing workspaces, agents and PRs
 before dispatching. Uncertain launches remain blocked rather than being repeated.
 Schedules require the host, checkout, skill installation and credentials to remain
 available; this is not a hosted queue or an automatic merge service.
+
+## Triage-only sweeps with Paseo
+
+`orchestrate-tickets` only ever acts on issues already labeled `ready-for-agent`.
+`codex/skills/triage-tickets` is the lighter, independent counterpart that sweeps
+unlabeled, `needs-triage`, and stale-`needs-info` issues into that state to begin
+with, applying the interactive mattpocock `triage` skill's judgment. It runs on
+its own schedule (default daily, `0 8 * * *` UTC), against the same persistent
+checkout, and never opens a Paseo worktree or launches an implementation agent —
+that boundary stays `orchestrate-tickets`'s job once an issue reaches
+`ready-for-agent`. Install it the same way:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/triage-tickets \
+  "${CODEX_HOME:-$HOME/.codex}/skills/triage-tickets"
+```
+
+It reads the label vocabulary from the consuming repo's own
+`docs/agents/triage-labels.md` rather than hardcoding the five canonical label
+strings, and its only durable state is a short-lived run lock under
+`.toolkit/triage/` that guards against two overlapping sweeps — the issue
+tracker's own labels and comments remain the source of truth for what has
+already been triaged, so there is no per-issue ledger to reconcile. Run
+`pnpm triage` from this package, or `node src/triage-cli.mjs`, for the helper
+protocol documented in the skill's `references/protocol.md`.
+
+An issue found to already be implemented is closed autonomously as `wontfix`
+with a pointer to where the behavior lives — the one outcome this skill both
+recommends and applies unattended, because it's mechanically verifiable. A
+recommended-but-rejected bug or enhancement only gets a comment; the issue's
+label and open/closed state are left for a human to confirm. This skill never
+grills and never launches implementation.
