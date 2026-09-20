@@ -104,3 +104,23 @@ test("unknown provider is rejected", () => {
 		/unknown ticket provider: jira/,
 	);
 });
+
+test("closed issue retaining readiness is never treated as ready", () => {
+	const provider = resolveProvider(
+		{ provider: "github" },
+		{
+			exec: () =>
+				JSON.stringify({
+					state: "CLOSED",
+					labels: [{ name: "ready-for-agent" }],
+				}),
+		},
+	);
+	assert.equal(
+		provider.getStatus("42", {
+			statusLabels: ["ready-for-agent", "done"],
+			closedStatus: "done",
+		}),
+		"done",
+	);
+});
