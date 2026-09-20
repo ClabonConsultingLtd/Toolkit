@@ -1,0 +1,13 @@
+{
+	"provider": "github",
+	"readyStatus": "ready-for-agent",
+	"command": "your-agent-launch-command",
+	"statusLabels": [
+		"needs-triage",
+		"needs-info",
+		"ready-for-agent",
+		"ready-for-human",
+		"wontfix"
+	],
+	"closedStatus": "done"
+}
