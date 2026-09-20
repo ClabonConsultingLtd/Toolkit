@@ -358,6 +358,21 @@ test("abandoned filesystem mutex is never silently stolen", (t) => {
 	assert.throws(() => execute("acquire", path), /state busy/);
 });
 
+test("changeTicket stamps updatedAt on every status transition", () => {
+	const s = newBatch(manifest());
+	changeTicket(s, 7, "reserve", runtime, 1000);
+	assert.equal(s.tickets[7].updatedAt, new Date(1000).toISOString());
+	changeTicket(s, 7, "attach", { workspaceId: "w", agentId: "a" }, 2000);
+	assert.equal(s.tickets[7].updatedAt, new Date(1000).toISOString());
+	changeTicket(s, 7, "review", { evidence: "tests" }, 3000);
+	assert.equal(s.tickets[7].updatedAt, new Date(3000).toISOString());
+	changeTicket(s, 7, "fix", { reason: "flaky" }, 4000);
+	assert.equal(s.tickets[7].updatedAt, new Date(4000).toISOString());
+	changeTicket(s, 7, "block", { reason: "permission" }, 5000);
+	assert.equal(s.tickets[7].updatedAt, new Date(5000).toISOString());
+	changeTicket(s, 7, "resume", { evidence: "resolved" }, 6000);
+	assert.equal(s.tickets[7].updatedAt, new Date(6000).toISOString());
+});
 test("manifest priority order is preserved", () => {
 	const s = newBatch({ ...manifest(), tickets: [9, 7, 8] });
 	assert.deepEqual(disposition(s).launchable, ["9", "7", "8"]);

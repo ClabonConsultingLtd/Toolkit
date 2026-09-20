@@ -50,17 +50,18 @@ export function newBatch(input) {
 		),
 	};
 }
-export function atomicWrite(path, value) {
+export function atomicWriteText(path, text) {
 	mkdirSync(dirname(path), { recursive: true });
 	const temporary = `${path}.${randomUUID()}.tmp`;
 	try {
-		writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, {
-			mode: 0o600,
-		});
+		writeFileSync(temporary, text, { mode: 0o600 });
 		renameSync(temporary, path);
 	} finally {
 		rmSync(temporary, { force: true });
 	}
+}
+export function atomicWrite(path, value) {
+	atomicWriteText(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 export function readState(path) {
 	const state = JSON.parse(readFileSync(path, "utf8"));
@@ -202,7 +203,7 @@ export function disposition(state) {
 		})),
 	};
 }
-export function changeTicket(state, number, action, data = {}) {
+export function changeTicket(state, number, action, data = {}, now = Date.now()) {
 	const t = state.tickets[issueNumber(number)];
 	if (!t) throw new Error("ticket outside selected batch");
 	const requireStatus = (...statuses) => {
@@ -229,6 +230,7 @@ export function changeTicket(state, number, action, data = {}) {
 			thinkingOptionId: data.thinkingOptionId,
 			branch: `tickets/${state.batchId}/${t.number}`,
 			launchKey: `${state.repository}:${state.batchId}:${t.number}`,
+			updatedAt: new Date(now).toISOString(),
 		});
 	} else if (action === "attach") {
 		requireStatus("implementing", "blocked");
@@ -252,6 +254,7 @@ export function changeTicket(state, number, action, data = {}) {
 			status: "reviewing",
 			workerActive: false,
 			evidence: data.evidence,
+			updatedAt: new Date(now).toISOString(),
 		});
 	} else if (action === "fix") {
 		requireStatus("reviewing");
@@ -261,6 +264,7 @@ export function changeTicket(state, number, action, data = {}) {
 				status: "blocked",
 				blockKind: "human",
 				reason: data.reason,
+				updatedAt: new Date(now).toISOString(),
 			});
 		else {
 			t.fixCycles++;
@@ -268,6 +272,7 @@ export function changeTicket(state, number, action, data = {}) {
 				status: "implementing",
 				workerActive: true,
 				reason: data.reason,
+				updatedAt: new Date(now).toISOString(),
 			});
 		}
 	} else if (action === "ready") {
@@ -281,6 +286,7 @@ export function changeTicket(state, number, action, data = {}) {
 			evidence: data.evidence,
 			reviewedHead: data.reviewedHead,
 			reason: null,
+			updatedAt: new Date(now).toISOString(),
 		});
 	} else if (action === "block") {
 		if (t.status === "completed")
@@ -291,6 +297,7 @@ export function changeTicket(state, number, action, data = {}) {
 			status: "blocked",
 			blockKind: "human",
 			reason: data.reason,
+			updatedAt: new Date(now).toISOString(),
 		});
 		// A permission wait or uncertain launch still consumes a slot until confirmed stopped.
 		if (data.workerStopped === true) t.workerActive = false;
@@ -308,6 +315,7 @@ export function changeTicket(state, number, action, data = {}) {
 		t.status = next;
 		t.blockKind = null;
 		t.reason = null;
+		t.updatedAt = new Date(now).toISOString();
 	} else throw new Error(`unknown ticket action: ${action}`);
 	return t;
 }
