@@ -180,3 +180,40 @@ recommends and applies unattended, because it's mechanically verifiable. A
 recommended-but-rejected bug or enhancement only gets a comment; the issue's
 label and open/closed state are left for a human to confirm. This skill never
 grills and never launches implementation.
+
+## Reporting digest for human review
+
+`orchestrate-tickets` writes rich state — fix-cycle counts, blocked reasons,
+now a per-transition `updatedAt` timestamp — but nothing previously
+summarized it for a human between the real-time blocker surfacing that
+happens mid-run. `codex/skills/report-tickets` is a separate, read-only
+skill that turns that state, plus Paseo's `get_agent_activity`/`list_agents`,
+into a periodic digest: tickets completed/in-flight/blocked-on-you since the
+last digest, fix cycles nearing the two-cycle cap, token/turn cost per
+ticket compared against the ticket's own `**Claude:** \`Model / effort\``
+recommendation, and any ticket stuck longer than a configurable hour
+threshold (default 24h). It never mutates `orchestrate-tickets`'s batch
+state, creates a worktree, or launches a worker, and it runs on its own
+schedule (default daily, `30 8 * * *` UTC), independent of both
+`orchestrate-tickets` and `triage-tickets`. Install it the same way:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/report-tickets \
+  "${CODEX_HOME:-$HOME/.codex}/skills/report-tickets"
+```
+
+Run `pnpm report-tickets /absolute/checkout` from this package, or
+`node src/digest-cli.mjs /absolute/checkout`, for the helper protocol
+documented in the skill's `references/protocol.md`. The helper discovers
+every batch file under `.toolkit/orchestration/` in the given checkout,
+reads its own cursor at `.toolkit/report-tickets/cursor.json`, and writes
+`digest.json` and `digest.md` beside it before advancing that cursor.
+Paseo activity data and each ticket's parsed recommendation are gathered by
+the calling skill session and the helper itself respectively — the helper
+never calls Paseo directly.
+
+This skill produces content only; it does not deliver anywhere. Point your
+own Slack/email/push automation at the written `digest.md` (or parse
+`digest.json` for anything richer than copy-pasting the Markdown) — whatever
+delivery mechanism your host project already has wired up.
