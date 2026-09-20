@@ -16,6 +16,7 @@ Toolkit is a collection of small, reusable packages—not a framework that takes
 | Run a queue of implementation tickets | [`agent-workflow`](packages/agent-workflow/README.md#ticket-batches) | Tickets run serially, require a completion status, and resume from recorded state. |
 | Generate a batch of images | [`image-generation`](packages/image-generation/README.md) | A caller-chosen runner gains retries, quota stops, logs, and resumable state. |
 | Turn reference images into GLBs | [`image-to-3d`](packages/image-to-3d/README.md) | Explicit queues become auditable image-to-model batches through a Gradio-compatible service. |
+| Track a vendored Toolkit package's version | [`toolkit-sync`](packages/toolkit-sync/README.md) | A consuming repo pins a release, detects drift, and re-syncs updates instead of an untracked copy-paste. |
 
 ## Quick starts
 
