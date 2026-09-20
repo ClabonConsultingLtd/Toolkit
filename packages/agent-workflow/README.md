@@ -147,3 +147,73 @@ lease. After interruptions the skill locates existing workspaces, agents and PRs
 before dispatching. Uncertain launches remain blocked rather than being repeated.
 Schedules require the host, checkout, skill installation and credentials to remain
 available; this is not a hosted queue or an automatic merge service.
+
+## Triage-only sweeps with Paseo
+
+`orchestrate-tickets` only ever acts on issues already labeled `ready-for-agent`.
+`codex/skills/triage-tickets` is the lighter, independent counterpart that sweeps
+unlabeled, `needs-triage`, and stale-`needs-info` issues into that state to begin
+with, applying the interactive mattpocock `triage` skill's judgment. It runs on
+its own schedule (default daily, `0 8 * * *` UTC), against the same persistent
+checkout, and never opens a Paseo worktree or launches an implementation agent —
+that boundary stays `orchestrate-tickets`'s job once an issue reaches
+`ready-for-agent`. Install it the same way:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/triage-tickets \
+  "${CODEX_HOME:-$HOME/.codex}/skills/triage-tickets"
+```
+
+It reads the label vocabulary from the consuming repo's own
+`docs/agents/triage-labels.md` rather than hardcoding the five canonical label
+strings, and its only durable state is a short-lived run lock under
+`.toolkit/triage/` that guards against two overlapping sweeps — the issue
+tracker's own labels and comments remain the source of truth for what has
+already been triaged, so there is no per-issue ledger to reconcile. Run
+`pnpm triage` from this package, or `node src/triage-cli.mjs`, for the helper
+protocol documented in the skill's `references/protocol.md`.
+
+An issue found to already be implemented is closed autonomously as `wontfix`
+with a pointer to where the behavior lives — the one outcome this skill both
+recommends and applies unattended, because it's mechanically verifiable. A
+recommended-but-rejected bug or enhancement only gets a comment; the issue's
+label and open/closed state are left for a human to confirm. This skill never
+grills and never launches implementation.
+
+## Reporting digest for human review
+
+`orchestrate-tickets` writes rich state — fix-cycle counts, blocked reasons,
+now a per-transition `updatedAt` timestamp — but nothing previously
+summarized it for a human between the real-time blocker surfacing that
+happens mid-run. `codex/skills/report-tickets` is a separate, read-only
+skill that turns that state, plus Paseo's `get_agent_activity`/`list_agents`,
+into a periodic digest: tickets completed/in-flight/blocked-on-you since the
+last digest, fix cycles nearing the two-cycle cap, token/turn cost per
+ticket compared against the ticket's own `**Claude:** \`Model / effort\``
+recommendation, and any ticket stuck longer than a configurable hour
+threshold (default 24h). It never mutates `orchestrate-tickets`'s batch
+state, creates a worktree, or launches a worker, and it runs on its own
+schedule (default daily, `30 8 * * *` UTC), independent of both
+`orchestrate-tickets` and `triage-tickets`. Install it the same way:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/report-tickets \
+  "${CODEX_HOME:-$HOME/.codex}/skills/report-tickets"
+```
+
+Run `pnpm report-tickets /absolute/checkout` from this package, or
+`node src/digest-cli.mjs /absolute/checkout`, for the helper protocol
+documented in the skill's `references/protocol.md`. The helper discovers
+every batch file under `.toolkit/orchestration/` in the given checkout,
+reads its own cursor at `.toolkit/report-tickets/cursor.json`, and writes
+`digest.json` and `digest.md` beside it before advancing that cursor.
+Paseo activity data and each ticket's parsed recommendation are gathered by
+the calling skill session and the helper itself respectively — the helper
+never calls Paseo directly.
+
+This skill produces content only; it does not deliver anywhere. Point your
+own Slack/email/push automation at the written `digest.md` (or parse
+`digest.json` for anything richer than copy-pasting the Markdown) — whatever
+delivery mechanism your host project already has wired up.
