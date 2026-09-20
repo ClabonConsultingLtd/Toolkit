@@ -16,14 +16,14 @@ Built for Markdown tickets, such as those produced by Matt Pocock's `/grill-with
 
 ### `github`
 
-GitHub issues don't carry status in the body; repos track it as a triage label (see e.g. a repo's `docs/agents/triage-labels.md`). A ticket reference is a GitHub issue number (a leading `#` is stripped). Status is read via `gh issue view --json labels,state`: it's whichever entry of the required `statusLabels` array is present on the issue (list every triage label this repo actually uses, e.g. `needs-triage`, `ready-for-agent`, `wontfix`); a closed issue with none of those labels falls back to `closedStatus` (default `"closed"`, set it to match your `completeStatus` if the agent closes the issue on completion instead of relabeling it). `gh` must be authenticated and run inside a clone of the target repo.
+GitHub issues don't carry status in the body; repos track it as a triage label (see e.g. a repo's `docs/agents/triage-labels.md`). A ticket reference is a GitHub issue number (a leading `#` is stripped). Status is read via `gh issue view --json labels,state`: it's whichever entry of the required `statusLabels` array is present on the issue (list every triage label this repo actually uses, e.g. `needs-triage`, `ready-for-agent`, `wontfix`); a closed issue takes precedence over labels and resolves to `closedStatus` (default `"closed"`, set it to match your `completeStatus` if the agent closes the issue on completion instead of relabeling it). `gh` must be authenticated and run inside a clone of the target repo.
 
 ```json
 {
 	"provider": "github",
 	"readyStatus": "ready-for-agent",
 	"command": "your-agent-launch-command",
-	"statusLabels": ["needs-triage", "needs-info", "ready-for-agent", "ready-for-human", "wontfix"],
+	"statusLabels": ["needs-triage", "needs-info", "ready-for-agent", "ready-for-human", "wontfix", "done"],
 	"closedStatus": "done"
 }
 ```
@@ -98,3 +98,52 @@ pnpm ticket-batch ticket-batch.json --dry-run
 ```
 
 Normal execution launches one ticket, waits for its command to exit, re-reads its status, and proceeds only when it equals `completeStatus` (default: `done`). It writes a resumable `.toolkit/ticket-batch-state.json` beside the manifest by default. The batch stops at the first launch failure or unchanged status; `--continue-on-failure` and `--max N` are explicit opt-ins.
+
+## Codex orchestration with Paseo
+
+The `codex/skills/orchestrate-tickets` integration coordinates an explicit batch of
+GitHub issues using Claude workers and Codex review. It retains the existing
+Markdown and GitHub command launchers. Prerequisites are Node 24+, authenticated
+`gh`, a persistent Toolkit checkout, and Paseo MCP connected to Codex with both
+Codex and Claude available.
+
+Install the skill by symlinking it from your persistent Toolkit checkout:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/orchestrate-tickets \
+  "${CODEX_HOME:-$HOME/.codex}/skills/orchestrate-tickets"
+```
+
+Keep that checkout in place: the skill's helper imports the package's source.
+Restart your Codex session to discover a newly installed skill, or explicitly
+provide its absolute SKILL.md path to an existing session.
+
+Example requests:
+
+```text
+Use $orchestrate-tickets for example/project issues 7, 8, 9 as batch exports.
+Use $orchestrate-tickets to resume batch exports in /absolute/project.
+```
+
+Alternatively supply a manifest shaped like `examples/orchestration-batch.json`.
+The skill fills checkout, base branch and initiating Codex model from the live
+session. State lives at `.toolkit/orchestration/<batch-id>.json` in the stable
+consuming checkout; keep this directory ignored. Run `pnpm orchestrate` from this
+package, or `node src/orchestration-cli.mjs`, for the helper protocol documented in
+the skill's `references/protocol.md`. Commands use JSON request files or stdin;
+Paseo tool calls remain the Codex skill's responsibility.
+
+Defaults: three isolated Claude worktrees, Auto permission mode, two review/fix
+cycles per ticket, and hourly UTC Codex reconciliation. You merge PRs. Only a
+verified merged PR lets orchestration replace `ready-for-agent` with `done` and
+close the issue. Closed issues without a linked merged PR need reconciliation;
+readiness labels do not make a closed issue launchable. Independent work continues
+while PRs await your merge. Schedules pause on completion or when only human
+blockers remain, and can be resumed explicitly after recovery.
+
+The state helper reserves before launching and fences writes with a renewable
+lease. After interruptions the skill locates existing workspaces, agents and PRs
+before dispatching. Uncertain launches remain blocked rather than being repeated.
+Schedules require the host, checkout, skill installation and credentials to remain
+available; this is not a hosted queue or an automatic merge service.
