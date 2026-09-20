@@ -1,0 +1,9 @@
+{
+	"include": [
+		"README.md",
+		"pyproject.toml",
+		"src/**",
+		"claude/**",
+		"examples/**"
+	]
+}
