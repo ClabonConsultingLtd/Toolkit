@@ -7,7 +7,8 @@
 		"needs-info",
 		"ready-for-agent",
 		"ready-for-human",
-		"wontfix"
+		"wontfix",
+		"done"
 	],
 	"closedStatus": "done"
 }
