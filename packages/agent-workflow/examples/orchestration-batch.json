@@ -1,0 +1,9 @@
+{
+	"repository": "example/project",
+	"batchId": "exports",
+	"cwd": "/persistent/project",
+	"baseBranch": "main",
+	"codexModel": "<initiating Paseo Codex model>",
+	"tickets": [7, 8, 9],
+	"concurrency": 3
+}

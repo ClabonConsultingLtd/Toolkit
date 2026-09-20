@@ -8,6 +8,7 @@
 		"handoff": "node src/handoff.mjs",
 		"ticket": "node src/ticket-launch.mjs",
 		"ticket-batch": "node src/ticket-batch.mjs",
-		"worktree": "node src/worktree-launch.mjs"
+		"worktree": "node src/worktree-launch.mjs",
+		"orchestrate": "node src/orchestration-cli.mjs"
 	}
 }

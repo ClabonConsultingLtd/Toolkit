@@ -26,9 +26,9 @@ function githubIssueStatus(ticketRef, config, { exec = defaultGhExec } = {}) {
 	const raw = exec(["issue", "view", ticketRef, "--json", "labels,state"]);
 	const data = JSON.parse(raw);
 	const names = data.labels?.map((entry) => entry.name) ?? [];
+	if (data.state === "CLOSED") return config.closedStatus ?? "closed";
 	const found = statusLabels.find((label) => names.includes(label));
 	if (found) return found;
-	if (data.state === "CLOSED") return config.closedStatus ?? "closed";
 	throw new Error(
 		`github issue has no label from statusLabels (${statusLabels.join(", ")}): #${ticketRef}`,
 	);
