@@ -17,6 +17,7 @@ python -m unittest discover -s packages/image-generation/tests -v
 python -m unittest discover -s packages/image-to-3d/tests -v
 pnpm --dir packages/agent-workflow test
 pnpm --dir packages/claude-token-optimisation test
+pnpm --dir packages/toolkit-sync test
 ```
 
 Use Black for Python and Biome for JavaScript, JSON, YAML, and Markdown. Do not commit generated images, model files, provider transcripts, credentials, `node_modules`, or local runtime state.
