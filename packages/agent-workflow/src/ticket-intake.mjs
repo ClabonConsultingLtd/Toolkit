@@ -112,6 +112,13 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 			policy.scheduleId = input.scheduleId;
 		} else if (command === "pause" || command === "resume") {
 			policy.paused = command === "pause";
+			if (policy.paused) {
+				policy.pausedAt = new Date(options.now ?? Date.now()).toISOString();
+				policy.pauseReason = input.reason || "Paused by controller";
+			} else {
+				delete policy.pausedAt;
+				delete policy.pauseReason;
+			}
 		} else if (command === "tick") {
 			if (policy.paused) return { paused: true, initialized: false };
 			const now = options.now ?? Date.now(),
