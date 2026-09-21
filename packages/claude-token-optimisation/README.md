@@ -15,3 +15,5 @@ Run `node install.mjs <target-repository>`. It copies the agent and hooks into t
 Set `BULK_READER_MIN_LINES` to change the large-read threshold; it defaults to 350 lines.
 
 The bash summary hook writes raw successful-command logs under `.toolkit/claude-token-optimisation/bash-summary-logs` in the current repository by default. Set `TOOLKIT_STATE_DIR` to relocate runtime state.
+
+Set `TOOLKIT_BASH_SUMMARY_SURVEY=on` to additionally log a `{command, at}` line to `.toolkit/claude-token-optimisation/bash-summary-survey.jsonl` for every command that misses the allowlist, without running or otherwise touching that command. Off by default. Use it to mine your own project's real usage for candidate additions to the allowlist above.
