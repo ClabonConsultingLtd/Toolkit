@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
  * retain their complete output so diagnostics are never hidden behind a log.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 async function readHookInput() {
 	const chunks = [];
@@ -35,6 +35,30 @@ function stripCdPrefix(command) {
 		/^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*&&\s*([\s\S]*)$/,
 	);
 	return match ? match[1].trim() : command;
+}
+
+// Opt-in only (TOOLKIT_BASH_SUMMARY_SURVEY=on): records which commands miss
+// the allowlist so a project can mine its own log for candidates to propose
+// upstream. Metadata only, and it never runs or touches the command itself -
+// this always exits before the real Bash tool call, leaving execution
+// completely unaffected either way.
+function surveyUnmatched(command, cwd) {
+	if (process.env.TOOLKIT_BASH_SUMMARY_SURVEY !== "on") return;
+	const stateRoot = resolve(
+		cwd ?? process.cwd(),
+		process.env.TOOLKIT_STATE_DIR ?? ".toolkit",
+	);
+	const logPath = join(
+		stateRoot,
+		"claude-token-optimisation",
+		"bash-summary-survey.jsonl",
+	);
+	mkdirSync(dirname(logPath), { recursive: true });
+	writeFileSync(
+		logPath,
+		`${JSON.stringify({ at: new Date().toISOString(), command })}\n`,
+		{ flag: "a" },
+	);
 }
 
 function commandKind(command) {
@@ -98,10 +122,14 @@ const {
 	timeout,
 } = input.tool_input ?? {};
 if (typeof command !== "string" || background) process.exit(0);
-const candidate = commandKind(command.trim());
-if (!candidate) process.exit(0);
+const trimmedCommand = command.trim();
+const candidate = commandKind(trimmedCommand);
+if (!candidate) {
+	surveyUnmatched(trimmedCommand, input.cwd);
+	process.exit(0);
+}
 
-const result = spawnSync(`${command.trim()} 2>&1`, {
+const result = spawnSync(`${trimmedCommand} 2>&1`, {
 	shell: true,
 	cwd: input.cwd ?? process.cwd(),
 	encoding: "utf8",
