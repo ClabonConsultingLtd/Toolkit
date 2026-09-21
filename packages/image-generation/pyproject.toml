@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "toolkit-image-generation"
-version = "0.3.0"
+version = "0.3.1"
 description = "Generic resumable command-line image generation batches"
 requires-python = ">=3.11"
 
