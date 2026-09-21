@@ -1,0 +1,78 @@
+name: Prepare release
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: toolkit-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref != 'release/next' &&
+      (contains(github.event.pull_request.labels.*.name, 'release:patch') ||
+       contains(github.event.pull_request.labels.*.name, 'release:minor') ||
+       contains(github.event.pull_request.labels.*.name, 'release:major'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - id: bump
+        name: Resolve the requested release bump
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          count=0
+          for value in major minor patch; do
+            if [[ ",$LABELS," == *",release:$value,"* ]]; then bump="$value"; count=$((count + 1)); fi
+          done
+          if [[ "$count" -ne 1 ]]; then echo "exactly one release label required" >&2; exit 1; fi
+          echo "value=$bump" >> "$GITHUB_OUTPUT"
+      - id: pending
+        name: Check out the pending release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          number="$(gh pr list --base main --head release/next --state open --json number --jq '.[0].number')"
+          if [[ -n "$number" ]]; then
+            git fetch origin release/next
+            git checkout --force -B release/next origin/release/next
+            git rebase origin/main
+            echo "number=$number" >> "$GITHUB_OUTPUT"
+          else
+            git checkout -b release/next origin/main
+          fi
+      - id: version
+        name: Update the release candidate
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          base="$(git describe --tags --abbrev=0 --match 'v[0-9]*' | sed 's/^v//')"
+          version="$(node .github/scripts/release-version.mjs "$base" "${{ steps.bump.outputs.value }}" "$PR_NUMBER" "$PR_TITLE")"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - name: Commit and push the release candidate
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md packages/*/package.json packages/*/pyproject.toml packages/*/uv.lock
+          git commit -m "Release v${{ steps.version.outputs.value }}"
+          git push --force-with-lease origin release/next
+      - name: Create or update the release pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pending.outputs.number }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          body="Automated release candidate. Merging this PR creates immutable tag v$VERSION. It aggregates processed, labelled PRs."
+          if [[ -n "$PR_NUMBER" ]]; then gh pr edit "$PR_NUMBER" --title "Release v$VERSION" --body "$body"; else gh pr create --base main --head release/next --title "Release v$VERSION" --body "$body"; fi
