@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.3.0 - 2026-09-21
+## 0.3.1 - 2026-09-21
+
+- #25: Handle malformed intake dependency metadata per ticket
 
 - #21: Feed back generic hook/skill improvements from a consumer repository
 
