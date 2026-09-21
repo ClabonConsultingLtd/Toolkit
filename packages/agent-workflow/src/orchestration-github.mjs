@@ -21,7 +21,7 @@ export function fallbackDependencies(body = "") {
 			"cross-repository dependency declarations require native GitHub edges",
 		);
 	const refs = [...line.matchAll(/#([1-9]\d*)/g)].map((m) => m[1]);
-	if (!refs.length && !/^none\.?$/i.test(line.trim()))
+	if (!refs.length && !/^none(?:\s*\([^()\n]*\))?\.?$/i.test(line.trim()))
 		throw new Error("cannot parse Blocked by declaration");
 	return [...new Set(refs)];
 }
@@ -42,7 +42,7 @@ export function github(repository, exec = gh) {
 			"--repo",
 			repository,
 			"--json",
-			"number,title,body,comments,labels,state,stateReason,url",
+			"number,title,body,comments,labels,state,stateReason,url,assignees",
 		]);
 		let dependencies = [];
 		if (withDependencies) {
@@ -97,6 +97,39 @@ export function github(repository, exec = gh) {
 	return {
 		issue,
 		pr,
+		listReady() {
+			return json([
+				"api",
+				"--paginate",
+				"--slurp",
+				`repos/${repository}/issues?state=open&labels=ready-for-agent&sort=created&direction=asc&per_page=100`,
+			])
+				.flat()
+				.filter((item) => !item.pull_request);
+		},
+		hasImplementationPr(number) {
+			const events = json([
+				"api",
+				"--paginate",
+				"--slurp",
+				`repos/${repository}/issues/${issueNumber(number)}/timeline?per_page=100`,
+			]).flat();
+			for (const event of events) {
+				const source = event.source?.issue;
+				if (event.event !== "cross-referenced" || !source?.pull_request)
+					continue;
+				// Read the exact referenced PR, including references originating in another repo.
+				const url = new URL(source.pull_request.url);
+				if (
+					url.origin !== "https://api.github.com" ||
+					!/^\/repos\/[^/]+\/[^/]+\/pulls\/[1-9]\d*$/.test(url.pathname)
+				)
+					throw new Error("invalid referenced PR API URL");
+				const pull = json(["api", url.pathname.slice(1)]);
+				if (pull.state === "open" || pull.merged_at) return true;
+			}
+			return false;
+		},
 		snapshot(state) {
 			const issues = {};
 			for (const n of Object.keys(state.tickets)) issues[n] = issue(n);
