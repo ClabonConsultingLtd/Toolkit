@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `claude-token-optimisation`: `summarize-bash.mjs` now strips a leading `cd "<path>" && ` prefix before matching its allowlist, so an allowlisted command still gets summarized when a worktree-based session prefixes it with a directory change. Fed back from a consuming repo where every allowlist miss the hook logged carried this prefix.
+- `claude-token-optimisation`: clarify `bulk-reader`'s guidance to explicitly mention `Grep` for cheaper lookups and to name debugging/security/architecture/changes as the judgment-heavy tasks it should hand back to the parent.
+- `agent-workflow`: expand the `bounded-handoff` skill with a delegable/never-delegable checklist, a diff-review checklist, and a session handoff limit, generalized from a consuming repo's several months of using the CLI.
+
 ## 0.2.0 - 2026-09-20
 
 - Initial standalone packages for Claude context optimisation, bounded agent workflow, image generation, and image-to-3D conversion.
