@@ -138,11 +138,12 @@ export function github(repository, exec = gh) {
 				.filter((item) => !item.pull_request);
 		},
 		hasImplementationPr(number) {
+			const ticketNumber = issueNumber(number);
 			const events = json([
 				"api",
 				"--paginate",
 				"--slurp",
-				`repos/${repository}/issues/${issueNumber(number)}/timeline?per_page=100`,
+				`repos/${repository}/issues/${ticketNumber}/timeline?per_page=100`,
 			]).flat();
 			for (const event of events) {
 				const source = event.source?.issue;
@@ -156,7 +157,14 @@ export function github(repository, exec = gh) {
 				)
 					throw new Error("invalid referenced PR API URL");
 				const pull = json(["api", url.pathname.slice(1)]);
-				if (pull.state === "open" || pull.merged_at) return true;
+				const implementationBranch = new RegExp(
+					`^tickets/[a-z0-9][a-z0-9-]{0,59}/${ticketNumber}$`,
+				);
+				if (
+					(pull.state === "open" || pull.merged_at) &&
+					implementationBranch.test(pull.headRefName ?? "")
+				)
+					return true;
 			}
 			return false;
 		},
