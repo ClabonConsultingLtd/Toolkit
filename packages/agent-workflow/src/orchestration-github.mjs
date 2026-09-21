@@ -8,7 +8,13 @@ export function gh(args) {
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 }
-export function fallbackDependencies(body = "") {
+function dependencyError(message, declaration) {
+	const error = new Error(message);
+	error.code = "INVALID_DEPENDENCY_DECLARATION";
+	error.declaration = declaration;
+	return error;
+}
+export function fallbackDependencies(body = "", repository) {
 	const line =
 		/^\s*(?:\*\*)?Blocked by:(?:\*\*)?[^\S\n]*(.*)$/im.exec(body)?.[1] ??
 		/^##\s+Blocked by[^\S\n]*\n([\s\S]*?)(?=^##\s|$(?![\s\S]))/im
@@ -16,13 +22,28 @@ export function fallbackDependencies(body = "") {
 			?.trim() ??
 		"";
 	if (!line) return [];
-	if (/[\w/.-]+#\d+|https?:\/\//.test(line))
-		throw new Error(
+	let normalized = line.replace(/^\s*[-*+]\s+/gm, "").trim();
+	const localUrl =
+		/^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/issues\/([1-9]\d*)$/gim;
+	normalized = normalized.replace(localUrl, (_match, owner, repo, number) => {
+		if (
+			!repository ||
+			`${owner}/${repo}`.toLowerCase() !== repository.toLowerCase()
+		)
+			throw dependencyError(
+				"cross-repository dependency declarations require native GitHub edges",
+				line,
+			);
+		return `#${number}`;
+	});
+	if (/[\w/.-]+#\d+|https?:\/\//.test(normalized))
+		throw dependencyError(
 			"cross-repository dependency declarations require native GitHub edges",
+			line,
 		);
-	const refs = [...line.matchAll(/#([1-9]\d*)/g)].map((m) => m[1]);
-	if (!refs.length && !/^none(?:\s*\([^()\n]*\))?\.?$/i.test(line.trim()))
-		throw new Error("cannot parse Blocked by declaration");
+	const refs = [...normalized.matchAll(/#([1-9]\d*)/g)].map((m) => m[1]);
+	if (!refs.length && !/^none(?:\s*\([^()\n]*\))?\.?$/i.test(normalized))
+		throw dependencyError("cannot parse Blocked by declaration", line);
 	return [...new Set(refs)];
 }
 export function recommendation(body = "") {
@@ -67,12 +88,21 @@ export function github(repository, exec = gh) {
 						return issueNumber(d.number);
 					});
 				if (!dependencies.length)
-					dependencies = fallbackDependencies(data.body);
+					dependencies = fallbackDependencies(data.body, repository);
 			} catch (error) {
 				// Authentication, rate limits and transport errors must not silently erase blockers.
 				const message = `${error.message} ${error.stderr ?? ""}`;
+				if (error.code === "INVALID_DEPENDENCY_DECLARATION") {
+					error.message = `Issue #${n} has an invalid "Blocked by" declaration: ${JSON.stringify(error.declaration)}. Accepted forms are "None", "#123", a local issue URL, or native GitHub dependencies.`;
+					throw error;
+				}
 				if (!/HTTP (404|410|422)/.test(message)) throw error;
-				dependencies = fallbackDependencies(data.body);
+				try {
+					dependencies = fallbackDependencies(data.body, repository);
+				} catch (fallbackError) {
+					fallbackError.message = `Issue #${n} has an invalid "Blocked by" declaration: ${JSON.stringify(fallbackError.declaration)}. Accepted forms are "None", "#123", a local issue URL, or native GitHub dependencies.`;
+					throw fallbackError;
+				}
 			}
 		}
 		return {
@@ -132,7 +162,21 @@ export function github(repository, exec = gh) {
 		},
 		snapshot(state) {
 			const issues = {};
-			for (const n of Object.keys(state.tickets)) issues[n] = issue(n);
+			for (const n of Object.keys(state.tickets)) {
+				try {
+					issues[n] = issue(n);
+				} catch (error) {
+					if (error.code !== "INVALID_DEPENDENCY_DECLARATION") throw error;
+					issues[n] = {
+						number: n,
+						state: "OPEN",
+						labels: [],
+						dependencies: [],
+						recommendation: null,
+						dependencyError: error.message,
+					};
+				}
+			}
 			for (const item of Object.values(issues))
 				for (const dep of item.dependencies)
 					if (!issues[dep]) issues[dep] = issue(dep, false);
