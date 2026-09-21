@@ -171,9 +171,13 @@ test("corrupt existing state fails closed rather than ignoring a possible claim"
 	writeFileSync(join(f.dir, "other.json"), "{broken");
 	assert.throws(() => selectNext(f.path, f.input, f.api), /cannot inspect/);
 });
-test("GitHub discovery paginates, excludes PRs, and detects open or merged references", () => {
+test("GitHub discovery paginates, excludes PRs, and detects orchestration implementation references", () => {
 	const calls = [];
-	let pull = { state: "open", merged_at: null };
+	let pull = {
+		state: "open",
+		merged_at: null,
+		headRefName: "chore/pin-toolkit-v0.3.1",
+	};
 	const api = github("example/project", (args) => {
 		calls.push(args);
 		if (args.at(-1).includes("/issues?"))
@@ -204,8 +208,14 @@ test("GitHub discovery paginates, excludes PRs, and detects open or merged refer
 	);
 	assert.ok(calls[0].includes("--paginate"));
 	assert.ok(calls[0].includes("--slurp"));
+	assert.equal(api.hasImplementationPr(1), false);
+	pull.headRefName = "tickets/intake-2026092115/1";
 	assert.equal(api.hasImplementationPr(1), true);
-	pull = { state: "closed", merged_at: null };
+	pull = {
+		state: "closed",
+		merged_at: null,
+		headRefName: "tickets/intake-2026092115/1",
+	};
 	assert.equal(api.hasImplementationPr(1), false);
 	pull.merged_at = "2026-01-01";
 	assert.equal(api.hasImplementationPr(1), true);
