@@ -217,3 +217,46 @@ This skill produces content only; it does not deliver anywhere. Point your
 own Slack/email/push automation at the written `digest.md` (or parse
 `digest.json` for anything richer than copy-pasting the Markdown) — whatever
 delivery mechanism your host project already has wired up.
+
+### Schedule the next N eligible tickets
+
+```text
+Use $orchestrate-tickets to schedule the next 5 eligible tickets in this project.
+```
+
+The skill selects a **fixed batch of up to N** open, unassigned `ready-for-agent`
+issues, oldest first, with completed blockers and supported Claude recommendations.
+It skips tickets in existing batches, known active work, conflicting status labels,
+and issues referenced by open or merged PRs. It then starts the usual workers and
+hourly reconciliation schedule. N is the batch size; at most three workers run at
+once. No new tickets are added as the batch finishes. If none qualify, no schedule
+is created; a smaller eligible set runs with its shortfall reported.
+
+For a read-only preview, use the helper's `select-next` command with the normal
+initialization fields, `count` instead of `tickets`, and the current Paseo Claude
+`models` array. `init-next` rechecks and persists the batch under a shared selection
+lock. See the skill's `references/selection.md` for details and exclusions. Keep
+all batch state in the same checkout's `.toolkit/orchestration/` directory so
+automatic and explicit batches share overlap protection.
+
+### Admit more work every hour
+
+```text
+Use $orchestrate-tickets to select up to 3 new eligible tickets every hour,
+with at most 3 tickets in progress across this project.
+```
+
+Hourly intake creates additional bounded batches as capacity becomes available.
+The same N limits both new tickets per hour and active implementation/review work
+across batches. Awaiting-merge PRs do not consume active slots; uncertain launches
+and permission-waiting workers do. Queued work reserves admission capacity. Worker
+reservations and resumptions enforce the shared cap, so overlapping batch schedules
+cannot exceed it. Existing per-batch concurrency still caps each batch at three.
+
+The intake schedule stays enabled when no work qualifies or capacity is full.
+It never merges PRs. Use `scripts/intake.mjs` (or the package's `ticket-intake`
+command) for configure/status/tick/pause/resume, as documented in the skill's
+`references/intake.md`. A repeated tick within the same UTC hour reuses the previous
+result. Policies live under `.toolkit/orchestration/.intake/`, with normal batch
+files beside that directory; all runners must use the updated helper from one
+stable checkout. Installing this capability does not activate a live intake job.

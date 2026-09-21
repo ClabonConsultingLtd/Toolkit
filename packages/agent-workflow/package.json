@@ -11,6 +11,7 @@
 		"worktree": "node src/worktree-launch.mjs",
 		"orchestrate": "node src/orchestration-cli.mjs",
 		"report-tickets": "node src/digest-cli.mjs",
-		"triage": "node src/triage-cli.mjs"
+		"triage": "node src/triage-cli.mjs",
+		"ticket-intake": "node src/intake-cli.mjs"
 	}
 }
