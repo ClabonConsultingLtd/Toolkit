@@ -70,6 +70,11 @@ export function execute(command, path, input = {}, options = {}) {
 				output = { released: true };
 			} else if (command === "sync" || command === "reserve") {
 				const issues = api.snapshot(state);
+				for (const ticket of Object.values(state.tickets))
+					if (issues[ticket.number].dependencyError)
+						changeTicket(state, ticket.number, "block", {
+							reason: issues[ticket.number].dependencyError,
+						});
 				checkCycles(issues);
 				for (const t of Object.values(state.tickets)) {
 					t.dependencies = issues[t.number].dependencies;

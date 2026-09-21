@@ -107,7 +107,18 @@ export function selectNext(file, input, api) {
 		let reason;
 		if (claimed.has(number)) reason = "already selected or active";
 		else {
-			const issue = api.issue(number);
+			let issue;
+			try {
+				issue = api.issue(number);
+			} catch (error) {
+				if (error.code !== "INVALID_DEPENDENCY_DECLARATION") throw error;
+				skipped.push({
+					number,
+					reason: "invalid dependency declaration",
+					detail: error.message,
+				});
+				continue;
+			}
 			cache.set(number, issue);
 			if (issue.state !== "OPEN" || !issue.labels.includes("ready-for-agent"))
 				reason = "not open and ready-for-agent";
