@@ -9,6 +9,7 @@ jobs:
         with: { node-version: 24 }
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
+      - run: node --test '.github/scripts/*.test.mjs'
       - run: node --test 'packages/agent-workflow/test/*.test.mjs'
       - run: node --test 'packages/claude-token-optimisation/test/*.test.mjs'
       - run: node --test 'packages/toolkit-sync/test/*.test.mjs'
