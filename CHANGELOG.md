@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.3.1 - 2026-09-21
+## 0.3.2 - 2026-09-21
+
+- #27: Fix intake exclusion for generic PR references
 
 - #25: Handle malformed intake dependency metadata per ticket
 
