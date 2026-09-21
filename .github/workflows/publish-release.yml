@@ -1,0 +1,46 @@
+name: Publish release tag
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: toolkit-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'release/next'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - id: version
+        name: Validate the lockstep release version
+        run: |
+          version="$(node --input-type=module -e 'import { releaseVersion } from "./.github/scripts/release-version.mjs"; process.stdout.write(releaseVersion(process.cwd()))')"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { releaseVersion } from "./.github/scripts/release-version.mjs";
+            const version = releaseVersion(process.cwd());
+            for (const file of ["packages/claude-token-optimisation/package.json", "packages/toolkit-sync/package.json", "packages/image-generation/pyproject.toml", "packages/image-to-3d/pyproject.toml", "packages/image-generation/uv.lock", "packages/image-to-3d/uv.lock"]) if (!readFileSync(file, "utf8").includes(version)) throw new Error(`${file} does not contain ${version}`);
+          '
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - name: Create the immutable tag
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          tag="v$VERSION"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then echo "$tag already exists; refusing to move it." >&2; exit 1; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate "$tag" --message "Release $tag"
+          git push origin "$tag"
