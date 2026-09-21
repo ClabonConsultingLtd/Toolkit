@@ -26,12 +26,24 @@ function deny(reason) {
 	);
 }
 
+// A worktree-based session commonly prefixes a plain `cd "<path>" && ` before
+// the real command to make sure it runs in the right directory. Match against
+// the command with that prefix stripped; the caller still executes the
+// command as given, so the cd itself still happens.
+function stripCdPrefix(command) {
+	const match = command.match(
+		/^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*&&\s*([\s\S]*)$/,
+	);
+	return match ? match[1].trim() : command;
+}
+
 function commandKind(command) {
-	const vitest = command.match(
+	const forMatch = stripCdPrefix(command);
+	const vitest = forMatch.match(
 		/^(?:npx |pnpm exec |pnpm dlx )?vitest run ([\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)$/,
 	);
-	if (command === "git status") return { kind: "git-status" };
-	if (command === "pnpm -r list --depth -1") return { kind: "pnpm-list" };
+	if (forMatch === "git status") return { kind: "git-status" };
+	if (forMatch === "pnpm -r list --depth -1") return { kind: "pnpm-list" };
 	if (vitest) return { kind: "vitest-single-file", testPath: vitest[1] };
 	return null;
 }
