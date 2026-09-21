@@ -4,11 +4,13 @@ Node 24+, authenticated `gh`, a persistent Toolkit checkout, and Paseo MCP are r
 
 `node <skill>/scripts/orchestrate.mjs COMMAND /absolute/state.json [request.json|-]`
 
-Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as separate shell arguments, never interpolate ticket text into commands. Every mutation except init/acquire requires the acquired `token`. `status` is read-only. Nonzero exit means no new action is authorized; external GitHub operations may have partially succeeded, so reconcile before retrying.
+Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as separate shell arguments, never interpolate ticket text into commands. Every mutation except init/init-next/acquire requires the acquired `token`. `status` is read-only. Nonzero exit means no new action is authorized; external GitHub operations may have partially succeeded, so reconcile before retrying.
 
 | Command | Request fields beyond token | Result / purpose |
 | --- | --- | --- |
-| init | repository, batchId, cwd, baseBranch, codexModel, tickets; optional concurrency (1–3) | Create state; refuses overwrite. tickets are issue numbers or strings. |
+| select-next | repository, batchId, cwd, baseBranch, codexModel, count, models; optional concurrency, excludeTickets | Read-only next-N eligibility preview; no token required. |
+| init-next | Same as select-next | Select under directory lock and initialize one fixed batch; initialized:false if none eligible. |
+| init | repository, batchId, cwd, baseBranch, codexModel, tickets; optional concurrency (1–3) | Create state; refuses overwrite and tickets claimed by another batch in the state directory. tickets are issue numbers or strings. |
 | status | none | Full durable state. |
 | acquire | none | acquired:false if busy; otherwise token and expiresAt. |
 | renew / release | none | Extend ten-minute lease / release. |
@@ -46,3 +48,7 @@ A lease timeout permits another orchestrator to reconcile, not to repeat an unce
 The short-lived `<state>.mutex` directory serializes file transactions. If a process is killed while holding it, no automatic stealing occurs: stop the schedule, establish that no helper writer is alive, remove only that mutex directory, and resume. Atomic rename ensures the state file remains complete. A leftover `*.tmp` file is not the source of truth.
 
 Partial completion writes are retry-safe: sync verifies PR merge and current labels/state on every attempt. A previously closed issue that still has ready-for-agent gets repaired after merge. Without a matching merged PR, it is blocked, never launched.
+
+Automatic selection details and invocation examples: [selection.md](selection.md). All batches for a checkout must use the canonical state directory so overlap detection sees them. Initialization is serialized by `.selection.lock`; after a crash, verify no initializer is alive before removing this directory. Preview is read-only and not a reservation: `init-next` rechecks eligibility.
+
+When an intake policy exists, reserve/resume/fix operations also enforce its repository-wide active-ticket limit under the shared selection lock. A capacity rejection is temporary: retain the queued/blocked state and wait; do not create another batch or agent to bypass it. See [intake.md](intake.md) for the recurring controller protocol.
