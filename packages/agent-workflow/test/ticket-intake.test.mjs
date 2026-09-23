@@ -93,6 +93,10 @@ test("9am selects N; 10am admits only free slots; review and awaiting-merge coun
 test("same-hour ticks are idempotent even after a slot becomes free", (t) => {
 	const f = fixture(t),
 		a = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	assert.match(a.helper.version, /^\d+\.\d+\.\d+$/);
+	assert.match(a.helper.source, /orchestration-github\.mjs$/);
+	assert.match(a.helper.sourceSha256, /^[a-f0-9]{64}$/);
+	assert.deepEqual(intakeCommand("status", f.cwd).lastTick.helper, a.helper);
 	update(a.batchFile, (s) => {
 		for (const ticket of Object.values(s.tickets))
 			ticket.status = "awaiting_merge";
@@ -100,6 +104,7 @@ test("same-hour ticks are idempotent even after a slot becomes free", (t) => {
 	const again = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
 	assert.equal(again.replayed, true);
 	assert.equal(again.batchFile, a.batchFile);
+	assert.deepEqual(again.activeHelper, a.helper);
 	const next = intakeCommand(
 		"tick",
 		f.cwd,
@@ -222,6 +227,7 @@ test("recover batch created before a crash without duplicating the hourly select
 	);
 	assert.equal(recovered.recovered, true);
 	assert.equal(recovered.batchFile, first.batchFile);
+	assert.deepEqual(recovered.helper, first.helper);
 });
 test("shared lock blocks both intake and reserve; malformed policy fails closed", (t) => {
 	const f = fixture(t),

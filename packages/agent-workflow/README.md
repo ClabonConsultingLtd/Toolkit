@@ -119,6 +119,27 @@ Keep that checkout in place: the skill's helper imports the package's source.
 Restart your Codex session to discover a newly installed skill, or explicitly
 provide its absolute SKILL.md path to an existing session.
 
+To update after a Toolkit release, resolve the installed skill symlink and update
+the checkout it actually points into to the release tag (with a clean checkout):
+
+```bash
+node -p 'require("node:fs").realpathSync(process.argv[1])' \
+  "${CODEX_HOME:-$HOME/.codex}/skills/orchestrate-tickets"
+git -C /absolute/Toolkit fetch origin tag vX.Y.Z
+git -C /absolute/Toolkit switch --detach vX.Y.Z
+node /absolute/Toolkit/packages/agent-workflow/codex/skills/orchestrate-tickets/scripts/intake.mjs status /absolute/consuming-repo
+```
+
+The `status` response shows `activeHelper.version`, `activeHelper.source`, and
+`activeHelper.sourceSha256`; `lastTick.helper` records what the last hourly run
+used. Check these against the checkout and tag before resuming a schedule. A
+consuming repo that vendors this package should also update its pin to the same
+tag with `node cli.mjs pin agent-workflow vX.Y.Z`, then run
+`node cli.mjs sync agent-workflow` from its installed `toolkit-sync` copy (see
+`packages/toolkit-sync/README.md`). A vendored update does not update a separate
+global skill symlink. Restart the Codex session or refresh the schedule prompt so
+it resolves the updated skill and helper paths.
+
 Example requests:
 
 ```text
@@ -227,10 +248,11 @@ Use $orchestrate-tickets to schedule the next 5 eligible tickets in this project
 The skill selects a **fixed batch of up to N** open, unassigned `ready-for-agent`
 issues, oldest first, with completed blockers and supported Claude recommendations.
 It skips tickets in existing batches, known active work, conflicting status labels,
-and issues referenced by open or merged PRs. It then starts the usual workers and
-hourly reconciliation schedule. N is the batch size; at most three workers run at
-once. No new tickets are added as the batch finishes. If none qualify, no schedule
-is created; a smaller eligible set runs with its shortfall reported.
+and issues with open or merged same-repository implementation PRs on a matching
+ticket branch. It then starts the usual workers and hourly reconciliation schedule.
+N is the batch size; at most three workers run at once. No new tickets are added
+as the batch finishes. If none qualify, no schedule is created; a smaller
+eligible set runs with its shortfall reported.
 
 For a read-only preview, use the helper's `select-next` command with the normal
 initialization fields, `count` instead of `tickets`, and the current Paseo Claude

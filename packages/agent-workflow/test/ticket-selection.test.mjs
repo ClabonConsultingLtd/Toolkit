@@ -171,54 +171,137 @@ test("corrupt existing state fails closed rather than ignoring a possible claim"
 	writeFileSync(join(f.dir, "other.json"), "{broken");
 	assert.throws(() => selectNext(f.path, f.input, f.api), /cannot inspect/);
 });
-test("GitHub discovery paginates, excludes PRs, and detects orchestration implementation references", () => {
+function restSelection(t, pulls, failPull = false) {
+	const f = fixture(t);
 	const calls = [];
-	let pull = {
-		state: "open",
-		merged_at: null,
-		headRefName: "chore/pin-toolkit-v0.3.1",
-	};
 	const api = github("example/project", (args) => {
 		calls.push(args);
-		if (args.at(-1).includes("/issues?"))
+		const path = args.at(-1);
+		if (path.includes("/issues?"))
+			return JSON.stringify([[{ number: 49, created_at: "2026-01-01" }]]);
+		if (args[0] === "issue" && args[1] === "view" && args[2] === "49")
+			return JSON.stringify({
+				number: 49,
+				body: "**Claude:** `Sonnet / medium`",
+				labels: [{ name: "ready-for-agent" }],
+				state: "OPEN",
+				assignees: [],
+			});
+		if (path.includes("/dependencies/blocked_by")) return "[[]]";
+		if (path.includes("/timeline?"))
 			return JSON.stringify([
-				[{ number: 1 }, { number: 2, pull_request: {} }],
-				[{ number: 3 }],
-			]);
-		if (args.at(-1).includes("/timeline?"))
-			return JSON.stringify([
-				[
-					{
-						event: "cross-referenced",
-						source: {
-							issue: {
-								pull_request: {
-									url: "https://api.github.com/repos/example/project/pulls/12",
-								},
+				pulls.map((pull) => ({
+					event: "cross-referenced",
+					source: {
+						issue: {
+							pull_request: {
+								url: `https://api.github.com/repos/example/project/pulls/${pull.number}`,
 							},
 						},
 					},
-				],
+				})),
 			]);
-		return JSON.stringify(pull);
+		const number = Number(path.split("/").at(-1));
+		const pull = pulls.find((item) => item.number === number);
+		if (pull && failPull) throw new Error("HTTP 403");
+		if (pull) return JSON.stringify(pull);
+		throw new Error(`unexpected gh call: ${args.join(" ")}`);
 	});
-	assert.deepEqual(
-		api.listReady().map((i) => i.number),
-		[1, 3],
-	);
-	assert.ok(calls[0].includes("--paginate"));
-	assert.ok(calls[0].includes("--slurp"));
-	assert.equal(api.hasImplementationPr(1), false);
-	pull.headRefName = "tickets/intake-2026092115/1";
-	assert.equal(api.hasImplementationPr(1), true);
-	pull = {
-		state: "closed",
-		merged_at: null,
-		headRefName: "tickets/intake-2026092115/1",
+	return {
+		...f,
+		api,
+		calls,
+		select: () => selectNext(f.path, { ...f.input, count: 1 }, api),
 	};
-	assert.equal(api.hasImplementationPr(1), false);
-	pull.merged_at = "2026-01-01";
-	assert.equal(api.hasImplementationPr(1), true);
+}
+function restPull(branch, overrides = {}) {
+	return {
+		number: 76,
+		state: "open",
+		merged_at: null,
+		html_url: "https://github.com/example/project/pull/76",
+		head: { ref: branch, repo: { full_name: "example/project" } },
+		base: { ref: "main", repo: { full_name: "example/project" } },
+		...overrides,
+	};
+}
+test("REST timeline mention of #49 by the #48 implementation PR does not exclude #49", (t) => {
+	const f = restSelection(t, [restPull("tickets/intake-2026092115/48")]);
+	assert.deepEqual(f.select().tickets, ["49"]);
+	assert.ok(
+		f.calls.some(
+			(args) => args.includes("--paginate") && args.includes("--slurp"),
+		),
+	);
+});
+test("selection excludes open and merged same-repository ticket PRs with exact evidence", (t) => {
+	for (const overrides of [
+		{},
+		{ state: "closed", merged_at: "2026-09-22T12:00:00Z" },
+	]) {
+		const f = restSelection(t, [
+			restPull("tickets/intake-2026092115/48"),
+			restPull("tickets/intake-2026092115/49", { number: 77, ...overrides }),
+		]);
+		const result = f.select();
+		assert.deepEqual(result.tickets, []);
+		assert.deepEqual(result.skipped, [
+			{
+				number: "49",
+				reason: "existing open or merged implementation PR",
+				pr: {
+					number: 77,
+					url: "https://github.com/example/project/pull/77",
+					evidence: "same-repository head.ref tickets/intake-2026092115/49",
+				},
+			},
+		]);
+	}
+});
+test("selection admits after a closed unmerged PR and ignores a matching branch from a fork", (t) => {
+	const closed = restSelection(t, [
+		restPull("tickets/intake-2026092115/49", { state: "closed" }),
+	]);
+	assert.deepEqual(closed.select().tickets, ["49"]);
+	const fork = restSelection(t, [
+		restPull("tickets/intake-2026092115/49", {
+			head: {
+				ref: "tickets/intake-2026092115/49",
+				repo: { full_name: "elsewhere/fork" },
+			},
+		}),
+	]);
+	assert.deepEqual(fork.select().tickets, ["49"]);
+});
+test("selection fails closed on ambiguous REST PR identity and GitHub errors", (t) => {
+	const malformed = restSelection(t, [
+		restPull("tickets/intake-2026092115/49", {
+			head: { repo: { full_name: "example/project" } },
+		}),
+	]);
+	assert.throws(() => malformed.select(), /issue #49.*head.ref.*pull\/76/);
+	const invalid = restSelection(t, [
+		restPull("tickets/intake-2026092115/49", { state: "unknown" }),
+	]);
+	assert.throws(
+		() => invalid.select(),
+		/issue #49.*state or identity.*pull\/76/,
+	);
+	const mismatched = restSelection(t, [
+		restPull("tickets/intake-2026092115/49", {
+			base: { ref: "main", repo: { full_name: "elsewhere/project" } },
+		}),
+	]);
+	assert.throws(
+		() => mismatched.select(),
+		/issue #49.*repository mismatch.*pull\/76/,
+	);
+	const failure = restSelection(
+		t,
+		[restPull("tickets/intake-2026092115/49")],
+		true,
+	);
+	assert.throws(() => failure.select(), /issue #49.*pull\/76.*HTTP 403/);
 });
 
 test("GitHub fallback accepts the authored None (can start immediately) declaration", () => {
