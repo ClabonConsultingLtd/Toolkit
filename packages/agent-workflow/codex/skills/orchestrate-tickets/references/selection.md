@@ -32,9 +32,13 @@ Eligibility and order:
   local batch or the supplied active-work exclusion list.
 - Require all native/fallback blockers closed, and no unfinished local batch
   owning a blocker. An open blocker is never included speculatively in the batch.
-- Skip issues referenced by an open or merged PR. GitHub timeline cross-references
-  are used conservatively; even a related PR can cause a skip. An unlinked PR
-  cannot be inferred reliably, so retain explicit issue references in worker PRs.
+- Inspect timeline cross-references using the REST PR response. Skip only an open
+  or merged PR whose `head.ref` is a `tickets/<batch-id>/<issue>` branch in the
+  same repository. A descriptive mention of another ticket does not establish
+  implementation ownership. `skipped[].pr` gives the PR URL and branch evidence.
+  If PR identity or GitHub data cannot be verified, selection stops with an
+  actionable error rather than admitting possible duplicate work. An unlinked
+  PR cannot be inferred reliably, so retain explicit issue references in worker PRs.
 - Require a Claude recommendation supported by the discovered model catalog.
   Missing or unsupported recommendations are reported and skipped.
 - GitHub/authentication errors and unreadable batch state abort selection rather

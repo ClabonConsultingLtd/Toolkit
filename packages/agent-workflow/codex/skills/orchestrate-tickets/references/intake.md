@@ -81,6 +81,12 @@ Do not pause it just because an individual ticket requires human input.
 - `pause` / `resume`: toggle admission. Also pause/resume the saved Paseo schedule
   using its tools. Do not automatically bypass a user's paused policy.
 
+Every response includes `activeHelper` with the running package version, source
+path, and SHA-256 of the GitHub identity helper. `status.lastTick.helper` records
+the helper used for the most recent admission. Compare these when a scheduled run
+appears to use stale code; the global skill symlink and schedule must resolve to
+the intended tagged Toolkit checkout. See the package README for update steps.
+
 Each hourly admission creates a bounded batch; the recurring controller creates
 additional batches on later hours. Example with N=3: 9am admits three. At 10am,
 if two are still implementing/reviewing and one awaits merge, admit at most one.
