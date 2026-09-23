@@ -1,5 +1,21 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { blockers, issueNumber } from "./orchestration.mjs";
+
+export function helperIdentity() {
+	const source = fileURLToPath(import.meta.url);
+	return {
+		version: JSON.parse(
+			readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+		).version,
+		source,
+		sourceSha256: createHash("sha256")
+			.update(readFileSync(source))
+			.digest("hex"),
+	};
+}
 
 export function gh(args) {
 	return execFileSync("gh", args, {
@@ -139,32 +155,102 @@ export function github(repository, exec = gh) {
 		},
 		hasImplementationPr(number) {
 			const ticketNumber = issueNumber(number);
-			const events = json([
-				"api",
-				"--paginate",
-				"--slurp",
-				`repos/${repository}/issues/${ticketNumber}/timeline?per_page=100`,
-			]).flat();
+			let events;
+			try {
+				events = json([
+					"api",
+					"--paginate",
+					"--slurp",
+					`repos/${repository}/issues/${ticketNumber}/timeline?per_page=100`,
+				]).flat();
+			} catch (error) {
+				throw new Error(
+					`issue #${ticketNumber}: cannot inspect PR timeline: ${error.message}`,
+					{ cause: error },
+				);
+			}
 			for (const event of events) {
 				const source = event.source?.issue;
 				if (event.event !== "cross-referenced" || !source?.pull_request)
 					continue;
 				// Read the exact referenced PR, including references originating in another repo.
-				const url = new URL(source.pull_request.url);
+				let url;
+				try {
+					url = new URL(source.pull_request.url);
+				} catch {
+					throw new Error(
+						`issue #${ticketNumber}: referenced PR has no valid API URL`,
+					);
+				}
 				if (
 					url.origin !== "https://api.github.com" ||
-					!/^\/repos\/[^/]+\/[^/]+\/pulls\/[1-9]\d*$/.test(url.pathname)
+					!/^\/repos\/[^/]+\/[^/]+\/pulls\/[1-9]\d*$/.test(url.pathname) ||
+					url.search ||
+					url.hash
 				)
-					throw new Error("invalid referenced PR API URL");
-				const pull = json(["api", url.pathname.slice(1)]);
+					throw new Error(
+						`issue #${ticketNumber}: invalid referenced PR API URL: ${url.href}`,
+					);
+				const apiRepo = url.pathname.split("/").slice(2, 4).join("/");
+				const prNumber = Number(url.pathname.split("/").at(-1));
+				const prUrl = `https://github.com/${apiRepo}/pull/${prNumber}`;
+				let pull;
+				try {
+					pull = json(["api", url.pathname.slice(1)]);
+				} catch (error) {
+					throw new Error(
+						`issue #${ticketNumber}: cannot inspect referenced PR ${prUrl}: ${error.message}`,
+						{ cause: error },
+					);
+				}
+				if (
+					!pull ||
+					typeof pull !== "object" ||
+					Array.isArray(pull) ||
+					pull.number !== prNumber ||
+					!["open", "closed"].includes(pull.state) ||
+					!(
+						pull.merged_at === null ||
+						(typeof pull.merged_at === "string" && pull.merged_at)
+					)
+				)
+					throw new Error(
+						`issue #${ticketNumber}: cannot verify state or identity of referenced PR ${prUrl}`,
+					);
+				if (pull.state === "closed" && !pull.merged_at) continue;
+				const headRepo = pull.head?.repo?.full_name;
+				const baseRepo = pull.base?.repo?.full_name;
+				const headRef = pull.head?.ref;
+				if (
+					typeof headRepo !== "string" ||
+					!headRepo ||
+					typeof baseRepo !== "string" ||
+					!baseRepo ||
+					typeof headRef !== "string" ||
+					!headRef
+				)
+					throw new Error(
+						`issue #${ticketNumber}: cannot verify head.ref and repository of referenced PR ${prUrl}`,
+					);
+				if (baseRepo.toLowerCase() !== apiRepo.toLowerCase())
+					throw new Error(
+						`issue #${ticketNumber}: repository mismatch for referenced PR ${prUrl}`,
+					);
+				if (
+					apiRepo.toLowerCase() !== repository.toLowerCase() ||
+					headRepo.toLowerCase() !== repository.toLowerCase() ||
+					baseRepo.toLowerCase() !== repository.toLowerCase()
+				)
+					continue;
 				const implementationBranch = new RegExp(
 					`^tickets/[a-z0-9][a-z0-9-]{0,59}/${ticketNumber}$`,
 				);
-				if (
-					(pull.state === "open" || pull.merged_at) &&
-					implementationBranch.test(pull.headRefName ?? "")
-				)
-					return true;
+				if (implementationBranch.test(headRef))
+					return {
+						number: prNumber,
+						url: prUrl,
+						evidence: `same-repository head.ref ${headRef}`,
+					};
 			}
 			return false;
 		},

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ACTIVE, atomicWrite, newBatch } from "./orchestration.mjs";
-import { github } from "./orchestration-github.mjs";
+import { github, helperIdentity } from "./orchestration-github.mjs";
 import {
 	batchStates,
 	selectNext,
@@ -68,8 +68,14 @@ export function enforceCapacity(batchFile, state, previousActive) {
 export function intakeCommand(command, checkout, input = {}, options = {}) {
 	const cwd = resolve(checkout),
 		anchor = join(cwd, ".toolkit", "orchestration", "intake-anchor.json");
-	if (command === "status") return readIntake(anchor);
-	return withSelectionLock(anchor, () => {
+	const activeHelper = helperIdentity();
+	if (command === "status") {
+		const policy = readIntake(anchor);
+		return policy
+			? { ...policy, activeHelper }
+			: { activeHelper, configured: false };
+	}
+	const result = withSelectionLock(anchor, () => {
 		let policy = readIntake(anchor);
 		const path = intakePath(anchor);
 		if (command === "configure") {
@@ -141,6 +147,7 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 					batchFile,
 					tickets: existing.ticketOrder,
 					recovered: true,
+					helper: existing.selection.helper ?? null,
 				};
 			} else {
 				const budget = capacity(anchor, policy.repository);
@@ -174,6 +181,7 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 							intakeHour: hour,
 							requestedCount: policy.count,
 							order: selection.order,
+							helper: activeHelper,
 						};
 						state.managedByIntake = true;
 						atomicWrite(batchFile, state);
@@ -186,10 +194,12 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 					} else policy.lastTick = { hour, initialized: false, ...selection };
 				}
 			}
+			if (!("helper" in policy.lastTick)) policy.lastTick.helper = activeHelper;
 			atomicWrite(path, policy);
 			return policy.lastTick;
 		} else throw new Error(`unknown intake command: ${command}`);
 		atomicWrite(path, policy);
 		return policy;
 	});
+	return { ...result, activeHelper };
 }

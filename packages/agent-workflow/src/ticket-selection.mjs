@@ -148,9 +148,15 @@ export function selectNext(file, input, api) {
 				}
 				if (pending.length)
 					reason = `blocked by ${pending.map((n) => `#${n}`).join(", ")}`;
-				else if (api.hasImplementationPr(number))
-					reason = "existing open or merged PR";
 				else {
+					const implementationPr = api.hasImplementationPr(number);
+					if (implementationPr) {
+						reason = "existing open or merged implementation PR";
+						if (typeof implementationPr === "object")
+							skipped.push({ number, reason, pr: implementationPr });
+						else skipped.push({ number, reason });
+						continue;
+					}
 					try {
 						resolveRuntime(issue.recommendation, input.models);
 					} catch (error) {
