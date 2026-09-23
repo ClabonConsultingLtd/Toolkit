@@ -65,6 +65,17 @@ export function enforceCapacity(batchFile, state, previousActive) {
 			"repository intake execution limit reached; wait for an active slot",
 		);
 }
+function readHourlyBatch(batchFile, repository, hour) {
+	const existing = JSON.parse(readFileSync(batchFile, "utf8"));
+	if (
+		existing.repository !== repository ||
+		existing.selection?.intakeHour !== hour ||
+		!Array.isArray(existing.ticketOrder) ||
+		!existing.ticketOrder.length
+	)
+		throw new Error("intake batch ID collision");
+	return existing;
+}
 export function intakeCommand(command, checkout, input = {}, options = {}) {
 	const cwd = resolve(checkout),
 		anchor = join(cwd, ".toolkit", "orchestration", "intake-anchor.json");
@@ -81,6 +92,12 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 		if (command === "configure") {
 			if (!Number.isSafeInteger(input.count) || input.count < 1)
 				throw new Error("count must be a positive integer");
+			for (const field of ["cron", "timezone"])
+				if (
+					input[field] !== undefined &&
+					(typeof input[field] !== "string" || !input[field].trim())
+				)
+					throw new Error(`${field} must be a nonempty string`);
 			newBatch({ ...input, cwd, batchId: "intake-validation", tickets: ["1"] });
 			if (
 				policy &&
@@ -99,11 +116,15 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				baseBranch: input.baseBranch,
 				codexModel: input.codexModel,
 				count: input.count,
-				cron: "0 * * * *",
-				timezone: "UTC",
+				cron: input.cron ?? policy?.cron ?? "0 * * * *",
+				timezone: input.timezone ?? policy?.timezone ?? "UTC",
 				scheduleName: `ticket-intake:${input.repository}`,
 				scheduleId: policy?.scheduleId ?? null,
 				paused: policy?.paused ?? false,
+				...(policy?.paused && {
+					pausedAt: policy.pausedAt,
+					pauseReason: policy.pauseReason,
+				}),
 				lastTick: policy?.lastTick ?? null,
 			};
 			atomicWrite(path, policy);
@@ -126,28 +147,56 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				delete policy.pauseReason;
 			}
 		} else if (command === "tick") {
-			if (policy.paused) return { paused: true, initialized: false };
+			if (policy.paused)
+				return {
+					status: "paused",
+					paused: true,
+					initialized: false,
+					capacity: capacity(anchor, policy.repository),
+				};
 			const now = options.now ?? Date.now(),
 				hour = new Date(now).toISOString().slice(0, 13);
-			if (policy.lastTick && policy.lastTick.hour >= hour)
-				return { ...policy.lastTick, replayed: true };
 			const batchId = `intake-${hour.replace(/[-T:]/g, "")}`,
 				batchFile = join(dirname(anchor), `${batchId}.json`);
+			if (policy.lastTick?.hour > hour)
+				return {
+					...policy.lastTick,
+					status: "replayed",
+					replayed: true,
+					reason: "clock is before the last evaluated hour",
+					capacity: capacity(anchor, policy.repository),
+				};
+			if (policy.lastTick?.hour === hour && policy.lastTick.initialized) {
+				if (!existsSync(batchFile))
+					throw new Error(
+						"admitted intake batch is missing; reconcile before retrying",
+					);
+				const existing = readHourlyBatch(batchFile, policy.repository, hour);
+				if (
+					JSON.stringify(existing.ticketOrder) !==
+					JSON.stringify(policy.lastTick.tickets)
+				)
+					throw new Error("intake batch differs from the recorded admission");
+				return {
+					...policy.lastTick,
+					status: "replayed",
+					replayed: true,
+					capacity: capacity(anchor, policy.repository),
+				};
+			}
+			const retried = policy.lastTick?.hour === hour;
 			// Atomic batch creation precedes tick bookkeeping. Recover that batch after a crash.
 			if (existsSync(batchFile)) {
-				const existing = JSON.parse(readFileSync(batchFile, "utf8"));
-				if (
-					existing.repository !== policy.repository ||
-					existing.selection?.intakeHour !== hour
-				)
-					throw new Error("intake batch ID collision");
+				const existing = readHourlyBatch(batchFile, policy.repository, hour);
 				policy.lastTick = {
 					hour,
+					status: "recovered",
 					initialized: true,
 					batchFile,
 					tickets: existing.ticketOrder,
 					recovered: true,
 					helper: existing.selection.helper ?? null,
+					capacity: capacity(anchor, policy.repository),
 				};
 			} else {
 				const budget = capacity(anchor, policy.repository);
@@ -155,9 +204,17 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				if (count === 0)
 					policy.lastTick = {
 						hour,
+						status: "capacity-full",
+						retried,
 						initialized: false,
 						tickets: [],
 						reason: "capacity full",
+						skipped: [
+							{
+								reason:
+									"capacity full; wait for a managed ticket to release a slot",
+							},
+						],
 						capacity: budget,
 					};
 				else {
@@ -187,11 +244,23 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 						atomicWrite(batchFile, state);
 						policy.lastTick = {
 							hour,
+							status: "admitted",
+							retried,
 							initialized: true,
 							batchFile,
+							capacity: capacity(anchor, policy.repository),
 							...selection,
 						};
-					} else policy.lastTick = { hour, initialized: false, ...selection };
+					} else
+						policy.lastTick = {
+							hour,
+							status: "empty",
+							retried,
+							initialized: false,
+							reason: "no eligible tickets",
+							capacity: budget,
+							...selection,
+						};
 				}
 			}
 			if (!("helper" in policy.lastTick)) policy.lastTick.helper = activeHelper;
