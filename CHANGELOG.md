@@ -2,6 +2,8 @@
 
 ## 0.3.5 - 2026-09-23
 
+- #41: Configure Git identity before release rebase
+
 - #36: Fix intake PR identity verification and expose helper source
 
 - #33: fix: reconcile interrupted orchestration workers
