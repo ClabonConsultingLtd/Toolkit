@@ -203,7 +203,13 @@ export function disposition(state) {
 		})),
 	};
 }
-export function changeTicket(state, number, action, data = {}, now = Date.now()) {
+export function changeTicket(
+	state,
+	number,
+	action,
+	data = {},
+	now = Date.now(),
+) {
 	const t = state.tickets[issueNumber(number)];
 	if (!t) throw new Error("ticket outside selected batch");
 	const requireStatus = (...statuses) => {
@@ -246,6 +252,11 @@ export function changeTicket(state, number, action, data = {}, now = Date.now())
 			t.agentId = data.agentId;
 			t.launchUncertain = false;
 		}
+		if (data.workerActive === true) {
+			if (!t.agentId) throw new Error("agent must be attached");
+			t.workerActive = true;
+			t.updatedAt = new Date(now).toISOString();
+		}
 	} else if (action === "review") {
 		requireStatus("implementing");
 		requireText("evidence");
@@ -262,7 +273,9 @@ export function changeTicket(state, number, action, data = {}, now = Date.now())
 		if (t.fixCycles >= 2)
 			Object.assign(t, {
 				status: "blocked",
+				previousStatus: "reviewing",
 				blockKind: "human",
+				repairLimitReached: true,
 				reason: data.reason,
 				updatedAt: new Date(now).toISOString(),
 			});
@@ -306,7 +319,10 @@ export function changeTicket(state, number, action, data = {}, now = Date.now())
 		requireText("evidence");
 		if (t.launchUncertain)
 			throw new Error("reconcile the uncertain launch before resuming");
-		if (t.fixCycles >= 2 && data.resetFixCycles !== true)
+		const repairLimitBlock =
+			t.repairLimitReached === true ||
+			(t.fixCycles >= 2 && t.previousStatus !== "implementing");
+		if (repairLimitBlock && data.resetFixCycles !== true)
 			throw new Error("explicit resetFixCycles required after repair limit");
 		if (data.resetFixCycles) t.fixCycles = 0;
 		const next = t.previousStatus ?? (t.agentId ? "reviewing" : "queued");
@@ -315,6 +331,7 @@ export function changeTicket(state, number, action, data = {}, now = Date.now())
 		t.status = next;
 		t.blockKind = null;
 		t.reason = null;
+		delete t.repairLimitReached;
 		t.updatedAt = new Date(now).toISOString();
 	} else throw new Error(`unknown ticket action: ${action}`);
 	return t;
