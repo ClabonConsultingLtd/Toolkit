@@ -4,6 +4,8 @@
 
 - #41: Configure Git identity before release rebase
 
+- #39: Retry empty ticket intake ticks safely and report schedule drift
+
 - #36: Fix intake PR identity verification and expose helper source
 
 - #33: fix: reconcile interrupted orchestration workers
