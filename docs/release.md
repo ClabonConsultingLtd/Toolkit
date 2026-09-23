@@ -17,6 +17,12 @@
    package's README).
 7. Publish only packages whose tests and documentation describe their current behavior.
 
+If `Prepare release` fails while rebasing an existing `release/next` candidate,
+review the failed run and confirm the candidate branch and pull request are still
+open. After fixing the workflow, rerun the failed workflow run for the merged
+labelled PR that triggered it. Review the updated candidate diff and changelog
+before merging the release PR; do not hand-edit package versions to recover it.
+
 No release should include runtime artifacts, credentials, generated images, models, provider transcripts, or local state.
 
 ## Consuming-repo version tracking
