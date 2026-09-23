@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.3.3 - 2026-09-23
+## 0.3.4 - 2026-09-23
+
+- #33: fix: reconcile interrupted orchestration workers
 
 - #31: fix: use full access for controller schedules
 
