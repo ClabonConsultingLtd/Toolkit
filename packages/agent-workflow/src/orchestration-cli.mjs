@@ -167,9 +167,10 @@ export function execute(command, path, input = {}, options = {}) {
 			if (command !== "release") assertLease(state, input.token);
 			return { state, output };
 		});
-	return ["reserve", "resume", "fix"].includes(command)
-		? withSelectionLock(path, run)
-		: run();
+	const mutatesCapacity =
+		["reserve", "resume", "fix"].includes(command) ||
+		(command === "attach" && input.workerActive === true);
+	return mutatesCapacity ? withSelectionLock(path, run) : run();
 }
 export function main(args = process.argv.slice(2)) {
 	try {
