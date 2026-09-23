@@ -30,6 +30,11 @@ Eligibility and order:
   number. Re-read each issue before selecting. Pull requests are never tickets.
 - Skip assigned issues, conflicting triage/done labels, and tickets in another
   local batch or the supplied active-work exclusion list.
+- Skip parent specs: an issue with native GitHub sub-issues, or one named by
+  another issue's `## Parent` section or `Parent:` line (open or closed), is
+  implemented through those sub-tickets, never directly. `skipped[].subTickets`
+  lists them. A parent already in a batch is blocked for readiness at sync and
+  refused at `reserve`. If sub-tickets cannot be read, selection stops.
 - Require all native/fallback blockers closed, and no unfinished local batch
   owning a blocker. An open blocker is never included speculatively in the batch.
 - Inspect timeline cross-references using the REST PR response. Skip only an open

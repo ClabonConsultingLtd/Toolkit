@@ -57,6 +57,7 @@ test("skips malformed candidate metadata and continues selection", (t) => {
 			};
 		},
 		hasImplementationPr: () => false,
+		subTickets: () => [],
 	};
 	const result = selectNext(
 		join(dir, "batch.json"),

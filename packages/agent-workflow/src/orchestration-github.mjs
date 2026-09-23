@@ -21,6 +21,7 @@ export function gh(args) {
 	return execFileSync("gh", args, {
 		encoding: "utf8",
 		timeout: 60_000,
+		maxBuffer: 64 * 1024 * 1024,
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 }
@@ -61,6 +62,20 @@ export function fallbackDependencies(body = "", repository) {
 	if (!refs.length && !/^none(?:\s*\([^()\n]*\))?\.?$/i.test(normalized))
 		throw dependencyError("cannot parse Blocked by declaration", line);
 	return [...new Set(refs)];
+}
+// A split ticket names its parent spec in a "## Parent" section or "Parent:" line.
+export function parentReference(body = "", repository) {
+	const text =
+		/^##\s+Parent[^\S\n]*\n([\s\S]*?)(?=^##\s|$(?![\s\S]))/im.exec(body)?.[1] ??
+		/^\s*(?:\*\*)?Parent:(?:\*\*)?[^\S\n]*(.*)$/im.exec(body)?.[1] ??
+		"";
+	const url =
+		/https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/([1-9]\d*)/i.exec(text);
+	if (url)
+		return repository && url[1].toLowerCase() === repository.toLowerCase()
+			? url[2]
+			: null;
+	return /(?:^|[^\w/.-])#([1-9]\d*)/.exec(text)?.[1] ?? null;
 }
 export function recommendation(body = "") {
 	const match = /\*\*Claude:\*\*\s*`?([^`\n]+?)\s*\/\s*([\w-]+)`?\s*$/im.exec(
@@ -129,6 +144,55 @@ export function github(repository, exec = gh) {
 			recommendation: recommendation(data.body),
 		};
 	}
+	let parents;
+	// Parent specs are implemented through their sub-tickets, never directly.
+	// Closed children still count: a split spec stays a spec. Fails closed.
+	function subTickets(number) {
+		const n = issueNumber(number);
+		try {
+			if (!parents) {
+				parents = { children: new Map(), native: new Set() };
+				// Project in gh: full issue and PR bodies overflow the exec buffer.
+				const all = exec([
+					"api",
+					"--paginate",
+					"--jq",
+					".[] | select(.pull_request | not) | {number, body, sub_issues_summary}",
+					`repos/${repository}/issues?state=all&per_page=100`,
+				])
+					.split("\n")
+					.filter((line) => line.trim())
+					.map((line) => JSON.parse(line))
+					.filter((item) => !item.pull_request);
+				for (const item of all) {
+					const child = String(item.number);
+					const parent = parentReference(item.body ?? "", repository);
+					if (parent && parent !== child) {
+						if (!parents.children.has(parent))
+							parents.children.set(parent, new Set());
+						parents.children.get(parent).add(child);
+					}
+					if (item.sub_issues_summary?.total > 0) parents.native.add(child);
+				}
+			}
+			const children = new Set(parents.children.get(n));
+			if (parents.native.has(n))
+				for (const item of json([
+					"api",
+					"--paginate",
+					"--slurp",
+					`repos/${repository}/issues/${n}/sub_issues?per_page=100`,
+				]).flat())
+					children.add(String(item.number));
+			return [...children].sort((a, b) => Number(a) - Number(b));
+		} catch (error) {
+			parents = undefined;
+			throw new Error(
+				`issue #${n}: cannot inspect sub-tickets: ${error.message}`,
+				{ cause: error },
+			);
+		}
+	}
 	function pr(number) {
 		return json([
 			"pr",
@@ -143,6 +207,7 @@ export function github(repository, exec = gh) {
 	return {
 		issue,
 		pr,
+		subTickets,
 		listReady() {
 			return json([
 				"api",
@@ -270,6 +335,7 @@ export function github(repository, exec = gh) {
 						dependencyError: error.message,
 					};
 				}
+				issues[n].subTickets = subTickets(n);
 			}
 			for (const item of Object.values(issues))
 				for (const dep of item.dependencies)
@@ -355,6 +421,10 @@ export function requireReady(state, ticket, issues) {
 	const issue = issues[ticket.number];
 	if (issue.state !== "OPEN" || !issue.labels.includes("ready-for-agent"))
 		throw new Error("issue is not open and ready-for-agent");
+	if (issue.subTickets?.length)
+		throw new Error(
+			`issue is a parent spec; implement its sub-tickets ${issue.subTickets.map((n) => `#${n}`).join(", ")}`,
+		);
 	if (blockers(state, issue, issues).length)
 		throw new Error("issue has unresolved dependencies");
 	if (!issue.recommendation)

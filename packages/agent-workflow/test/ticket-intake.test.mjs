@@ -45,6 +45,7 @@ function fixture(t) {
 			recommendation: { model: "Sonnet", effort: "medium" },
 		}),
 		hasImplementationPr: () => false,
+		subTickets: () => [],
 		snapshot: (state) =>
 			Object.fromEntries(
 				Object.keys(state.tickets).map((n) => [n, api.issue(n)]),

@@ -51,6 +51,7 @@ function fixture(t) {
 			[3, 2, 1].map((n) => ({ number: n, created_at: `2026-01-0${n}` })),
 		issue: (n) => structuredClone(items[n]),
 		hasImplementationPr: () => false,
+		subTickets: () => [],
 	};
 	return { dir, path, input, items, api, options: { github: () => api } };
 }
@@ -77,6 +78,65 @@ test("eligibility excludes assigned, conflicting labels, open blockers, PRs and 
 	const result = selectNext(f.path, f.input, f.api);
 	assert.deepEqual(result.tickets, ["9", "10"]);
 	assert.equal(result.skipped.length, 8);
+});
+test("parent specs are skipped in favour of their sub-tickets", (t) => {
+	const f = fixture(t);
+	f.api.subTickets = (n) => (n === "1" ? ["2", "3"] : []);
+	const result = selectNext(f.path, f.input, f.api);
+	assert.deepEqual(result.tickets, ["2", "3"]);
+	assert.deepEqual(result.skipped, [
+		{
+			number: "1",
+			reason: "parent spec with sub-tickets",
+			subTickets: ["2", "3"],
+		},
+	]);
+});
+function parentApi(issues, subIssues = {}) {
+	const calls = [];
+	const api = github("example/project", (args) => {
+		calls.push(args);
+		const path = args.at(-1);
+		if (path.includes("/issues?state=all"))
+			return issues.map((item) => JSON.stringify(item)).join("\n");
+		const native = /\/issues\/(\d+)\/sub_issues/.exec(path);
+		if (native) return JSON.stringify([subIssues[native[1]] ?? []]);
+		throw new Error(`unexpected gh call: ${args.join(" ")}`);
+	});
+	return { api, calls };
+}
+test("sub-tickets come from Parent sections and native sub-issues, fetched once", () => {
+	const { api, calls } = parentApi(
+		[
+			{ number: 20, body: "Phase spec", sub_issues_summary: { total: 0 } },
+			{ number: 21, state: "closed", body: "## Parent\n\n#20 (Phase)\n" },
+			{
+				number: 22,
+				body: "**Parent:** https://github.com/example/project/issues/20",
+			},
+			{
+				number: 23,
+				body: "## Parent\n\nhttps://github.com/other/repo/issues/20",
+			},
+			{ number: 24, body: "## Parent\n\n#24" },
+			{ number: 25, pull_request: {}, body: "## Parent\n\n#20" },
+			{ number: 30, body: "Native parent", sub_issues_summary: { total: 1 } },
+		],
+		{ 30: [{ number: 31 }] },
+	);
+	assert.deepEqual(api.subTickets(20), ["21", "22"]);
+	assert.deepEqual(api.subTickets("#30"), ["31"]);
+	assert.deepEqual(api.subTickets(24), []);
+	assert.equal(
+		calls.filter((a) => a.at(-1).includes("/issues?state=all")).length,
+		1,
+	);
+});
+test("sub-ticket lookup fails closed rather than admitting a possible parent", () => {
+	const api = github("example/project", () => {
+		throw new Error("HTTP 502");
+	});
+	assert.throws(() => api.subTickets(20), /issue #20.*sub-tickets.*HTTP 502/);
 });
 test("existing batches and Paseo-discovered work are excluded including queued and blocked tickets", (t) => {
 	const f = fixture(t);
@@ -177,6 +237,7 @@ function restSelection(t, pulls, failPull = false) {
 	const api = github("example/project", (args) => {
 		calls.push(args);
 		const path = args.at(-1);
+		if (path.includes("/issues?state=all")) return "";
 		if (path.includes("/issues?"))
 			return JSON.stringify([[{ number: 49, created_at: "2026-01-01" }]]);
 		if (args[0] === "issue" && args[1] === "view" && args[2] === "49")
