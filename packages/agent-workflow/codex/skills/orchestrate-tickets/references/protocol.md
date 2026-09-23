@@ -16,7 +16,7 @@ Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as 
 | renew / release | none | Extend ten-minute lease / release. |
 | sync | none | Reconcile GitHub and return issues, launchable IDs, slots, pauseSchedule. |
 | reserve | number, models (Paseo Claude models array) | Recheck readiness/dependencies, resolve model/effort, persist branch/launchKey and reserve slot. |
-| attach | number, workspaceId and/or agentId | Persist identifiers immediately after each Paseo creation. Existing different IDs are rejected. |
+| attach | number, workspaceId and/or agentId; workerActive:true for a confirmed externally restarted saved agent | Persist identifiers immediately after each Paseo creation, or restore capacity accounting without leaving blocked. Existing different IDs are rejected. |
 | link-pr | number, pr | Fetch and verify same-repository branch/base before attaching PR. |
 | review | number, evidence | Record completed worker output; begin Codex review. |
 | fix | number, reason | Increment fix count and reserve worker; third request blocks without launching. |
@@ -43,7 +43,7 @@ Use the same shape whether the user supplies a manifest or explicit issue number
 
 ## Recovery
 
-A lease timeout permits another orchestrator to reconcile, not to repeat an uncertain external creation. Reservations and stable branch/launchKey values are the recovery evidence. A reservation with an existing agent can be attached, then explicitly resumed. If no agent was ever created, an operator must prove the old orchestrator has stopped before repairing its reservation; do not automatically clear launchUncertain.
+A lease timeout permits another orchestrator to reconcile, not to repeat an uncertain external creation. Reservations and stable branch/launchKey values are the recovery evidence. A reservation with an existing agent can be attached, then explicitly resumed. Restart blocked workers through `resume`; if a saved agent is already running because it was restarted externally, reconcile it first with `attach` and `workerActive: true`. If no agent was ever created, an operator must prove the old orchestrator has stopped before repairing its reservation; do not automatically clear launchUncertain.
 
 The short-lived `<state>.mutex` directory serializes file transactions. If a process is killed while holding it, no automatic stealing occurs: stop the schedule, establish that no helper writer is alive, remove only that mutex directory, and resume. Atomic rename ensures the state file remains complete. A leftover `*.tmp` file is not the source of truth.
 

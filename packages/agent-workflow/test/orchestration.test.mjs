@@ -151,6 +151,70 @@ test("two fixes then human block; permission waits keep their execution slot", (
 	changeTicket(s, 9, "block", { reason: "permission" });
 	assert.equal(s.tickets[9].workerActive, true);
 });
+test("an interrupted second repair resumes without resetting its repair history", () => {
+	const s = newBatch(manifest());
+	worker(s, 7);
+	for (let i = 0; i < 2; i++) {
+		changeTicket(s, 7, "review", { evidence: "result" });
+		changeTicket(s, 7, "fix", { reason: "test failure" });
+	}
+	changeTicket(s, 7, "block", {
+		reason: "provider session limit",
+		workerStopped: true,
+	});
+
+	const resumed = changeTicket(s, 7, "resume", {
+		evidence: "saved worker finished the authorised repair",
+	});
+	assert.equal(resumed.status, "implementing");
+	assert.equal(resumed.fixCycles, 2);
+	changeTicket(s, 7, "review", { evidence: "result" });
+	assert.equal(
+		changeTicket(s, 7, "fix", { reason: "still wrong" }).status,
+		"blocked",
+	);
+});
+test("a repair-limit block requires an explicit reset and resumes into review", () => {
+	const s = newBatch(manifest());
+	worker(s, 7);
+	for (let i = 0; i < 2; i++) {
+		changeTicket(s, 7, "review", { evidence: "result" });
+		changeTicket(s, 7, "fix", { reason: "test failure" });
+	}
+	changeTicket(s, 7, "block", {
+		reason: "provider session limit",
+		workerStopped: true,
+	});
+	changeTicket(s, 7, "resume", { evidence: "worker recovered" });
+	changeTicket(s, 7, "review", { evidence: "result" });
+	changeTicket(s, 7, "fix", { reason: "still wrong" });
+
+	assert.throws(
+		() => changeTicket(s, 7, "resume", { evidence: "another attempt" }),
+		/resetFixCycles/,
+	);
+	const resumed = changeTicket(s, 7, "resume", {
+		evidence: "human authorised another repair budget",
+		resetFixCycles: true,
+	});
+	assert.equal(resumed.status, "reviewing");
+	assert.equal(resumed.fixCycles, 0);
+});
+test("a reconciled live worker on a blocked ticket consumes repository capacity", () => {
+	const s = newBatch({ ...manifest(), tickets: [7, 8], concurrency: 1 });
+	worker(s, 7);
+	changeTicket(s, 7, "block", {
+		reason: "worker was believed stopped",
+		workerStopped: true,
+	});
+	assert.deepEqual(disposition(s).launchable, ["8"]);
+
+	const reconciled = changeTicket(s, 7, "attach", { workerActive: true });
+	assert.equal(reconciled.status, "blocked");
+	assert.equal(reconciled.workerActive, true);
+	assert.equal(disposition(s).slots, 0);
+	assert.deepEqual(disposition(s).launchable, []);
+});
 test("uncertain launches require reconciliation before resume", () => {
 	const s = newBatch(manifest());
 	changeTicket(s, 7, "reserve", runtime);
