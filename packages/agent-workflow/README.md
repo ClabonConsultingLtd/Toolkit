@@ -275,10 +275,17 @@ and permission-waiting workers do. Queued work reserves admission capacity. Work
 reservations and resumptions enforce the shared cap, so overlapping batch schedules
 cannot exceed it. Existing per-batch concurrency still caps each batch at three.
 
-The intake schedule stays enabled when no work qualifies or capacity is full.
+The intake schedule may use hourly UTC or a deliberately chosen cron and timezone.
+Runs between UTC hour boundaries can reconcile existing work and retry a zero-admission
+evaluation after readiness or capacity changes. Once a batch is admitted, later
+ticks in that UTC hour replay it without adding tickets. Reconfiguration preserves
+the saved schedule cadence unless a new one is supplied. Compare the saved policy
+with the live Paseo schedule before describing it as enabled; preserve user pauses.
+An enabled intake schedule keeps running when no work qualifies or capacity is full.
 It never merges PRs. Use `scripts/intake.mjs` (or the package's `ticket-intake`
 command) for configure/status/tick/pause/resume, as documented in the skill's
-`references/intake.md`. A repeated tick within the same UTC hour reuses the previous
-result. Policies live under `.toolkit/orchestration/.intake/`, with normal batch
+`references/intake.md`. Tick output distinguishes admissions, empty evaluations,
+capacity waits, and replays, and includes the current shared capacity. Policies
+live under `.toolkit/orchestration/.intake/`, with normal batch
 files beside that directory; all runners must use the updated helper from one
 stable checkout. Installing this capability does not activate a live intake job.

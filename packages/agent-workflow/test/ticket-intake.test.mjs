@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -88,7 +89,10 @@ test("9am selects N; 10am admits only free slots; review and awaiting-merge coun
 		{ ...f.options, now: f.options.now + 7200000 },
 	);
 	assert.equal(third.initialized, false);
+	assert.equal(third.status, "capacity-full");
 	assert.equal(third.reason, "capacity full");
+	assert.equal(third.capacity.admissionSlots, 0);
+	assert.match(third.skipped[0].reason, /release a slot/);
 });
 test("same-hour ticks are idempotent even after a slot becomes free", (t) => {
 	const f = fixture(t),
@@ -103,7 +107,9 @@ test("same-hour ticks are idempotent even after a slot becomes free", (t) => {
 	});
 	const again = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
 	assert.equal(again.replayed, true);
+	assert.equal(again.status, "replayed");
 	assert.equal(again.batchFile, a.batchFile);
+	assert.equal(again.capacity.admissionSlots, 3);
 	assert.deepEqual(again.activeHelper, a.helper);
 	const next = intakeCommand(
 		"tick",
@@ -112,6 +118,133 @@ test("same-hour ticks are idempotent even after a slot becomes free", (t) => {
 		{ ...f.options, now: f.options.now + 3600000 },
 	);
 	assert.deepEqual(next.tickets, ["4", "5", "6"]);
+});
+test("empty tick retries after a dependency closes, then keeps the admission idempotent", (t) => {
+	const f = fixture(t);
+	let dependencyClosed = false;
+	f.api.listReady = () => [{ number: 2, created_at: "2026-01-02" }];
+	f.api.issue = (number) =>
+		String(number) === "1"
+			? { number: "1", state: dependencyClosed ? "CLOSED" : "OPEN" }
+			: {
+					...fixtureIssue(2),
+					dependencies: ["1"],
+				};
+	const empty = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	assert.equal(empty.status, "empty");
+	assert.equal(empty.retried, false);
+	assert.equal(empty.capacity.admissionSlots, 3);
+	assert.deepEqual(empty.skipped, [{ number: "2", reason: "blocked by #1" }]);
+	const stillEmpty = intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models },
+		f.options,
+	);
+	assert.equal(stillEmpty.status, "empty");
+	assert.equal(stillEmpty.retried, true);
+	dependencyClosed = true;
+	const admitted = intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models },
+		f.options,
+	);
+	assert.equal(admitted.status, "admitted");
+	assert.equal(admitted.retried, true);
+	assert.deepEqual(admitted.tickets, ["2"]);
+	assert.equal(admitted.capacity.admissionSlots, 2);
+	update(admitted.batchFile, (state) => {
+		state.tickets[2].status = "awaiting_merge";
+	});
+	const replay = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	assert.equal(replay.status, "replayed");
+	assert.deepEqual(replay.tickets, ["2"]);
+	assert.equal(replay.capacity.admissionSlots, 3);
+});
+function fixtureIssue(number) {
+	return {
+		number: String(number),
+		state: "OPEN",
+		labels: ["ready-for-agent"],
+		dependencies: [],
+		assignees: [],
+		recommendation: { model: "Sonnet", effort: "medium" },
+	};
+}
+test("overlapping tick cannot select while another tick holds the shared lock", (t) => {
+	const f = fixture(t);
+	let overlap;
+	f.api.listReady = () => {
+		const request = join(f.cwd, "request.json");
+		writeFileSync(request, JSON.stringify({ models: f.models }));
+		overlap = spawnSync(
+			process.execPath,
+			[
+				join(import.meta.dirname, "..", "src", "intake-cli.mjs"),
+				"tick",
+				f.cwd,
+				request,
+			],
+			{ encoding: "utf8" },
+		);
+		return [{ number: 1, created_at: "2026-01-01" }];
+	};
+	const admitted = intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models },
+		f.options,
+	);
+	assert.equal(overlap.status, 1);
+	assert.match(overlap.stderr, /another batch selection is in progress/);
+	assert.deepEqual(admitted.tickets, ["1"]);
+	const replay = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	assert.equal(replay.status, "replayed");
+	assert.equal(replay.batchFile, admitted.batchFile);
+});
+test("reconfigure preserves a chosen schedule cadence", (t) => {
+	const f = fixture(t);
+	const cadence = intakeCommand("configure", f.cwd, {
+		...f.input,
+		cron: "*/30 * * * *",
+		timezone: "Europe/London",
+	});
+	assert.equal(cadence.cron, "*/30 * * * *");
+	assert.equal(cadence.timezone, "Europe/London");
+	const repeated = intakeCommand("configure", f.cwd, f.input);
+	assert.equal(repeated.cron, cadence.cron);
+	assert.equal(repeated.timezone, cadence.timezone);
+	intakeCommand("pause", f.cwd, { reason: "user request" });
+	const paused = intakeCommand("configure", f.cwd, f.input);
+	assert.equal(paused.paused, true);
+	assert.equal(paused.pauseReason, "user request");
+	assert.ok(paused.pausedAt);
+	assert.throws(
+		() =>
+			intakeCommand("configure", f.cwd, {
+				...f.input,
+				cron: " ",
+			}),
+		/cron must be a nonempty string/,
+	);
+});
+test("capacity-full tick can retry after a slot frees within the hour", (t) => {
+	const f = fixture(t);
+	intakeCommand("configure", f.cwd, { ...f.input, count: 1 });
+	const first = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	const nextHour = { ...f.options, now: f.options.now + 3600000 };
+	const full = intakeCommand("tick", f.cwd, { models: f.models }, nextHour);
+	assert.equal(full.status, "capacity-full");
+	assert.equal(full.capacity.queued, 1);
+	update(first.batchFile, (state) => {
+		state.tickets[1].status = "awaiting_merge";
+	});
+	const admitted = intakeCommand("tick", f.cwd, { models: f.models }, nextHour);
+	assert.equal(admitted.status, "admitted");
+	assert.equal(admitted.retried, true);
+	assert.deepEqual(admitted.tickets, ["2"]);
+	assert.equal(admitted.capacity.admissionSlots, 0);
 });
 test("per-batch reserves cannot exceed the repository limit and can continue after a slot is freed", (t) => {
 	const f = fixture(t);
@@ -226,8 +359,68 @@ test("recover batch created before a crash without duplicating the hourly select
 		f.options,
 	);
 	assert.equal(recovered.recovered, true);
+	assert.equal(recovered.status, "recovered");
 	assert.equal(recovered.batchFile, first.batchFile);
 	assert.deepEqual(recovered.helper, first.helper);
+	assert.equal(recovered.capacity.admissionSlots, 0);
+	const replay = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	assert.equal(replay.status, "replayed");
+	assert.deepEqual(replay.tickets, first.tickets);
+});
+test("crash after retry admission recovers the existing batch despite stale empty policy", (t) => {
+	const f = fixture(t);
+	f.api.listReady = () => [];
+	const empty = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	assert.equal(empty.status, "empty");
+	f.api.listReady = () => [{ number: 1, created_at: "2026-01-01" }];
+	const first = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	const policyFile = intakePath(first.batchFile);
+	const policy = intakeCommand("status", f.cwd);
+	delete policy.activeHelper;
+	policy.lastTick = empty;
+	delete policy.lastTick.activeHelper;
+	atomicWrite(policyFile, policy);
+	let selections = 0;
+	f.api.listReady = () => {
+		selections++;
+		return [{ number: 2, created_at: "2026-01-02" }];
+	};
+	const recovered = intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models },
+		f.options,
+	);
+	assert.equal(recovered.status, "recovered");
+	assert.deepEqual(recovered.tickets, ["1"]);
+	assert.deepEqual(recovered.helper, first.helper);
+	assert.equal(selections, 0);
+	assert.equal(
+		intakeCommand("tick", f.cwd, { models: f.models }, f.options).status,
+		"replayed",
+	);
+	assert.equal(selections, 0);
+});
+test("an admitted policy fails closed when its batch disappears or changes identity", (t) => {
+	const f = fixture(t);
+	const admitted = intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models },
+		f.options,
+	);
+	update(admitted.batchFile, (state) => {
+		state.ticketOrder = ["9"];
+	});
+	assert.throws(
+		() => intakeCommand("tick", f.cwd, { models: f.models }, f.options),
+		/differs from the recorded admission/,
+	);
+	rmSync(admitted.batchFile);
+	assert.throws(
+		() => intakeCommand("tick", f.cwd, { models: f.models }, f.options),
+		/admitted intake batch is missing/,
+	);
 });
 test("shared lock blocks both intake and reserve; malformed policy fails closed", (t) => {
 	const f = fixture(t),
