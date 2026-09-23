@@ -53,7 +53,8 @@ intake helper and checkout, and instruct the run to:
    its paused state, cron, and timezone with the policy and report any difference,
    missing schedule, or ID/name mismatch. A paused schedule with a false
    `policy.paused` value is still paused; never resume it merely because policy
-   says enabled.
+   says enabled. If the two pause states disagree, stop before `tick` and ask the
+   user which state to keep; do not infer consent to resume from a routine run.
    If policy is paused and the schedule is running, pause the schedule and report
    the drift. Resolve a missing or mismatched schedule before new admission;
    preserve explicit user pauses. Do not claim the controller is enabled without
