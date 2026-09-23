@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.3.2 - 2026-09-21
+## 0.3.3 - 2026-09-23
+
+- #31: fix: use full access for controller schedules
 
 - #27: Fix intake exclusion for generic PR references
 
