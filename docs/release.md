@@ -17,6 +17,15 @@
    package's README).
 7. Publish only packages whose tests and documentation describe their current behavior.
 
+If `Prepare release` fails while rebasing an existing `release/next` candidate,
+review the failed run and confirm the candidate branch and pull request are still
+open. Once the workflow fix is on `main`, use a newly merged PR with exactly one
+release label to trigger preparation again. Do not rerun the old workflow run:
+GitHub reruns it with the original event's commit, ref, and workflow version.
+Review the updated candidate diff and changelog before merging the release PR;
+do not hand-edit package versions to recover it. See GitHub's
+[rerun documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
+
 No release should include runtime artifacts, credentials, generated images, models, provider transcripts, or local state.
 
 ## Consuming-repo version tracking
