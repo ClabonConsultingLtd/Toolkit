@@ -36,7 +36,7 @@ not already authorized implementation or the shared execution limit.
 Ensure exactly one Paseo schedule named `ticket-intake:<owner/repo>`; list existing
 schedules before creating to recover interrupted configuration. Set hourly cron
 `0 * * * *`, UTC, stable checkout cwd, local isolation, and the initiating Codex
-model; use Auto-review permissions. Register its ID with `intake ... schedule`
+model; use `full-access` (`danger-full-access`) permissions. Register its ID with `intake ... schedule`
 (request `{"scheduleId":"..."}`). Preserve explicit user cadence/timezone if
 provided; the hourly tick deduplication key itself uses UTC.
 
