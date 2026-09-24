@@ -261,6 +261,130 @@ test("reconfigure preserves a chosen schedule cadence", (t) => {
 		/cron must be a nonempty string/,
 	);
 });
+test("tracked repository config updates capacity and exclusions without resetting runtime state", (t) => {
+	const f = fixture(t);
+	const configPath = join(f.cwd, "toolkit-intake.json");
+	const tracked = {
+		version: 1,
+		...f.input,
+		count: 2,
+		cron: "0 * * * *",
+		timezone: "Europe/London",
+		excludeTickets: [1],
+	};
+	writeFileSync(configPath, JSON.stringify(tracked));
+	intakeCommand("schedule", f.cwd, { scheduleId: "existing-schedule" });
+	intakeCommand("pause", f.cwd, { reason: "user request" });
+	const synced = intakeCommand("sync-config", f.cwd);
+	assert.equal(synced.count, 2);
+	assert.equal(synced.cron, tracked.cron);
+	assert.equal(synced.timezone, tracked.timezone);
+	assert.deepEqual(synced.excludeTickets, ["1"]);
+	assert.equal(synced.scheduleId, "existing-schedule");
+	assert.equal(synced.paused, true);
+	assert.equal(synced.pauseReason, "user request");
+	intakeCommand("resume", f.cwd);
+	const first = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	assert.deepEqual(first.tickets, ["2", "3"]);
+	tracked.count = 3;
+	tracked.excludeTickets = [1, 4];
+	writeFileSync(configPath, JSON.stringify(tracked));
+	const next = intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models },
+		{ ...f.options, now: f.options.now + 3600000 },
+	);
+	assert.equal(next.status, "admitted");
+	assert.deepEqual(next.tickets, ["5"]);
+	assert.equal(intakeCommand("status", f.cwd).count, 3);
+	assert.equal(
+		intakeCommand("status", f.cwd).repositoryConfig,
+		"toolkit-intake.json",
+	);
+	assert.throws(
+		() => intakeCommand("configure", f.cwd, f.input),
+		/toolkit-intake.json is authoritative/,
+	);
+});
+test("tracked config can initialize a new repository without a request file", (t) => {
+	const cwd = mkdtempSync(join(tmpdir(), "intake-config-"));
+	t.after(() => rmSync(cwd, { recursive: true, force: true }));
+	writeFileSync(
+		join(cwd, "toolkit-intake.json"),
+		JSON.stringify({
+			version: 1,
+			repository: "example/another-repo",
+			baseBranch: "develop",
+			codexModel: "gpt-6-sol",
+			count: 4,
+		}),
+	);
+	const policy = intakeCommand("configure", cwd);
+	assert.equal(policy.repository, "example/another-repo");
+	assert.equal(policy.baseBranch, "develop");
+	assert.equal(policy.count, 4);
+	assert.equal(policy.scheduleId, null);
+	assert.equal(policy.paused, false);
+});
+test("request-based exclusions require canonical issue numbers", (t) => {
+	const f = fixture(t);
+	assert.throws(
+		() =>
+			intakeCommand("configure", f.cwd, {
+				...f.input,
+				excludeTickets: "1",
+			}),
+		/excludeTickets must contain issue numbers/,
+	);
+	assert.throws(
+		() =>
+			intakeCommand(
+				"tick",
+				f.cwd,
+				{ models: f.models, excludeTickets: ["01"] },
+				f.options,
+			),
+		/excludeTickets must contain issue numbers/,
+	);
+});
+test("invalid tracked config and unsafe limit decreases fail without changing policy", (t) => {
+	const f = fixture(t);
+	const configPath = join(f.cwd, "toolkit-intake.json");
+	const tracked = { version: 1, ...f.input, count: 2 };
+	writeFileSync(configPath, JSON.stringify({ ...tracked, unexpected: true }));
+	assert.throws(
+		() => intakeCommand("sync-config", f.cwd),
+		/unknown field unexpected/,
+	);
+	assert.equal(intakeCommand("pause", f.cwd).paused, true);
+	assert.equal(intakeCommand("resume", f.cwd).paused, false);
+	assert.equal(
+		JSON.parse(
+			readFileSync(
+				intakePath(join(f.cwd, ".toolkit/orchestration/intake-anchor.json")),
+				"utf8",
+			),
+		).count,
+		3,
+	);
+	writeFileSync(configPath, JSON.stringify(tracked));
+	const batch = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	update(batch.batchFile, (state) => {
+		for (const ticket of Object.values(state.tickets))
+			ticket.status = "implementing";
+	});
+	tracked.count = 1;
+	writeFileSync(configPath, JSON.stringify(tracked));
+	assert.throws(
+		() => intakeCommand("sync-config", f.cwd),
+		/below current active work/,
+	);
+	assert.equal(
+		JSON.parse(readFileSync(intakePath(batch.batchFile), "utf8")).count,
+		2,
+	);
+});
 test("capacity-full tick can retry after a slot frees within the hour", (t) => {
 	const f = fixture(t);
 	intakeCommand("configure", f.cwd, { ...f.input, count: 1 });

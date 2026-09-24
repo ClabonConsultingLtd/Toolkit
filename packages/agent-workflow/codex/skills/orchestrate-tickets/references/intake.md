@@ -1,7 +1,8 @@
 # Hourly intake with a shared execution limit
 
-Use when the user asks to select more eligible work every hour. Ask for N if not
-specified. N is both the maximum new selections per hourly tick and the maximum
+Use when the user asks to select more eligible work every hour. Read N from the
+repository's tracked `toolkit-intake.json` when present; otherwise ask for N if
+not specified. N is both the maximum new selections per hourly tick and the maximum
 managed tickets in active implementation/review across this repository's batches.
 Awaiting-merge PRs do not consume active slots. Uncertain launches and workers
 waiting for permission do. Queued tickets reserve admission capacity so a delayed
@@ -15,7 +16,14 @@ This is a local shared limit for managed tickets, not a distributed worker quota
 
 ## Configure once
 
-Run `node <skill>/scripts/intake.mjs configure CHECKOUT request.json` with:
+For a tracked, reviewable repository configuration, commit `toolkit-intake.json`
+at the checkout root (see `examples/toolkit-intake.json`). It supports `version: 1`,
+`repository`, `baseBranch`, `codexModel`, `count`, and optional `cron`, `timezone`,
+and `excludeTickets` issue numbers. Set `count` to the desired shared cap. Do not
+put pause state, schedule IDs, paths, or tick history in this file. Run
+`node <skill>/scripts/intake.mjs configure CHECKOUT` to initialize the local
+runtime policy from it. Existing repositories without the tracked file can keep
+using `node <skill>/scripts/intake.mjs configure CHECKOUT request.json` with:
 
 ```json
 {
@@ -28,8 +36,15 @@ Run `node <skill>/scripts/intake.mjs configure CHECKOUT request.json` with:
 }
 ```
 
-Discover repository/base/model normally. The helper stores policy under
+Discover repository/base/model normally. The helper stores runtime policy under
 `.toolkit/orchestration/.intake/policy.json`, separate from batch reports.
+When a tracked config exists, it is authoritative over those stable policy
+fields. `sync-config` applies edits under the shared lock, preserving pause state,
+schedule ID, and last tick; `tick` also syncs it before admission. Invalid config
+or a reduction below active work stops the tick without overwriting the policy.
+The saved `excludeTickets` are always passed to selection, alongside any dynamic
+exclusions in the tick request. A hard-coded N in a schedule prompt can become
+stale; instruct the controller to read the saved policy instead.
 It refuses a limit below current active work; let that work finish before lowering
 N. Choose `cron` and `timezone` with the user; these fields default to every 30
 minutes from 08:00 through 19:30 UTC when omitted. Reconfiguring without them
@@ -54,14 +69,18 @@ schedule's cadence implicitly.
 Its prompt must include the absolute paths to this skill, this reference, the
 intake helper and checkout, and instruct the run to:
 
-1. Read saved policy and fetch the current Paseo schedule by saved ID. Compare
-   its paused state, cron, and timezone with the policy and report any difference,
+1. If `toolkit-intake.json` exists, run `sync-config` before reading policy;
+   stop on invalid settings or a limit below active work. Then read saved policy
+   and fetch the current Paseo schedule by saved ID. Compare
+   its paused state, cron, timezone, and model with the policy and report any difference,
    missing schedule, or ID/name mismatch. A paused schedule with a false
    `policy.paused` value is still paused; never resume it merely because policy
    says enabled. If the two pause states disagree, stop before `tick` and ask the
    user which state to keep; do not infer consent to resume from a routine run.
    If policy is paused and the schedule is running, pause the schedule and report
-   the drift. Resolve a missing or mismatched schedule before new admission;
+   the drift. For a committed cadence or model change, explicitly update the
+   Paseo schedule to match the tracked config before admission; never change its
+   paused state as a side effect. Resolve a missing or mismatched schedule before new admission;
    preserve explicit user pauses. Do not claim the controller is enabled without
    checking both states, including after a zero-selection run. Then read all
    existing batches. Reconcile worker/PR progress using normal orchestration
@@ -116,8 +135,11 @@ Do not pause it just because an individual ticket requires human input.
 
 `node <skill>/scripts/intake.mjs COMMAND CHECKOUT [request.json|-]`
 
-- `configure`: required repository, baseBranch, codexModel, count; optional cron
-  and timezone. Persist the chosen cadence across later configurations.
+- `configure`: when `toolkit-intake.json` exists, use it with no request. Otherwise
+  pass a request with repository, baseBranch, codexModel, count and optional cron,
+  timezone, and excludeTickets. Persist the chosen cadence across later configurations.
+- `sync-config`: apply the tracked file to runtime policy, retaining schedule ID,
+  pause state, and last tick. Requires `toolkit-intake.json`.
 - `status`: read-only policy, including schedule ID and last hourly result.
 - `schedule`: persist scheduleId; rejects replacement by a different schedule.
 - `tick`: current models array and optional excludeTickets; admits at most once
