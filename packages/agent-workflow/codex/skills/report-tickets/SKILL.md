@@ -13,7 +13,7 @@ Run the helper at this skill's `scripts/digest.mjs` (installed by symlink to its
 
 This skill only reads. It never writes to `orchestrate-tickets`'s batch state file, never creates a Paseo worktree, and never launches a worker. Real-time blocker/permission surfacing stays inside `orchestrate-tickets`, immediate rather than batched here.
 
-It runs on its own repo-wide schedule, independent of both `orchestrate-tickets`'s hourly reconciliation and any triage schedule. One run sweeps every batch state file under `<checkout>/.toolkit/orchestration/`, not one schedule per batch.
+It runs on its own repo-wide schedule, independent of both `orchestrate-tickets`'s half-hourly reconciliation and any triage schedule. One run sweeps every batch state file under `<checkout>/.toolkit/orchestration/`, not one schedule per batch.
 
 ## Gather inputs
 
@@ -33,6 +33,6 @@ This skill produces content only. Delivery (Slack, email, push notification, or 
 
 ## Schedule
 
-Ensure exactly one schedule per repository, distinct from `orchestrate-tickets`'s and any triage schedule. Use `list_schedules` to recover a previously created one before creating a new one. Default cadence `cron: "30 8 * * *"`, `timezone: "UTC"`; a repo may override this cadence. Use `isolation: "local"` and the stable checkout as `cwd`. The schedule prompt must name this skill's absolute SKILL.md path and the absolute checkout path, and instruct: sweep every batch state file under `.toolkit/orchestration/`, gather Paseo agent activity for referenced agents, run the helper, and never mutate `orchestrate-tickets` state.
+Ensure exactly one schedule per repository, distinct from `orchestrate-tickets`'s and any triage schedule. Use `list_schedules` to recover a previously created one before creating a new one. Default cadence `cron: "*/30 8-19 * * *"`, `timezone: "UTC"`; a repo may override this cadence. Use `isolation: "local"`, the stable checkout as `cwd`, `provider: "codex/gpt-6-sol"`, and `thinkingOptionId: "medium"`. Pass `--provider codex/gpt-6-sol --thinking medium` to `paseo schedule create` so the effort is explicit. Inspect the new schedule to confirm its model and thinking option. Keep a recovered schedule's settings unless the user explicitly requests a change. The schedule prompt must name this skill's absolute SKILL.md path and the absolute checkout path, and instruct: sweep every batch state file under `.toolkit/orchestration/`, gather Paseo agent activity for referenced agents, run the helper, and never mutate `orchestrate-tickets` state.
 
 Finish by reporting the digest's summary counts and a link to the written Markdown file, not by pasting the full table unless asked.

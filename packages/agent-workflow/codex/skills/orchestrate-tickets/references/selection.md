@@ -55,7 +55,7 @@ schedule and explain why. If fewer than N qualify, run that smaller fixed batch;
 do not wait for future issues to fill the original count.
 
 For a nonempty batch, continue the normal acquire/sync/dispatch/review workflow,
-and automatically ensure its hourly Paseo schedule as described in SKILL.md.
+and automatically ensure its half-hourly Paseo schedule as described in SKILL.md.
 Its prompt must reference the saved state and resume it, not repeat `init-next`
 or discover replacements. No replenishment after merges, failures or blockers.
 A later explicit next-N request creates a separate batch and excludes tickets

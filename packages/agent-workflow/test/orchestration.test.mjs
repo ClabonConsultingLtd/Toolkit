@@ -88,6 +88,7 @@ test("validates batch identity, ticket uniqueness and concurrency", () => {
 	])
 		assert.throws(() => newBatch({ ...manifest(), ...change }));
 	assert.equal(newBatch(manifest()).concurrency, 3);
+	assert.equal(newBatch(manifest()).cron, "*/30 8-19 * * *");
 });
 test("renewable lease fences previous owner after expiry", () => {
 	const s = newBatch(manifest()),
