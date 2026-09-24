@@ -11,3 +11,9 @@ Default canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `read
 ### Domain docs
 
 Multi-context: a root `CONTEXT-MAP.md` points to a `CONTEXT.md` per package under `packages/*`. See `docs/agents/domain.md`.
+
+### Context use
+
+Follow [`packages/claude-token-optimisation/CONTEXT-POLICY.md`](packages/claude-token-optimisation/CONTEXT-POLICY.md)
+for targeted reads and command output. Its read and output rules apply to Codex;
+the Claude hook scripts remain Claude-specific.
