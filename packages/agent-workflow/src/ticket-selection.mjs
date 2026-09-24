@@ -136,6 +136,15 @@ export function selectNext(file, input, api) {
 				reason = "conflicting status label";
 			else if (issue.assignees?.length) reason = "already assigned";
 			else {
+				const children = api.subTickets(number);
+				if (children.length) {
+					skipped.push({
+						number,
+						reason: "parent spec with sub-tickets",
+						subTickets: children,
+					});
+					continue;
+				}
 				const pending = [];
 				for (const dependency of issue.dependencies) {
 					if (!cache.has(dependency))
