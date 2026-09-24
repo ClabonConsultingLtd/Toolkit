@@ -12,8 +12,12 @@ import { dirname, join } from "node:path";
 import { issueNumber, newBatch } from "./orchestration.mjs";
 import {
 	normalizeClaudeModels,
-	resolveRuntime,
+	resolveWorkerRuntime,
 } from "./orchestration-github.mjs";
+import {
+	normalizeCodexModels,
+	readClaudeCooldown,
+} from "./provider-fallback.mjs";
 
 const SELECTION_LOCK_TTL_MS = 30 * 60_000;
 
@@ -145,7 +149,12 @@ export function selectNext(file, input, api) {
 	// A malformed live catalog is an invocation error, not evidence that every
 	// ready ticket's recommendation is unsupported. Validate before GitHub reads
 	// or an intake tick can persist an incorrect empty result.
-	const models = normalizeClaudeModels(input.models);
+	const evaluatedAt = Date.now();
+	const cooldown = readClaudeCooldown(input.fallbackStatePath, evaluatedAt);
+	const models = cooldown.active
+		? input.models
+		: normalizeClaudeModels(input.models);
+	if (cooldown.active) normalizeCodexModels(input.codexModels);
 	if (
 		input.excludeTickets !== undefined &&
 		!Array.isArray(input.excludeTickets)
@@ -231,7 +240,11 @@ export function selectNext(file, input, api) {
 						continue;
 					}
 					try {
-						resolveRuntime(issue.recommendation, models);
+						resolveWorkerRuntime(
+							issue.recommendation,
+							{ models, codexModels: input.codexModels },
+							{ statePath: input.fallbackStatePath, now: evaluatedAt },
+						);
 					} catch (error) {
 						reason = error.message;
 					}

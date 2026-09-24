@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { blockers, issueNumber } from "./orchestration.mjs";
+import {
+	readClaudeCooldown,
+	resolveCodexFallback,
+} from "./provider-fallback.mjs";
 
 export function helperIdentity() {
 	const source = fileURLToPath(import.meta.url);
@@ -496,4 +500,11 @@ export function resolveRuntime(rec, models) {
 			`unsupported Claude recommendation: ${rec.model} / ${rec.effort}`,
 		);
 	return { provider: `claude/${model.id}`, thinkingOptionId: rec.effort };
+}
+
+export function resolveWorkerRuntime(rec, input, options = {}) {
+	const cooldown = readClaudeCooldown(options.statePath, options.now);
+	return cooldown.active
+		? resolveCodexFallback(rec, input.codexModels)
+		: resolveRuntime(rec, input.models);
 }
