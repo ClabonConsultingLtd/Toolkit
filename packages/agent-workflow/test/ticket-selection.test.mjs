@@ -5,6 +5,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	rmSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,7 +13,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { execute } from "../src/orchestration-cli.mjs";
 import { github } from "../src/orchestration-github.mjs";
-import { selectNext } from "../src/ticket-selection.mjs";
+import { selectNext, withSelectionLock } from "../src/ticket-selection.mjs";
 
 function fixture(t) {
 	const dir = mkdtempSync(join(tmpdir(), "ticket-selection-"));
@@ -70,7 +71,27 @@ test("accepts Paseo thinking option IDs without rejecting eligible tickets", (t)
 	}));
 	assert.deepEqual(selectNext(f.path, f.input, f.api).tickets, ["1", "2"]);
 });
-test("rejects a malformed model catalog before reading tickets", (t) => {
+test("accepts the Paseo CLI catalog shape whose thinkingOptions is a display string", (t) => {
+	const f = fixture(t);
+	f.input.models = [
+		{
+			id: "claude-sonnet-5",
+			label: "Sonnet 5",
+			thinkingOptionIds: ["low", "medium", "high"],
+			thinkingOptions: "low, medium, high",
+		},
+	];
+	assert.deepEqual(selectNext(f.path, f.input, f.api).tickets, ["1", "2"]);
+});
+test("ignores catalog entries with no effort metadata instead of rejecting the catalog", (t) => {
+	const f = fixture(t);
+	f.input.models.push(
+		{ id: "claude-haiku-4-5", label: "Haiku 4.5" },
+		{ id: "sonnet", label: "Sonnet" },
+	);
+	assert.deepEqual(selectNext(f.path, f.input, f.api).tickets, ["1", "2"]);
+});
+test("rejects a model catalog with no usable effort metadata before reading tickets", (t) => {
 	const f = fixture(t);
 	f.input.models = [{ id: "claude-sonnet-5", label: "Sonnet 5" }];
 	f.api.listReady = () => {
@@ -78,7 +99,95 @@ test("rejects a malformed model catalog before reading tickets", (t) => {
 	};
 	assert.throws(
 		() => selectNext(f.path, f.input, f.api),
-		/invalid Paseo Claude model catalog: models\[0\].thinkingOptions/,
+		/invalid Paseo Claude model catalog: no model advertises thinkingOptions/,
+	);
+});
+test("rejects a display-string catalog entry with no thinkingOptionIds", (t) => {
+	const f = fixture(t);
+	f.input.models.push({ id: "claude-opus-5", thinkingOptions: "low, high" });
+	assert.throws(
+		() => selectNext(f.path, f.input, f.api),
+		/invalid Paseo Claude model catalog: models\[1\].thinkingOptions/,
+	);
+});
+test("selection lock is released after the action, even when it throws", (t) => {
+	const f = fixture(t);
+	assert.throws(
+		() =>
+			withSelectionLock(f.path, () => {
+				throw new Error("boom");
+			}),
+		/boom/,
+	);
+	assert.equal(existsSync(join(f.dir, ".selection.lock")), false);
+});
+test("selection lock refuses a lock held by a live process on this host", (t) => {
+	const f = fixture(t),
+		lock = join(f.dir, ".selection.lock");
+	mkdirSync(lock);
+	writeFileSync(
+		join(lock, "owner.json"),
+		JSON.stringify({ host: "h", pid: 42, startedAt: 1_000 }),
+	);
+	assert.throws(
+		() =>
+			withSelectionLock(f.path, () => "ran", {
+				host: "h",
+				now: 2_000,
+				alive: () => true,
+			}),
+		/another batch selection is in progress/,
+	);
+	assert.equal(existsSync(lock), true);
+});
+test("selection lock reclaims a lock whose owner process has exited", (t) => {
+	const f = fixture(t),
+		lock = join(f.dir, ".selection.lock");
+	mkdirSync(lock);
+	writeFileSync(
+		join(lock, "owner.json"),
+		JSON.stringify({ host: "h", pid: 42, startedAt: 1_000 }),
+	);
+	const result = withSelectionLock(f.path, () => "ran", {
+		host: "h",
+		now: 2_000,
+		alive: (pid) => pid !== 42,
+	});
+	assert.equal(result, "ran");
+	assert.equal(existsSync(lock), false);
+});
+test("selection lock does not trust PID liveness from another host until the TTL", (t) => {
+	const f = fixture(t),
+		lock = join(f.dir, ".selection.lock");
+	mkdirSync(lock);
+	writeFileSync(
+		join(lock, "owner.json"),
+		JSON.stringify({ host: "other", pid: 42, startedAt: 1_000 }),
+	);
+	const options = { host: "h", ttlMs: 10_000, alive: () => false };
+	assert.throws(
+		() => withSelectionLock(f.path, () => "ran", { ...options, now: 5_000 }),
+		/another batch selection is in progress/,
+	);
+	assert.equal(
+		withSelectionLock(f.path, () => "ran", { ...options, now: 11_000 }),
+		"ran",
+	);
+});
+test("selection lock reclaims a legacy ownerless lock by age only", (t) => {
+	const f = fixture(t),
+		lock = join(f.dir, ".selection.lock");
+	mkdirSync(lock);
+	const options = { ttlMs: 10_000, alive: () => false };
+	assert.throws(
+		() => withSelectionLock(f.path, () => "ran", options),
+		/another batch selection is in progress/,
+	);
+	const old = new Date(Date.now() - 60_000);
+	utimesSync(lock, old, old);
+	assert.equal(
+		withSelectionLock(f.path, () => "ran", options),
+		"ran",
 	);
 });
 test("eligibility excludes assigned, conflicting labels, open blockers, PRs and unsupported models", (t) => {

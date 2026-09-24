@@ -100,8 +100,10 @@ intake helper and checkout, and instruct the run to:
 2. Discover current Claude models and active work. Pass the raw `models` array
    from Paseo `list_models({provider: "claude"})`, preserving each model's
    `thinkingOptions: [{id, ...}]`. The helper also accepts a validated
-   `thinkingOptionIds: ["high", ...]` array, but never synthesize unsupported
-   options.
+   `thinkingOptionIds: ["high", ...]` array (the `paseo provider models --json`
+   shape, whose `thinkingOptions` is a display string), and treats entries with
+   neither field as unselectable rather than rejecting the catalog. Never
+   synthesize unsupported options.
    If the schedule prompt authorizes implementation-metadata repair, run a
    read-only `select-next` preview with the valid catalog. For an issue skipped
    solely because its recommendation is absent, malformed or unsupported,
