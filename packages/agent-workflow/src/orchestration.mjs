@@ -42,7 +42,7 @@ export function newBatch(input) {
 		concurrency,
 		scheduleId: null,
 		scheduleName: `tickets:${input.repository}:${input.batchId}`,
-		cron: "0 * * * *",
+		cron: "*/30 8-19 * * *",
 		timezone: "UTC",
 		lease: null,
 		tickets: Object.fromEntries(

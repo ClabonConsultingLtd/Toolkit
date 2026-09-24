@@ -1,6 +1,6 @@
 ---
 name: triage-tickets
-description: Sweep a GitHub repo's unlabeled, needs-triage, and stale needs-info issues through the mattpocock /triage state machine on an independent daily schedule, applying only mechanically safe outcomes and recommending the rest. Never launches implementation and never grills; that stays orchestrate-tickets's and a human's job respectively.
+description: Sweep a GitHub repo's unlabeled, needs-triage, and stale needs-info issues through the mattpocock /triage state machine on an independent schedule, applying only mechanically safe outcomes and recommending the rest. Never launches implementation and never grills; that stays orchestrate-tickets's and a human's job respectively.
 ---
 
 # Triage tickets
@@ -122,10 +122,14 @@ After the first successful run, ensure exactly one Paseo schedule for a
 `triage:<repository>` schedule name. Use `list_schedules` to recover a
 previously created schedule before creating one — mirror
 `orchestrate-tickets`'s recovery pattern exactly. With no existing schedule,
-call `create_schedule` with `cron: "0 8 * * *"`, `timezone: "UTC"` (both
+create a Paseo schedule with `cron: "*/30 8-19 * * *"`, `timezone: "UTC"` (both
 overridable per repo the same way `orchestrate-tickets`'s cron is
-adjustable), the stable checkout as `cwd`, `isolation: "local"`, and this
-session's Codex `provider`.
+adjustable), the stable checkout as `cwd`, `isolation: "local"`,
+`provider: "codex/gpt-6-sol"`, and `thinkingOptionId: "medium"`. Pass
+`--provider codex/gpt-6-sol --thinking medium` to `paseo schedule create` so the
+effort is explicit. Inspect the new schedule to confirm its model and thinking
+option. Keep a recovered schedule's settings unless the user explicitly requests
+a change.
 
 The schedule prompt must name this skill's absolute `SKILL.md` path and the
 absolute stable checkout path, and instruct: acquire the lock, run one full

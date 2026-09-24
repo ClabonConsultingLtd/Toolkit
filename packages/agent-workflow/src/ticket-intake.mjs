@@ -116,7 +116,7 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				baseBranch: input.baseBranch,
 				codexModel: input.codexModel,
 				count: input.count,
-				cron: input.cron ?? policy?.cron ?? "0 * * * *",
+				cron: input.cron ?? policy?.cron ?? "*/30 8-19 * * *",
 				timezone: input.timezone ?? policy?.timezone ?? "UTC",
 				scheduleName: `ticket-intake:${input.repository}`,
 				scheduleId: policy?.scheduleId ?? null,

@@ -156,8 +156,11 @@ the skill's `references/protocol.md`. Commands use JSON request files or stdin;
 Paseo tool calls remain the Codex skill's responsibility.
 
 Defaults: three isolated Claude worktrees, Auto permission mode, two review/fix
-cycles per ticket, and hourly UTC Codex reconciliation. You merge PRs. Only a
-verified merged PR lets orchestration replace `ready-for-agent` with `done` and
+cycles per ticket, and Codex reconciliation every 30 minutes from 08:00 through
+19:30 UTC. New Paseo schedules for orchestration, intake, triage, and reporting
+use `codex/gpt-6-sol` with medium reasoning. Existing schedules retain their
+settings until explicitly changed. You merge PRs. Only a verified merged PR lets
+orchestration replace `ready-for-agent` with `done` and
 close the issue. Closed issues without a linked merged PR need reconciliation;
 readiness labels do not make a closed issue launchable. Independent work continues
 while PRs await your merge. Schedules pause on completion or when only human
@@ -175,7 +178,7 @@ available; this is not a hosted queue or an automatic merge service.
 `codex/skills/triage-tickets` is the lighter, independent counterpart that sweeps
 unlabeled, `needs-triage`, and stale-`needs-info` issues into that state to begin
 with, applying the interactive mattpocock `triage` skill's judgment. It runs on
-its own schedule (default daily, `0 8 * * *` UTC), against the same persistent
+its own schedule (default `*/30 8-19 * * *` UTC), against the same persistent
 checkout, and never opens a Paseo worktree or launches an implementation agent —
 that boundary stays `orchestrate-tickets`'s job once an issue reaches
 `ready-for-agent`. Install it the same way:
@@ -215,7 +218,7 @@ ticket compared against the ticket's own `**Claude:** \`Model / effort\``
 recommendation, and any ticket stuck longer than a configurable hour
 threshold (default 24h). It never mutates `orchestrate-tickets`'s batch
 state, creates a worktree, or launches a worker, and it runs on its own
-schedule (default daily, `30 8 * * *` UTC), independent of both
+schedule (default `*/30 8-19 * * *` UTC), independent of both
 `orchestrate-tickets` and `triage-tickets`. Install it the same way:
 
 ```bash
@@ -250,7 +253,8 @@ issues, oldest first, with completed blockers and supported Claude recommendatio
 It skips tickets in existing batches, known active work, conflicting status labels,
 parent specs that have been split into sub-tickets (native sub-issues or a
 `## Parent` reference from another issue), and issues with open or merged
-same-repository implementation PRs on a matching ticket branch. It then starts the usual workers and hourly reconciliation schedule.
+same-repository implementation PRs on a matching ticket branch. It then starts
+the usual workers and a half-hourly reconciliation schedule.
 N is the batch size; at most three workers run at once. No new tickets are added
 as the batch finishes. If none qualify, no schedule is created; a smaller
 eligible set runs with its shortfall reported.
@@ -276,9 +280,10 @@ and permission-waiting workers do. Queued work reserves admission capacity. Work
 reservations and resumptions enforce the shared cap, so overlapping batch schedules
 cannot exceed it. Existing per-batch concurrency still caps each batch at three.
 
-The intake schedule may use hourly UTC or a deliberately chosen cron and timezone.
-Runs between UTC hour boundaries can reconcile existing work and retry a zero-admission
-evaluation after readiness or capacity changes. Once a batch is admitted, later
+The intake schedule defaults to every 30 minutes from 08:00 through 19:30 UTC,
+or it may use a deliberately chosen cron and timezone. Runs between UTC hour
+boundaries can reconcile existing work and retry a zero-admission evaluation
+after readiness or capacity changes. Once a batch is admitted, later
 ticks in that UTC hour replay it without adding tickets. Reconfiguration preserves
 the saved schedule cadence unless a new one is supplied. Compare the saved policy
 with the live Paseo schedule before describing it as enabled; preserve user pauses.
