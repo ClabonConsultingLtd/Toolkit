@@ -248,8 +248,9 @@ Use $orchestrate-tickets to schedule the next 5 eligible tickets in this project
 The skill selects a **fixed batch of up to N** open, unassigned `ready-for-agent`
 issues, oldest first, with completed blockers and supported Claude recommendations.
 It skips tickets in existing batches, known active work, conflicting status labels,
-and issues with open or merged same-repository implementation PRs on a matching
-ticket branch. It then starts the usual workers and hourly reconciliation schedule.
+parent specs that have been split into sub-tickets (native sub-issues or a
+`## Parent` reference from another issue), and issues with open or merged
+same-repository implementation PRs on a matching ticket branch. It then starts the usual workers and hourly reconciliation schedule.
 N is the batch size; at most three workers run at once. No new tickets are added
 as the batch finishes. If none qualify, no schedule is created; a smaller
 eligible set runs with its shortfall reported.
