@@ -19,7 +19,10 @@ This is a local shared limit for managed tickets, not a distributed worker quota
 For a tracked, reviewable repository configuration, commit `toolkit-intake.json`
 at the checkout root (see `examples/toolkit-intake.json`). It supports `version: 1`,
 `repository`, `baseBranch`, `codexModel`, `count`, and optional `cron`, `timezone`,
-and `excludeTickets` issue numbers. Set `count` to the desired shared cap. Do not
+`excludeTickets` issue numbers, and `requiredChecks` check-run names or status
+contexts. Set `count` to the desired shared cap. List every check that must run
+before a controller merge; a missing check blocks it. An empty list explicitly
+requires none, while every reported pending or failing check still blocks it. Do not
 put pause state, schedule IDs, paths, or tick history in this file. Run
 `node <skill>/scripts/intake.mjs configure CHECKOUT` to initialize the local
 runtime policy from it. Existing repositories without the tracked file can keep
@@ -85,8 +88,13 @@ intake helper and checkout, and instruct the run to:
    checking both states, including after a zero-selection run. Then read all
    existing batches. Reconcile worker/PR progress using normal orchestration
    leases; skip a batch owned by another run. Review completed workers and PRs
-   before new admission. Where the user has explicitly authorized automated
-   merging, merge qualifying reviewed PRs, then `sync` their exact batches so
+   before new admission. Where the user has explicitly authorized scheduled Codex approval and
+   merging, submit an approval review when GitHub permits it. Then run
+   `orchestrate merge-ready STATE.json` with the ticket number and current lease
+   token immediately before each merge. Merge only when it returns `mergeReady: true`,
+   using the returned head SHA as the merge command's head match. Leave PRs awaiting
+   merge when the controller cannot approve its own PR or branch protection requires
+   another reviewer. Then `sync` their exact batches so
    verified merges close their issues and release dependencies. Otherwise only
    reconcile PRs already merged outside the controller. Renew each held lease at
    least every five minutes during long reviews or tests and immediately before
@@ -94,11 +102,17 @@ intake helper and checkout, and instruct the run to:
    report a failed release rather than claiming success. Resume queued work in
    older batches first. Stop launching if the shared cap rejects a reservation.
    Never mark a capacity wait as a human blocker.
-2. Discover current Claude models and active work. Pass the raw `models` array
+2. Check shared `claude-cooldown`, then discover current Claude models and active work. Pass the raw `models` array
    from Paseo `list_models({provider: "claude"})`, preserving each model's
    `thinkingOptions: [{id, ...}]`. The helper also accepts a validated
-   `thinkingOptionIds: ["high", ...]` array, but never synthesize unsupported
-   options.
+   `thinkingOptionIds: ["high", ...]` array (the `paseo provider models --json`
+   shape, whose `thinkingOptions` is a display string), and treats entries with
+   neither field as unselectable rather than rejecting the catalog. Never
+   synthesize unsupported options. During an active cooldown, also pass the raw `codexModels` array
+   from Paseo `list_models({provider: "codex"})`. If a Claude worker fails with
+   an explicit usage-limit error during reconciliation or creation, record that
+   error with `record-claude-limit` before launching another worker. The next
+   reservation will use Codex; leave the failed worker blocked for reconciliation.
    If the schedule prompt authorizes implementation-metadata repair, run a
    read-only `select-next` preview with the valid catalog. For an issue skipped
    solely because its recommendation is absent, malformed or unsupported,
@@ -106,6 +120,7 @@ intake helper and checkout, and instruct the run to:
    its existing requirements and a supported model/effort. Leave issues needing
    a product decision unchanged and report them. Never edit a ticket to
    compensate for a malformed catalog. Then run `intake ... tick` with `models`
+   and `codexModels` during a cooldown,
    and optional `excludeTickets` for work outside saved batches. This
    atomically admits up to `min(N, available capacity)` eligible tickets using the
    same readiness/dependency/model/PR exclusions as [selection.md](selection.md).
@@ -139,7 +154,8 @@ Do not pause it just because an individual ticket requires human input.
   pass a request with repository, baseBranch, codexModel, count and optional cron,
   timezone, and excludeTickets. Persist the chosen cadence across later configurations.
 - `sync-config`: apply the tracked file to runtime policy, retaining schedule ID,
-  pause state, and last tick. Requires `toolkit-intake.json`.
+  pause state, and last tick. Requires `toolkit-intake.json`. It also copies
+  `requiredChecks`; removing the field removes the saved list.
 - `status`: read-only policy, including schedule ID and last hourly result.
 - `schedule`: persist scheduleId; rejects replacement by a different schedule.
 - `tick`: current models array and optional excludeTickets; admits at most once

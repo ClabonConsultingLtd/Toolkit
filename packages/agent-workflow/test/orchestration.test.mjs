@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -478,6 +484,131 @@ test("CLI does not complete open PR; rejects failing checks and invalidates chan
 	pr.state = "CLOSED";
 	execute("sync", path, { token }, options);
 	assert.match(execute("status", path).tickets[7].reason, /without merge/);
+});
+test("required checks gate ready and controller merge", (t) => {
+	const { path, token } = fixture(t);
+	const pr = pull();
+	const options = {
+		github: () => ({
+			snapshot,
+			pr: () => pr,
+			requiredStatusChecks: () => {
+				throw new Error("HTTP 403");
+			},
+		}),
+	};
+	const policyDir = join(path, "..", ".intake");
+	mkdirSync(policyDir);
+	writeFileSync(
+		join(policyDir, "policy.json"),
+		JSON.stringify({
+			version: 1,
+			count: 2,
+			repository: "example/project",
+			requiredChecks: ["ci", "smoke"],
+		}),
+	);
+	execute("reserve", path, { token, number: 7, models }, options);
+	execute(
+		"attach",
+		path,
+		{ token, number: 7, workspaceId: "w", agentId: "a" },
+		options,
+	);
+	execute("link-pr", path, { token, number: 7, pr: 17 }, options);
+	execute("review", path, { token, number: 7, evidence: "tests" }, options);
+	const ready = () =>
+		execute(
+			"ready",
+			path,
+			{ token, number: 7, evidence: "diff", reviewedHead: "abc" },
+			options,
+		);
+	const pass = (name) => ({ name, status: "COMPLETED", conclusion: "SUCCESS" });
+	pr.statusCheckRollup = [pass("ci")];
+	assert.throws(ready, /missing required checks: smoke/);
+	pr.statusCheckRollup = [pass("ci"), { name: "smoke", status: "IN_PROGRESS" }];
+	assert.throws(ready, /pending or unsuccessful checks: smoke/);
+	pr.statusCheckRollup = [
+		pass("ci"),
+		{ name: "smoke", status: "COMPLETED", conclusion: "FAILURE" },
+	];
+	assert.throws(ready, /unsuccessful checks: smoke/);
+	pr.statusCheckRollup = [
+		pass("ci"),
+		{ context: "smoke", state: "SUCCESS" },
+		{ name: "extra", status: "COMPLETED", conclusion: "FAILURE" },
+	];
+	assert.throws(ready, /unsuccessful checks: extra/);
+	pr.statusCheckRollup = [pass("ci"), { context: "smoke", state: "SUCCESS" }];
+	ready();
+	assert.equal(
+		execute("merge-ready", path, { token, number: 7 }, options).mergeReady,
+		true,
+	);
+	pr.statusCheckRollup.push({
+		name: "extra",
+		status: "COMPLETED",
+		conclusion: "FAILURE",
+	});
+	assert.throws(
+		() => execute("merge-ready", path, { token, number: 7 }, options),
+		/unsuccessful checks: extra/,
+	);
+	pr.statusCheckRollup = [pass("ci")];
+	assert.throws(
+		() => execute("merge-ready", path, { token, number: 7 }, options),
+		/missing required checks: smoke/,
+	);
+});
+test("controller merge fails closed without configured or readable required checks", (t) => {
+	const { path, token } = fixture(t);
+	const pr = pull();
+	const options = {
+		github: () => ({
+			snapshot,
+			pr: () => pr,
+			requiredStatusChecks: () => {
+				throw new Error("HTTP 403");
+			},
+		}),
+	};
+	execute("reserve", path, { token, number: 7, models }, options);
+	execute(
+		"attach",
+		path,
+		{ token, number: 7, workspaceId: "w", agentId: "a" },
+		options,
+	);
+	execute("link-pr", path, { token, number: 7, pr: 17 }, options);
+	execute("review", path, { token, number: 7, evidence: "tests" }, options);
+	execute(
+		"ready",
+		path,
+		{ token, number: 7, evidence: "diff", reviewedHead: "abc" },
+		options,
+	);
+	assert.throws(
+		() => execute("merge-ready", path, { token, number: 7 }, options),
+		/required checks not configured/,
+	);
+	assert.equal(execute("status", path).tickets[7].status, "awaiting_merge");
+	options.github = () => ({
+		snapshot,
+		pr: () => pr,
+		requiredStatusChecks: () => ["ci"],
+	});
+	assert.throws(
+		() => execute("merge-ready", path, { token, number: 7 }, options),
+		/missing required checks: ci/,
+	);
+	pr.statusCheckRollup = [
+		{ name: "ci", status: "COMPLETED", conclusion: "SUCCESS" },
+	];
+	assert.equal(
+		execute("merge-ready", path, { token, number: 7 }, options).mergeReady,
+		true,
+	);
 });
 test("abandoned filesystem mutex is never silently stolen", (t) => {
 	const { path } = fixture(t);

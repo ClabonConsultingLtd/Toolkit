@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ACTIVE, atomicWrite } from "./orchestration.mjs";
 
@@ -35,15 +35,22 @@ export function modelsMatch(recommendedModel, actualModel) {
 	const wanted = recommendedModel.toLowerCase();
 	const got = actualModel.toLowerCase();
 	if (wanted === got) return true;
-	return FAMILIES.includes(wanted) && new RegExp(`^claude-${wanted}-[\\d-]+$`).test(got);
+	return (
+		FAMILIES.includes(wanted) &&
+		new RegExp(`^claude-${wanted}-[\\d-]+$`).test(got)
+	);
 }
-export function ticketRecord(ticket, { now, stuckHours, cost, recommendation }) {
+export function ticketRecord(
+	ticket,
+	{ now, stuckHours, cost, recommendation },
+) {
 	const actual = ticket.provider
 		? {
 				model: ticket.provider.replace(/^claude\//, ""),
 				effort: ticket.thinkingOptionId ?? null,
 			}
 		: null;
+	const codexFallback = ticket.provider?.startsWith("codex/") === true;
 	const stuck =
 		ticket.status !== "completed" &&
 		!!ticket.updatedAt &&
@@ -58,12 +65,16 @@ export function ticketRecord(ticket, { now, stuckHours, cost, recommendation }) 
 		turnCost: cost?.turnCost ?? null,
 		recommendation: recommendation ?? null,
 		actual,
+		codexFallback,
 		fixCycleCapped: (ticket.fixCycles ?? 0) >= 2,
 		recommendationMismatch:
 			!!recommendation &&
 			!!actual &&
-			(!modelsMatch(recommendation.model, actual.model) ||
-				recommendation.effort !== actual.effort),
+			(codexFallback
+				? ticket.fallbackFrom?.toLowerCase() !==
+					`${recommendation.model} / ${recommendation.effort}`.toLowerCase()
+				: !modelsMatch(recommendation.model, actual.model) ||
+					recommendation.effort !== actual.effort),
 		anomalous: stuck,
 	};
 }
@@ -143,6 +154,7 @@ export function renderMarkdown(digest) {
 		for (const t of batch.tickets) {
 			const flags = [
 				t.fixCycleCapped ? "fix-cap" : null,
+				t.codexFallback ? "codex-fallback" : null,
 				t.recommendationMismatch ? "model-mismatch" : null,
 				t.anomalous ? "stuck" : null,
 			]

@@ -8,19 +8,22 @@ Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as 
 
 | Command | Request fields beyond token | Result / purpose |
 | --- | --- | --- |
-| select-next | repository, batchId, cwd, baseBranch, codexModel, count, models; optional concurrency, excludeTickets | Read-only next-N eligibility preview; no token required. |
+| select-next | repository, batchId, cwd, baseBranch, codexModel, count, models; optional codexModels, concurrency, excludeTickets | Read-only next-N eligibility preview; no token required. |
 | init-next | Same as select-next | Select under directory lock and initialize one fixed batch; initialized:false if none eligible. |
 | init | repository, batchId, cwd, baseBranch, codexModel, tickets; optional concurrency (1–3) | Create state; refuses overwrite and tickets claimed by another batch in the state directory. tickets are issue numbers or strings. |
 | status | none | Full durable state. |
+| claude-cooldown | none | Read shared Claude cooldown; no lease or initialized batch required. |
+| record-claude-limit | error, failureKey, optional agentId | Record an explicit Claude usage-limit failure once per stable failure identity; no batch lease required. |
 | acquire | none | acquired:false if busy; otherwise token and expiresAt. |
 | renew / release | none | Extend ten-minute lease / release. Release accepts the saved owner's matching token even after expiry, but cannot clear a successor's lease. |
 | sync | none | Reconcile GitHub and return issues, launchable IDs, slots, pauseSchedule. |
-| reserve | number, models (raw Paseo Claude models array with `thinkingOptions`) | Recheck readiness/dependencies, resolve model/effort, persist branch/launchKey and reserve slot. |
+| reserve | number, models (Claude catalog), codexModels (Codex catalog during cooldown) | Recheck readiness/dependencies, resolve provider/model/effort, persist branch/launchKey and reserve slot. |
 | attach | number, workspaceId and/or agentId; workerActive:true for a confirmed externally restarted saved agent | Persist identifiers immediately after each Paseo creation, or restore capacity accounting without leaving blocked. Existing different IDs are rejected. |
 | link-pr | number, pr | Fetch and verify same-repository branch/base before attaching PR. |
 | review | number, evidence | Record completed worker output; begin Codex review. |
 | fix | number, reason | Increment fix count and reserve worker; third request blocks without launching. |
 | ready | number, evidence, reviewedHead | Verify open PR and check results; record awaiting_merge. |
+| merge-ready | number | Recheck the reviewed PR head, draft state, and required checks before an authorized controller merge; returns the head SHA to match during merge. |
 | block | number, reason; workerStopped:true only with evidence of stop | Human blocker; uncertain/running workers still consume a slot. |
 | resume | number, evidence; resetFixCycles:true if explicitly authorized | Recover human blocker; cannot bypass an uncertain launch. |
 | schedule | scheduleId | Persist scheduler identity; refuses replacement. |
@@ -49,6 +52,6 @@ The short-lived `<state>.mutex` directory serializes file transactions. If a pro
 
 Partial completion writes are retry-safe: sync verifies PR merge and current labels/state on every attempt. A previously closed issue that still has ready-for-agent gets repaired after merge. Without a matching merged PR, it is blocked, never launched.
 
-Automatic selection details and invocation examples: [selection.md](selection.md). All batches for a checkout must use the canonical state directory so overlap detection sees them. Initialization is serialized by `.selection.lock`; after a crash, verify no initializer is alive before removing this directory. Preview is read-only and not a reservation: `init-next` rechecks eligibility.
+Automatic selection details and invocation examples: [selection.md](selection.md). All batches for a checkout must use the canonical state directory so overlap detection sees them. Initialization is serialized by `.selection.lock`, which records its owner's host and PID. The helper reclaims it automatically once that owner has exited (same host) or after 30 minutes; do not remove it by hand. Preview is read-only and not a reservation: `init-next` rechecks eligibility.
 
 When an intake policy exists, reserve/resume/fix operations also enforce its repository-wide active-ticket limit under the shared selection lock. A capacity rejection is temporary: retain the queued/blocked state and wait; do not create another batch or agent to bypass it. See [intake.md](intake.md) for the recurring controller protocol.

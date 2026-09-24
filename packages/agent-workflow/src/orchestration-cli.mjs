@@ -13,13 +13,24 @@ import {
 	renew,
 	transaction,
 } from "./orchestration.mjs";
+import { requirePassingChecks } from "./orchestration-checks.mjs";
 import {
 	github,
 	requireReady,
-	resolveRuntime,
+	resolveWorkerRuntime,
 	verifyPr,
 } from "./orchestration-github.mjs";
-import { capacity, enforceCapacity, isInProgress } from "./ticket-intake.mjs";
+import {
+	fallbackStatePath,
+	readClaudeCooldown,
+	recordClaudeLimit,
+} from "./provider-fallback.mjs";
+import {
+	capacity,
+	enforceCapacity,
+	isInProgress,
+	readIntake,
+} from "./ticket-intake.mjs";
 import {
 	assertUnclaimed,
 	selectNext,
@@ -27,10 +38,22 @@ import {
 } from "./ticket-selection.mjs";
 
 export function execute(command, path, input = {}, options = {}) {
+	if (command === "claude-cooldown")
+		return readClaudeCooldown(options.fallbackStatePath ?? fallbackStatePath());
+	if (command === "record-claude-limit")
+		return recordClaudeLimit(
+			options.fallbackStatePath ?? fallbackStatePath(),
+			input.error,
+			{ agentId: input.agentId, failureKey: input.failureKey },
+		);
 	const makeGitHub = options.github ?? github;
 	if (command === "status") return readState(path);
 	if (command === "select-next")
-		return selectNext(path, input, makeGitHub(input.repository));
+		return selectNext(
+			path,
+			{ ...input, fallbackStatePath: options.fallbackStatePath },
+			makeGitHub(input.repository),
+		);
 	if (command === "init" || command === "init-next") {
 		return withSelectionLock(path, () =>
 			transaction(path, (existing) => {
@@ -40,7 +63,11 @@ export function execute(command, path, input = {}, options = {}) {
 					assertUnclaimed(path, input);
 					return { state, output: state };
 				}
-				const selection = selectNext(path, input, makeGitHub(input.repository));
+				const selection = selectNext(
+					path,
+					{ ...input, fallbackStatePath: options.fallbackStatePath },
+					makeGitHub(input.repository),
+				);
 				if (!selection.tickets.length)
 					return { output: { initialized: false, ...selection } };
 				const state = newBatch({ ...input, tickets: selection.tickets });
@@ -120,7 +147,9 @@ export function execute(command, path, input = {}, options = {}) {
 					const t = state.tickets[String(input.number).replace(/^#/, "")];
 					if (!t) throw new Error("ticket outside selected batch");
 					const issue = requireReady(state, t, issues);
-					const runtime = resolveRuntime(issue.recommendation, input.models);
+					const runtime = resolveWorkerRuntime(issue.recommendation, input, {
+						statePath: options.fallbackStatePath,
+					});
 					output = changeTicket(state, input.number, "reserve", runtime);
 				} else {
 					output = { ...disposition(state), issues };
@@ -147,25 +176,46 @@ export function execute(command, path, input = {}, options = {}) {
 				t.pr = pr.number;
 				t.prUrl = pr.url;
 				output = t;
-			} else if (command === "ready") {
+			} else if (command === "ready" || command === "merge-ready") {
 				const t = state.tickets[String(input.number)];
 				if (!t?.pr) throw new Error("link PR first");
 				const pr = api.pr(t.pr);
 				verifyPr(state, t, pr);
-				if (pr.state !== "OPEN" || pr.headRefOid !== input.reviewedHead)
+				const reviewedHead =
+					command === "ready" ? input.reviewedHead : t.reviewedHead;
+				if (pr.state !== "OPEN" || pr.headRefOid !== reviewedHead)
 					throw new Error("review must match current open PR head");
-				const checks = pr.statusCheckRollup ?? [];
+				const policy = readIntake(path);
 				if (
-					checks.some(
-						(c) =>
-							(c.status && c.status !== "COMPLETED") ||
-							(c.status &&
-								!["SUCCESS", "NEUTRAL", "SKIPPED"].includes(c.conclusion)) ||
-							(c.state && c.state !== "SUCCESS"),
-					)
+					policy &&
+					policy.repository.toLowerCase() !== state.repository.toLowerCase()
 				)
-					throw new Error("PR checks are pending or unsuccessful");
-				output = changeTicket(state, input.number, command, input);
+					throw new Error("intake policy belongs to another repository");
+				let required = policy?.requiredChecks;
+				if (command === "merge-ready") {
+					if (t.status !== "awaiting_merge")
+						throw new Error("ticket is not awaiting merge");
+					if (pr.isDraft) throw new Error("PR is still a draft");
+					if (required === undefined) {
+						try {
+							required = api.requiredStatusChecks(state.baseBranch);
+						} catch (error) {
+							throw new Error(
+								`required checks not configured and branch protection is unavailable: ${error.message}`,
+							);
+						}
+					}
+				}
+				requirePassingChecks(pr.statusCheckRollup ?? [], required);
+				output =
+					command === "ready"
+						? changeTicket(state, input.number, command, input)
+						: {
+								mergeReady: true,
+								pr: pr.number,
+								head: pr.headRefOid,
+								requiredChecks: required,
+							};
 			} else output = changeTicket(state, input.number, command, input);
 			if (["reserve", "resume", "fix"].includes(command))
 				enforceCapacity(path, state, previousActive);
