@@ -19,7 +19,10 @@ This is a local shared limit for managed tickets, not a distributed worker quota
 For a tracked, reviewable repository configuration, commit `toolkit-intake.json`
 at the checkout root (see `examples/toolkit-intake.json`). It supports `version: 1`,
 `repository`, `baseBranch`, `codexModel`, `count`, and optional `cron`, `timezone`,
-and `excludeTickets` issue numbers. Set `count` to the desired shared cap. Do not
+`excludeTickets` issue numbers, and `requiredChecks` check-run names or status
+contexts. Set `count` to the desired shared cap. List every check that must run
+before a controller merge; a missing check blocks it. An empty list explicitly
+requires none, while every reported pending or failing check still blocks it. Do not
 put pause state, schedule IDs, paths, or tick history in this file. Run
 `node <skill>/scripts/intake.mjs configure CHECKOUT` to initialize the local
 runtime policy from it. Existing repositories without the tracked file can keep
@@ -86,10 +89,12 @@ intake helper and checkout, and instruct the run to:
    existing batches. Reconcile worker/PR progress using normal orchestration
    leases; skip a batch owned by another run. Review completed workers and PRs
    before new admission. Where the user has explicitly authorized scheduled Codex approval and
-   merging, submit an approval review when GitHub permits it, then merge only
-   exact linked PRs whose reviewed heads are unchanged and whose required checks
-   and reviews pass. Leave PRs awaiting merge when the controller cannot approve
-   its own PR or branch protection requires another reviewer. Then `sync` their exact batches so
+   merging, submit an approval review when GitHub permits it. Then run
+   `orchestrate merge-ready STATE.json` with the ticket number and current lease
+   token immediately before each merge. Merge only when it returns `mergeReady: true`,
+   using the returned head SHA as the merge command's head match. Leave PRs awaiting
+   merge when the controller cannot approve its own PR or branch protection requires
+   another reviewer. Then `sync` their exact batches so
    verified merges close their issues and release dependencies. Otherwise only
    reconcile PRs already merged outside the controller. Renew each held lease at
    least every five minutes during long reviews or tests and immediately before
@@ -149,7 +154,8 @@ Do not pause it just because an individual ticket requires human input.
   pass a request with repository, baseBranch, codexModel, count and optional cron,
   timezone, and excludeTickets. Persist the chosen cadence across later configurations.
 - `sync-config`: apply the tracked file to runtime policy, retaining schedule ID,
-  pause state, and last tick. Requires `toolkit-intake.json`.
+  pause state, and last tick. Requires `toolkit-intake.json`. It also copies
+  `requiredChecks`; removing the field removes the saved list.
 - `status`: read-only policy, including schedule ID and last hourly result.
 - `schedule`: persist scheduleId; rejects replacement by a different schedule.
 - `tick`: current models array and optional excludeTickets; admits at most once

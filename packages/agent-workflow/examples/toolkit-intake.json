@@ -4,6 +4,7 @@
 	"baseBranch": "main",
 	"codexModel": "gpt-6-sol",
 	"count": 2,
+	"requiredChecks": ["verify"],
 	"cron": "*/30 8-19 * * *",
 	"timezone": "UTC",
 	"excludeTickets": []
