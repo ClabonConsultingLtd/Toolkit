@@ -156,7 +156,10 @@ the skill's `references/protocol.md`. Commands use JSON request files or stdin;
 Paseo tool calls remain the Codex skill's responsibility.
 
 Defaults: three isolated Claude worktrees, Auto permission mode, two review/fix
-cycles per ticket, and hourly UTC Codex reconciliation. You merge PRs. Only a
+cycles per ticket, and hourly UTC Codex reconciliation. New Paseo schedules for
+orchestration, intake, triage, and reporting use `codex/gpt-6-sol` with medium
+reasoning. Existing schedules retain their settings until explicitly changed.
+You merge PRs. Only a
 verified merged PR lets orchestration replace `ready-for-agent` with `done` and
 close the issue. Closed issues without a linked merged PR need reconciliation;
 readiness labels do not make a closed issue launchable. Independent work continues

@@ -39,8 +39,12 @@ not already authorized implementation or the shared execution limit.
 
 Ensure exactly one Paseo schedule named `ticket-intake:<owner/repo>`; list existing
 schedules before creating to recover interrupted configuration. Use the saved
-`cron` and `timezone`, stable checkout cwd, local isolation, and the initiating Codex
-model; use `full-access` (`danger-full-access`) permissions. Register its ID with `intake ... schedule`
+`cron` and `timezone`, stable checkout cwd, local isolation, `codex/gpt-6-sol`
+with medium reasoning, and `full-access` (`danger-full-access`) permissions.
+Pass `--provider codex/gpt-6-sol --thinking medium --mode full-access` to
+`paseo schedule create` so the effort is explicit. Inspect the new schedule to
+confirm its model and thinking option. Keep a recovered schedule's settings unless
+the user explicitly requests a change. Register its ID with `intake ... schedule`
 (request `{"scheduleId":"..."}`). A consuming repository may deliberately run
 every 30 minutes: the extra run can reconcile workers and PRs or retry an empty
 evaluation. Admission still uses a UTC hour key and never refills an hour after
