@@ -67,6 +67,29 @@ test("only explicit Claude usage-limit errors trigger a cooldown", (t) => {
 	);
 });
 
+test("Claude session-limit wording uses its stated UTC reset time", (t) => {
+	const f = fixture(t);
+	const now = Date.parse("2026-09-24T14:38:53Z");
+	const message = "You've hit your session limit · resets 6:20pm (UTC)";
+	assert.deepEqual(parseClaudeLimit(message, now), {
+		resetAt: Date.parse("2026-09-24T18:20:00Z"),
+	});
+	const state = recordClaudeLimit(f.cooldownPath, message, {
+		failureKey: "worker-166:activity-2284",
+		now,
+	});
+	assert.equal(state.resetAt, "2026-09-24T18:20:00.000Z");
+	assert.equal(readClaudeCooldown(f.cooldownPath, now).active, true);
+	assert.equal(
+		readClaudeCooldown(f.cooldownPath, Date.parse(state.resetAt)).active,
+		false,
+	);
+	assert.deepEqual(
+		parseClaudeLimit(message, Date.parse("2026-09-24T18:21:00Z")),
+		{ resetAt: Date.parse("2026-09-25T18:20:00Z") },
+	);
+});
+
 test("unknown reset uses one hour, repeated signals cannot shorten it, and a held lock fails safely", (t) => {
 	const f = fixture(t);
 	const now = Date.parse("2026-09-24T12:00:00Z");
