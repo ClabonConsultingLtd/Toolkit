@@ -97,13 +97,17 @@ intake helper and checkout, and instruct the run to:
    report a failed release rather than claiming success. Resume queued work in
    older batches first. Stop launching if the shared cap rejects a reservation.
    Never mark a capacity wait as a human blocker.
-2. Discover current Claude models and active work. Pass the raw `models` array
+2. Check shared `claude-cooldown`, then discover current Claude models and active work. Pass the raw `models` array
    from Paseo `list_models({provider: "claude"})`, preserving each model's
    `thinkingOptions: [{id, ...}]`. The helper also accepts a validated
    `thinkingOptionIds: ["high", ...]` array (the `paseo provider models --json`
    shape, whose `thinkingOptions` is a display string), and treats entries with
    neither field as unselectable rather than rejecting the catalog. Never
-   synthesize unsupported options.
+   synthesize unsupported options. During an active cooldown, also pass the raw `codexModels` array
+   from Paseo `list_models({provider: "codex"})`. If a Claude worker fails with
+   an explicit usage-limit error during reconciliation or creation, record that
+   error with `record-claude-limit` before launching another worker. The next
+   reservation will use Codex; leave the failed worker blocked for reconciliation.
    If the schedule prompt authorizes implementation-metadata repair, run a
    read-only `select-next` preview with the valid catalog. For an issue skipped
    solely because its recommendation is absent, malformed or unsupported,
@@ -111,6 +115,7 @@ intake helper and checkout, and instruct the run to:
    its existing requirements and a supported model/effort. Leave issues needing
    a product decision unchanged and report them. Never edit a ticket to
    compensate for a malformed catalog. Then run `intake ... tick` with `models`
+   and `codexModels` during a cooldown,
    and optional `excludeTickets` for work outside saved batches. This
    atomically admits up to `min(N, available capacity)` eligible tickets using the
    same readiness/dependency/model/PR exclusions as [selection.md](selection.md).

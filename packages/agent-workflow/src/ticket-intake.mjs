@@ -259,6 +259,8 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 						count,
 						concurrency: Math.min(3, policy.count),
 						models: input.models,
+						codexModels: input.codexModels,
+						fallbackStatePath: options.fallbackStatePath,
 						excludeTickets: [
 							...(policy.excludeTickets ?? []),
 							...dynamicExclusions,
