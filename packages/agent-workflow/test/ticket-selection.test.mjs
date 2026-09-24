@@ -62,6 +62,25 @@ test("read-only preview selects oldest first and returns a bounded fixed batch",
 	assert.equal(result.selectionMode, "fixed");
 	assert.deepEqual(readdirSync(f.dir), []);
 });
+test("accepts Paseo thinking option IDs without rejecting eligible tickets", (t) => {
+	const f = fixture(t);
+	f.input.models = f.input.models.map(({ thinkingOptions, ...model }) => ({
+		...model,
+		thinkingOptionIds: thinkingOptions.map(({ id }) => id),
+	}));
+	assert.deepEqual(selectNext(f.path, f.input, f.api).tickets, ["1", "2"]);
+});
+test("rejects a malformed model catalog before reading tickets", (t) => {
+	const f = fixture(t);
+	f.input.models = [{ id: "claude-sonnet-5", label: "Sonnet 5" }];
+	f.api.listReady = () => {
+		throw new Error("GitHub should not be read");
+	};
+	assert.throws(
+		() => selectNext(f.path, f.input, f.api),
+		/invalid Paseo Claude model catalog: models\[0\].thinkingOptions/,
+	);
+});
 test("eligibility excludes assigned, conflicting labels, open blockers, PRs and unsupported models", (t) => {
 	const f = fixture(t);
 	f.api.listReady = () =>

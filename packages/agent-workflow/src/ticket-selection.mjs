@@ -7,7 +7,10 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { issueNumber, newBatch } from "./orchestration.mjs";
-import { resolveRuntime } from "./orchestration-github.mjs";
+import {
+	normalizeClaudeModels,
+	resolveRuntime,
+} from "./orchestration-github.mjs";
 
 // Serialize selection and initialization across batches in the canonical state
 // directory. Per-batch execution leases continue to own implementation/review.
@@ -80,8 +83,10 @@ export function selectNext(file, input, api) {
 		throw new Error("choose count or explicit tickets, not both");
 	// Validate all initialization fields before contacting GitHub, even for preview.
 	newBatch({ ...input, tickets: ["1"] });
-	if (!Array.isArray(input.models) || !input.models.length)
-		throw new Error("current Paseo Claude model catalog required");
+	// A malformed live catalog is an invocation error, not evidence that every
+	// ready ticket's recommendation is unsupported. Validate before GitHub reads
+	// or an intake tick can persist an incorrect empty result.
+	const models = normalizeClaudeModels(input.models);
 	if (
 		input.excludeTickets !== undefined &&
 		!Array.isArray(input.excludeTickets)
@@ -167,7 +172,7 @@ export function selectNext(file, input, api) {
 						continue;
 					}
 					try {
-						resolveRuntime(issue.recommendation, input.models);
+						resolveRuntime(issue.recommendation, models);
 					} catch (error) {
 						reason = error.message;
 					}

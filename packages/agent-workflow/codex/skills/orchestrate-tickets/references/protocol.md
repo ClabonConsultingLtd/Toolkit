@@ -13,9 +13,9 @@ Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as 
 | init | repository, batchId, cwd, baseBranch, codexModel, tickets; optional concurrency (1–3) | Create state; refuses overwrite and tickets claimed by another batch in the state directory. tickets are issue numbers or strings. |
 | status | none | Full durable state. |
 | acquire | none | acquired:false if busy; otherwise token and expiresAt. |
-| renew / release | none | Extend ten-minute lease / release. |
+| renew / release | none | Extend ten-minute lease / release. Release accepts the saved owner's matching token even after expiry, but cannot clear a successor's lease. |
 | sync | none | Reconcile GitHub and return issues, launchable IDs, slots, pauseSchedule. |
-| reserve | number, models (Paseo Claude models array) | Recheck readiness/dependencies, resolve model/effort, persist branch/launchKey and reserve slot. |
+| reserve | number, models (raw Paseo Claude models array with `thinkingOptions`) | Recheck readiness/dependencies, resolve model/effort, persist branch/launchKey and reserve slot. |
 | attach | number, workspaceId and/or agentId; workerActive:true for a confirmed externally restarted saved agent | Persist identifiers immediately after each Paseo creation, or restore capacity accounting without leaving blocked. Existing different IDs are rejected. |
 | link-pr | number, pr | Fetch and verify same-repository branch/base before attaching PR. |
 | review | number, evidence | Record completed worker output; begin Codex review. |

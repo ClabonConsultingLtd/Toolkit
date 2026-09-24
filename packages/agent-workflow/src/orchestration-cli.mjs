@@ -58,6 +58,14 @@ export function execute(command, path, input = {}, options = {}) {
 		transaction(path, (state) => {
 			if (!state) throw new Error("initialize batch first");
 			if (command === "acquire") return { state, output: acquire(state) };
+			if (command === "release") {
+				// An expired owner can still clean up if no later run acquired the
+				// batch. Token equality fences it from clearing a successor's lease.
+				if (!input.token || state.lease?.token !== input.token)
+					throw new Error("lease missing or owned by another run");
+				state.lease = null;
+				return { state, output: { released: true } };
+			}
 			assertLease(state, input.token);
 			const previousActive = Object.values(state.tickets).filter(
 				isInProgress,
@@ -65,10 +73,7 @@ export function execute(command, path, input = {}, options = {}) {
 			let output;
 			const api = makeGitHub(state.repository);
 			if (command === "renew") output = renew(state, input.token);
-			else if (command === "release") {
-				state.lease = null;
-				output = { released: true };
-			} else if (command === "sync" || command === "reserve") {
+			else if (command === "sync" || command === "reserve") {
 				const issues = api.snapshot(state);
 				for (const ticket of Object.values(state.tickets))
 					if (issues[ticket.number].dependencyError)
@@ -164,7 +169,7 @@ export function execute(command, path, input = {}, options = {}) {
 			} else output = changeTicket(state, input.number, command, input);
 			if (["reserve", "resume", "fix"].includes(command))
 				enforceCapacity(path, state, previousActive);
-			if (command !== "release") assertLease(state, input.token);
+			assertLease(state, input.token);
 			return { state, output };
 		});
 	const mutatesCapacity =

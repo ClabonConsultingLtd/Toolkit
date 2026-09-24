@@ -15,7 +15,8 @@ before initializing. All batch state belongs under the stable checkout's
 `.toolkit/orchestration/` directory, including manually selected batches.
 
 Pass an initialization request with `count: N` instead of `tickets`, plus `models`
-(the current Paseo Claude model catalog array), repository, batchId, cwd,
+(the raw `models` array from Paseo `list_models({provider: "claude"})`, including
+each model's `thinkingOptions` objects), repository, batchId, cwd,
 baseBranch and initiating codexModel. Optional `excludeTickets` accepts issue
 numbers; concurrency remains 1–3 and is independent of batch size.
 
