@@ -435,14 +435,28 @@ export function requireReady(state, ticket, issues) {
 export function normalizeClaudeModels(models) {
 	if (!Array.isArray(models) || models.length === 0)
 		throw new Error("current Paseo Claude model catalog required");
-	return models.map((model, index) => {
+	const catalog = models.map((model, index) => {
 		if (!model || typeof model.id !== "string" || !model.id.trim())
 			throw new Error(
 				`invalid Paseo Claude model catalog: models[${index}].id required`,
 			);
-		let thinkingOptions = model.thinkingOptions;
-		if (thinkingOptions === undefined && Array.isArray(model.thinkingOptionIds))
+		// MCP list_models returns thinkingOptions as [{id, label}]; the CLI's
+		// `provider models --json` returns it as a display string alongside a
+		// thinkingOptionIds array. Prefer the structured array, then the IDs.
+		let thinkingOptions = Array.isArray(model.thinkingOptions)
+			? model.thinkingOptions
+			: undefined;
+		if (!thinkingOptions && Array.isArray(model.thinkingOptionIds))
 			thinkingOptions = model.thinkingOptionIds.map((id) => ({ id }));
+		// An entry advertising no effort metadata at all (e.g. a bare alias)
+		// cannot satisfy any recommendation; keep it but make it unselectable
+		// instead of rejecting the valid entries around it.
+		if (
+			!thinkingOptions &&
+			model.thinkingOptions == null &&
+			model.thinkingOptionIds == null
+		)
+			thinkingOptions = [];
 		if (
 			!Array.isArray(thinkingOptions) ||
 			thinkingOptions.some(
@@ -451,10 +465,15 @@ export function normalizeClaudeModels(models) {
 			)
 		)
 			throw new Error(
-				`invalid Paseo Claude model catalog: models[${index}].thinkingOptions required (or thinkingOptionIds array)`,
+				`invalid Paseo Claude model catalog: models[${index}].thinkingOptions must be an array of {id} (or thinkingOptionIds an array of IDs)`,
 			);
 		return { ...model, thinkingOptions };
 	});
+	if (!catalog.some((model) => model.thinkingOptions.length))
+		throw new Error(
+			"invalid Paseo Claude model catalog: no model advertises thinkingOptions (or thinkingOptionIds)",
+		);
+	return catalog;
 }
 
 export function resolveRuntime(rec, models) {

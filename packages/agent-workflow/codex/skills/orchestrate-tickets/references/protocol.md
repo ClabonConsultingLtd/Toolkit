@@ -49,6 +49,6 @@ The short-lived `<state>.mutex` directory serializes file transactions. If a pro
 
 Partial completion writes are retry-safe: sync verifies PR merge and current labels/state on every attempt. A previously closed issue that still has ready-for-agent gets repaired after merge. Without a matching merged PR, it is blocked, never launched.
 
-Automatic selection details and invocation examples: [selection.md](selection.md). All batches for a checkout must use the canonical state directory so overlap detection sees them. Initialization is serialized by `.selection.lock`; after a crash, verify no initializer is alive before removing this directory. Preview is read-only and not a reservation: `init-next` rechecks eligibility.
+Automatic selection details and invocation examples: [selection.md](selection.md). All batches for a checkout must use the canonical state directory so overlap detection sees them. Initialization is serialized by `.selection.lock`, which records its owner's host and PID. The helper reclaims it automatically once that owner has exited (same host) or after 30 minutes; do not remove it by hand. Preview is read-only and not a reservation: `init-next` rechecks eligibility.
 
 When an intake policy exists, reserve/resume/fix operations also enforce its repository-wide active-ticket limit under the shared selection lock. A capacity rejection is temporary: retain the queued/blocked state and wait; do not create another batch or agent to bypass it. See [intake.md](intake.md) for the recurring controller protocol.
