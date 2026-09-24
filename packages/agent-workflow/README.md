@@ -176,18 +176,22 @@ Defaults: three isolated Claude worktrees, Auto permission mode, two review/fix
 cycles per ticket, and Codex reconciliation every 30 minutes from 08:00 through
 19:30 UTC. New Paseo schedules for orchestration, intake, triage, and reporting
 use `codex/gpt-6-sol` with medium reasoning. Existing schedules retain their
-settings until explicitly changed. You merge PRs. Only a verified merged PR lets
+settings until explicitly changed. An authorized scheduled intake controller may
+approve and merge an exact linked, independently reviewed PR when GitHub permits
+its approval and all required checks and reviews pass. Independent batch
+schedules and Claude workers do not approve or merge. Only a verified merged PR lets
 orchestration replace `ready-for-agent` with `done` and
 close the issue. Closed issues without a linked merged PR need reconciliation;
 readiness labels do not make a closed issue launchable. Independent work continues
-while PRs await your merge. Schedules pause on completion or when only human
+while PRs await a permitted merge. Schedules pause on completion or when only human
 blockers remain, and can be resumed explicitly after recovery.
 
 The state helper reserves before launching and fences writes with a renewable
 lease. After interruptions the skill locates existing workspaces, agents and PRs
 before dispatching. Uncertain launches remain blocked rather than being repeated.
 Schedules require the host, checkout, skill installation and credentials to remain
-available; this is not a hosted queue or an automatic merge service.
+available; this is not a hosted queue. Scheduled intake merges only when the
+consuming repository explicitly authorizes it and GitHub permits it.
 
 ## Triage-only sweeps with Paseo
 
@@ -305,7 +309,8 @@ ticks in that UTC hour replay it without adding tickets. Reconfiguration preserv
 the saved schedule cadence unless a new one is supplied. Compare the saved policy
 with the live Paseo schedule before describing it as enabled; preserve user pauses.
 An enabled intake schedule keeps running when no work qualifies or capacity is full.
-It never merges PRs. Use `scripts/intake.mjs` (or the package's `ticket-intake`
+It merges PRs only when explicitly authorized and after the skill's exact-link,
+independent-review, unchanged-head, check, and branch-protection gates. Use `scripts/intake.mjs` (or the package's `ticket-intake`
 command) for configure/status/tick/pause/resume, as documented in the skill's
 `references/intake.md`. Tick output distinguishes admissions, empty evaluations,
 capacity waits, and replays, and includes the current shared capacity. Policies
