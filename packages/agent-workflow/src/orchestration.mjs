@@ -229,8 +229,8 @@ export function changeTicket(
 		requireStatus("queued");
 		requireText("provider");
 		requireText("thinkingOptionId");
-		if (!data.provider.startsWith("claude/"))
-			throw new Error("Claude provider/model required");
+		if (!/^(?:claude|codex)\/[\w.\-[\]]+$/.test(data.provider))
+			throw new Error("Claude or Codex provider/model required");
 		if (!disposition(state).launchable.includes(t.number))
 			throw new Error("no execution slot");
 		Object.assign(t, {
@@ -239,6 +239,7 @@ export function changeTicket(
 			launchUncertain: true,
 			provider: data.provider,
 			thinkingOptionId: data.thinkingOptionId,
+			...(data.fallbackFrom ? { fallbackFrom: data.fallbackFrom } : {}),
 			branch: `tickets/${state.batchId}/${t.number}`,
 			launchKey: `${state.repository}:${state.batchId}:${t.number}`,
 			updatedAt: new Date(now).toISOString(),

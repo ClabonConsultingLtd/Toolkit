@@ -4,29 +4,92 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
+	writeFileSync,
 } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { issueNumber, newBatch } from "./orchestration.mjs";
 import {
 	normalizeClaudeModels,
-	resolveRuntime,
+	resolveWorkerRuntime,
 } from "./orchestration-github.mjs";
+import {
+	normalizeCodexModels,
+	readClaudeCooldown,
+} from "./provider-fallback.mjs";
+
+const SELECTION_LOCK_TTL_MS = 30 * 60_000;
+
+function processAlive(pid) {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return error.code === "EPERM";
+	}
+}
+
+// A selection transaction is short and synchronous, so the lock outliving its
+// writer means that process was killed (e.g. an agent tool timeout) before its
+// finally block ran. Reclaim it when the recorded owner is provably gone on
+// this host, or when it is older than the TTL (unknown host, or a legacy lock
+// with no owner metadata, judged by the directory's mtime).
+function staleSelectionLock(lock, { now, host, ttlMs, alive }) {
+	let meta = null;
+	try {
+		meta = JSON.parse(readFileSync(join(lock, "owner.json"), "utf8"));
+	} catch {}
+	let startedAt = meta?.startedAt;
+	if (typeof startedAt !== "number") {
+		try {
+			startedAt = statSync(lock).mtimeMs;
+		} catch (error) {
+			if (error.code === "ENOENT") return true;
+			throw error;
+		}
+	}
+	if (now - startedAt >= ttlMs) return true;
+	return meta?.host === host && Number.isInteger(meta.pid) && !alive(meta.pid);
+}
 
 // Serialize selection and initialization across batches in the canonical state
 // directory. Per-batch execution leases continue to own implementation/review.
-export function withSelectionLock(file, action) {
+export function withSelectionLock(
+	file,
+	action,
+	{
+		now = Date.now(),
+		host = hostname(),
+		pid = process.pid,
+		ttlMs = SELECTION_LOCK_TTL_MS,
+		alive = processAlive,
+	} = {},
+) {
 	const dir = dirname(file),
 		lock = join(dir, ".selection.lock");
 	mkdirSync(dir, { recursive: true });
 	try {
 		mkdirSync(lock);
 	} catch (error) {
-		if (error.code === "EEXIST")
+		if (error.code !== "EEXIST") throw error;
+		if (!staleSelectionLock(lock, { now, host, ttlMs, alive }))
 			throw new Error(
-				"another batch selection is in progress; retry later (verify a crashed writer has stopped before removing .selection.lock)",
+				"another batch selection is in progress; retry later (the lock is reclaimed automatically once its owner has exited or after 30 minutes)",
 			);
-		throw error;
+		rmSync(lock, { recursive: true, force: true });
+		try {
+			mkdirSync(lock);
+		} catch (retry) {
+			if (retry.code === "EEXIST")
+				throw new Error("another batch selection is in progress; retry later");
+			throw retry;
+		}
 	}
+	writeFileSync(
+		join(lock, "owner.json"),
+		JSON.stringify({ host, pid, startedAt: now }),
+	);
 	try {
 		return action();
 	} finally {
@@ -86,7 +149,12 @@ export function selectNext(file, input, api) {
 	// A malformed live catalog is an invocation error, not evidence that every
 	// ready ticket's recommendation is unsupported. Validate before GitHub reads
 	// or an intake tick can persist an incorrect empty result.
-	const models = normalizeClaudeModels(input.models);
+	const evaluatedAt = Date.now();
+	const cooldown = readClaudeCooldown(input.fallbackStatePath, evaluatedAt);
+	const models = cooldown.active
+		? input.models
+		: normalizeClaudeModels(input.models);
+	if (cooldown.active) normalizeCodexModels(input.codexModels);
 	if (
 		input.excludeTickets !== undefined &&
 		!Array.isArray(input.excludeTickets)
@@ -172,7 +240,11 @@ export function selectNext(file, input, api) {
 						continue;
 					}
 					try {
-						resolveRuntime(issue.recommendation, models);
+						resolveWorkerRuntime(
+							issue.recommendation,
+							{ models, codexModels: input.codexModels },
+							{ statePath: input.fallbackStatePath, now: evaluatedAt },
+						);
 					} catch (error) {
 						reason = error.message;
 					}

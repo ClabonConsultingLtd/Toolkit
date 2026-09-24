@@ -271,6 +271,7 @@ test("tracked repository config updates capacity and exclusions without resettin
 		cron: "0 * * * *",
 		timezone: "Europe/London",
 		excludeTickets: [1],
+		requiredChecks: ["ci", "smoke"],
 	};
 	writeFileSync(configPath, JSON.stringify(tracked));
 	intakeCommand("schedule", f.cwd, { scheduleId: "existing-schedule" });
@@ -280,6 +281,7 @@ test("tracked repository config updates capacity and exclusions without resettin
 	assert.equal(synced.cron, tracked.cron);
 	assert.equal(synced.timezone, tracked.timezone);
 	assert.deepEqual(synced.excludeTickets, ["1"]);
+	assert.deepEqual(synced.requiredChecks, ["ci", "smoke"]);
 	assert.equal(synced.scheduleId, "existing-schedule");
 	assert.equal(synced.paused, true);
 	assert.equal(synced.pauseReason, "user request");
@@ -288,6 +290,7 @@ test("tracked repository config updates capacity and exclusions without resettin
 	assert.deepEqual(first.tickets, ["2", "3"]);
 	tracked.count = 3;
 	tracked.excludeTickets = [1, 4];
+	delete tracked.requiredChecks;
 	writeFileSync(configPath, JSON.stringify(tracked));
 	const next = intakeCommand(
 		"tick",
@@ -298,6 +301,7 @@ test("tracked repository config updates capacity and exclusions without resettin
 	assert.equal(next.status, "admitted");
 	assert.deepEqual(next.tickets, ["5"]);
 	assert.equal(intakeCommand("status", f.cwd).count, 3);
+	assert.equal(intakeCommand("status", f.cwd).requiredChecks, undefined);
 	assert.equal(
 		intakeCommand("status", f.cwd).repositoryConfig,
 		"toolkit-intake.json",
@@ -384,6 +388,19 @@ test("invalid tracked config and unsafe limit decreases fail without changing po
 		JSON.parse(readFileSync(intakePath(batch.batchFile), "utf8")).count,
 		2,
 	);
+});
+test("requiredChecks validates names, duplicates, and array type", (t) => {
+	const f = fixture(t);
+	const configPath = join(f.cwd, "toolkit-intake.json");
+	for (const invalid of ["ci", [""], [" ci"], ["ci", "ci"], [7]]) {
+		writeFileSync(
+			configPath,
+			JSON.stringify({ version: 1, ...f.input, requiredChecks: invalid }),
+		);
+		assert.throws(() => intakeCommand("sync-config", f.cwd), /requiredChecks/);
+	}
+	rmSync(configPath);
+	assert.equal(intakeCommand("status", f.cwd).requiredChecks, undefined);
 });
 test("capacity-full tick can retry after a slot frees within the hour", (t) => {
 	const f = fixture(t);
