@@ -17,7 +17,9 @@ import { execute } from "../src/orchestration-cli.mjs";
 import {
 	fallbackDependencies,
 	github,
+	parentReference,
 	recommendation,
+	requireReady,
 	resolveRuntime,
 } from "../src/orchestration-github.mjs";
 
@@ -114,6 +116,46 @@ test("dependency order and external blockers do not expand selection", () => {
 	issues[2].state = "OPEN";
 	assert.deepEqual(reconcile(waiting, issues).launchable, []);
 	assert.equal(Object.keys(waiting.tickets).length, 3);
+});
+test("parent specs in a batch are blocked for readiness and cannot be reserved", () => {
+	const s = newBatch(manifest()),
+		issues = snapshot();
+	issues[7].subTickets = ["11", "12"];
+	assert.deepEqual(reconcile(s, issues).launchable, ["9"]);
+	assert.equal(s.tickets[7].status, "blocked");
+	assert.equal(s.tickets[7].blockKind, "readiness");
+	assert.match(s.tickets[7].reason, /Parent spec.*#11, #12/);
+	assert.throws(
+		() => requireReady(s, s.tickets[7], issues),
+		/parent spec.*#11, #12/,
+	);
+	issues[7].subTickets = [];
+	reconcile(s, issues);
+	assert.equal(s.tickets[7].status, "queued");
+});
+test("parent references accept sections, lines and local URLs only", () => {
+	assert.equal(
+		parentReference("## Parent\n\n#152 (Phase 20 - foundation)\n"),
+		"152",
+	);
+	assert.equal(parentReference("**Parent:** #7"), "7");
+	assert.equal(
+		parentReference(
+			"## Parent\nhttps://github.com/Example/Project/issues/9\n## Next",
+			"example/project",
+		),
+		"9",
+	);
+	assert.equal(
+		parentReference(
+			"## Parent\nhttps://github.com/other/repo/issues/9",
+			"example/project",
+		),
+		null,
+	);
+	assert.equal(parentReference("## Parent\n\nNone\n## Blocked by\n\n#3"), null);
+	assert.equal(parentReference("Relates to #5"), null);
+	assert.equal(parentReference("## Parent\n\nother/repo#4"), null);
 });
 test("reservations prevent duplicates and cap execution while awaiting merge frees slots", () => {
 	const s = newBatch({ ...manifest(), tickets: [7, 8, 9, 10] });

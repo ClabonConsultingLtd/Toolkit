@@ -138,24 +138,29 @@ export function reconcile(state, issues) {
 			ticket.blockKind === "dependency"
 		) {
 			const deps = blockers(state, issue, issues);
+			const children = issue.subTickets ?? [];
 			const reason =
 				issue.state === "CLOSED"
 					? "Issue closed without verified PR merge"
 					: !issue.labels.includes("ready-for-agent")
 						? "Issue is not ready-for-agent"
-						: deps.length
-							? `Waiting for ${deps.map((n) => `#${n}`).join(", ")}`
-							: null;
+						: children.length
+							? `Parent spec; implemented through sub-tickets ${children.map((n) => `#${n}`).join(", ")}`
+							: deps.length
+								? `Waiting for ${deps.map((n) => `#${n}`).join(", ")}`
+								: null;
 			ticket.status = reason ? "blocked" : "queued";
 			ticket.reason = reason;
 			ticket.blockKind =
 				issue.state === "CLOSED"
 					? "human"
-					: deps.length
-						? "dependency"
-						: reason
-							? "readiness"
-							: null;
+					: children.length
+						? "readiness"
+						: deps.length
+							? "dependency"
+							: reason
+								? "readiness"
+								: null;
 		}
 	}
 	return disposition(state);
