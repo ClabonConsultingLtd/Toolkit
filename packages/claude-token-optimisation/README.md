@@ -2,6 +2,8 @@
 
 Claude Code integration assets for keeping broad reads and routine successful command output from consuming the primary session's context.
 
+The agent-neutral rules for reads and command output live in [CONTEXT-POLICY.md](CONTEXT-POLICY.md). Installation copies it to `.claude/CONTEXT-POLICY.md`; consuming repositories can point both `AGENTS.md` and `CLAUDE.md` there instead of maintaining two versions of the guidance. The hooks below are Claude Code adapters.
+
 ## Included assets
 
 - `agents/bulk-reader.md`: a read-only subagent for factual exploration of large files or file groups.
@@ -17,3 +19,5 @@ Set `BULK_READER_MIN_LINES` to change the large-read threshold; it defaults to 3
 The bash summary hook writes raw successful-command logs under `.toolkit/claude-token-optimisation/bash-summary-logs` in the current repository by default. Set `TOOLKIT_STATE_DIR` to relocate runtime state.
 
 Set `TOOLKIT_BASH_SUMMARY_SURVEY=on` to additionally log a `{command, at}` line to `.toolkit/claude-token-optimisation/bash-summary-survey.jsonl` for every command that misses the allowlist, without running or otherwise touching that command. Off by default. Use it to mine your own project's real usage for candidate additions to the allowlist above.
+
+The summary allowlist is intentionally small: exact `git status`, `pnpm -r list --depth -1`, and one-file `vitest run` commands. When a command does not match, the hook does nothing. Do not broaden it to arbitrary test pipelines or background tasks; prefer a command that runs once, keeps its exit status, and stores the full log. In particular, `test-command | tail` without `pipefail` can report success when the test failed.
