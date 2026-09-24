@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.3.5 - 2026-09-23
+## 0.3.6 - 2026-09-24
+
+- #42: fix: skip parent specs during ticket selection
 
 - #41: Configure Git identity before release rebase
 
