@@ -4,6 +4,8 @@
 
 - #48: feat: support tracked per-repository intake settings
 
+## 0.3.7 - 2026-09-24
+
 - #46: Harden ticket intake catalog, ordering, and lease cleanup
 
 - #42: fix: skip parent specs during ticket selection
