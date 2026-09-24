@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
 	acquire,
 	assertLease,
+	atomicWrite,
 	changeTicket,
 	checkCycles,
 	disposition,
@@ -100,6 +101,25 @@ test("renewable lease fences previous owner after expiry", () => {
 	assert.equal(second.acquired, true);
 	assert.throws(() => assertLease(s, first.token, 600102));
 	assertLease(s, second.token, 600102);
+});
+test("expired lease can be released only by its saved owner", (t) => {
+	const f = fixture(t);
+	const old = JSON.parse(readFileSync(f.path, "utf8"));
+	old.lease.expiresAt = Date.now() - 1;
+	atomicWrite(f.path, old);
+	assert.deepEqual(execute("release", f.path, { token: f.token }), {
+		released: true,
+	});
+	assert.equal(JSON.parse(readFileSync(f.path, "utf8")).lease, null);
+	const next = execute("acquire", f.path);
+	assert.throws(
+		() => execute("release", f.path, { token: f.token }),
+		/owned by another run/,
+	);
+	assert.equal(
+		JSON.parse(readFileSync(f.path, "utf8")).lease.token,
+		next.token,
+	);
 });
 test("dependency order and external blockers do not expand selection", () => {
 	const s = newBatch(manifest()),
