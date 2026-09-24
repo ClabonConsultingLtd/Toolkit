@@ -20,11 +20,11 @@ export function fallbackStatePath(env = process.env) {
 	return join(root, "toolkit", "agent-workflow", "claude-cooldown.json");
 }
 
-export function parseClaudeLimit(message) {
+export function parseClaudeLimit(message, now = Date.now()) {
 	if (typeof message !== "string") return null;
 	// A generic HTTP 429 may be transient or come from GitHub or another tool.
 	if (
-		!/(?:you['’]ve (?:hit|reached) your (?:claude )?(?:usage )?limit|claude (?:code )?usage limit (?:reached|exceeded)|(?:session|weekly|5.hour|seven.day) (?:usage )?limit (?:reached|exceeded)|usage limit (?:reached|exceeded).*(?:claude|anthropic))/i.test(
+		!/(?:you['’]ve (?:hit|reached) your (?:claude )?(?:usage |session )?limit|claude (?:code )?usage limit (?:reached|exceeded)|(?:session|weekly|5.hour|seven.day) (?:usage )?limit (?:reached|exceeded)|usage limit (?:reached|exceeded).*(?:claude|anthropic))/i.test(
 			message,
 		)
 	)
@@ -33,7 +33,28 @@ export function parseClaudeLimit(message) {
 		/(?:reset(?:s)?(?: at| on|:)?|until)\s+(\d{4}-\d\d-\d\d[T ]\d\d:\d\d(?::\d\d)?(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d))/i.exec(
 			message,
 		)?.[1];
-	const resetAt = iso ? Date.parse(iso.replace(" ", "T")) : NaN;
+	let resetAt = iso ? Date.parse(iso.replace(" ", "T")) : NaN;
+	if (!Number.isFinite(resetAt)) {
+		const utcTime =
+			/(?:reset(?:s)?(?: at| on|:)?|until)\s+(\d{1,2}):(\d\d)\s*(am|pm)\s*\(UTC\)/i.exec(
+				message,
+			);
+		if (utcTime) {
+			const hour = Number(utcTime[1]);
+			const minute = Number(utcTime[2]);
+			if (hour >= 1 && hour <= 12 && minute <= 59) {
+				const date = new Date(now);
+				resetAt = Date.UTC(
+					date.getUTCFullYear(),
+					date.getUTCMonth(),
+					date.getUTCDate(),
+					(hour % 12) + (utcTime[3].toLowerCase() === "pm" ? 12 : 0),
+					minute,
+				);
+				if (resetAt <= now) resetAt += 24 * ONE_HOUR;
+			}
+		}
+	}
 	return { resetAt: Number.isFinite(resetAt) ? resetAt : null };
 }
 
@@ -57,7 +78,7 @@ export function recordClaudeLimit(
 	message,
 	{ agentId = null, failureKey, now = Date.now() } = {},
 ) {
-	const limit = parseClaudeLimit(message);
+	const limit = parseClaudeLimit(message, now);
 	if (!limit) throw new Error("explicit Claude usage-limit error required");
 	if (agentId !== null && (typeof agentId !== "string" || !agentId.trim()))
 		throw new Error("agentId must be a nonempty string");
