@@ -287,6 +287,19 @@ lock. See the skill's `references/selection.md` for details and exclusions. Keep
 all batch state in the same checkout's `.toolkit/orchestration/` directory so
 automatic and explicit batches share overlap protection.
 
+### Claude usage-limit fallback
+
+When a Claude worker explicitly reports a usage limit, the controller records a
+host-wide cooldown at `${XDG_STATE_HOME:-~/.local/state}/toolkit/agent-workflow/claude-cooldown.json`
+(`TOOLKIT_STATE_DIR` can override the root). New ticket workers use Codex until
+the reported reset, or for one hour if no reset can be parsed. Opus and Fable
+recommendations map to GPT-6-Astra, Sonnet to GPT-6-Sol, and Haiku to GPT-6-Luna;
+the helper validates each model and reasoning option against the live Codex
+catalog. Existing workers remain on their selected provider. Use the
+`claude-cooldown` and `record-claude-limit` helper commands described in the
+orchestration protocol; generic rate limits and unrelated failures do not
+activate fallback. All controllers on the host must use the same state root.
+
 ### Admit more work every hour
 
 ```text
