@@ -23,7 +23,7 @@ Run `node <skill>/scripts/intake.mjs configure CHECKOUT request.json` with:
   "baseBranch": "main",
   "codexModel": "<initiating Paseo model>",
   "count": 3,
-  "cron": "0 * * * *",
+  "cron": "*/30 8-19 * * *",
   "timezone": "UTC"
 }
 ```
@@ -31,9 +31,10 @@ Run `node <skill>/scripts/intake.mjs configure CHECKOUT request.json` with:
 Discover repository/base/model normally. The helper stores policy under
 `.toolkit/orchestration/.intake/policy.json`, separate from batch reports.
 It refuses a limit below current active work; let that work finish before lowering
-N. Choose `cron` and `timezone` with the user; these fields default to hourly UTC
-when omitted. Reconfiguring without them preserves the saved cadence. Every worker
-reservation/resume uses a shared lock and enforces this policy,
+N. Choose `cron` and `timezone` with the user; these fields default to every 30
+minutes from 08:00 through 19:30 UTC when omitted. Reconfiguring without them
+preserves the saved cadence. Every worker reservation/resume uses a shared lock
+and enforces this policy,
 including existing manually selected batches. Pausing intake stops new admission,
 not already authorized implementation or the shared execution limit.
 
@@ -45,10 +46,10 @@ Pass `--provider codex/gpt-6-sol --thinking medium --mode full-access` to
 `paseo schedule create` so the effort is explicit. Inspect the new schedule to
 confirm its model and thinking option. Keep a recovered schedule's settings unless
 the user explicitly requests a change. Register its ID with `intake ... schedule`
-(request `{"scheduleId":"..."}`). A consuming repository may deliberately run
-every 30 minutes: the extra run can reconcile workers and PRs or retry an empty
-evaluation. Admission still uses a UTC hour key and never refills an hour after
-a nonempty batch. Do not change an existing schedule's cadence implicitly.
+(request `{"scheduleId":"..."}`). The second run in an hour can reconcile workers
+and PRs or retry an empty evaluation. Admission still uses a UTC hour key and
+never refills an hour after a nonempty batch. Do not change an existing
+schedule's cadence implicitly.
 
 Its prompt must include the absolute paths to this skill, this reference, the
 intake helper and checkout, and instruct the run to:

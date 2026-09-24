@@ -206,6 +206,7 @@ test("overlapping tick cannot select while another tick holds the shared lock", 
 });
 test("reconfigure preserves a chosen schedule cadence", (t) => {
 	const f = fixture(t);
+	assert.equal(intakeCommand("status", f.cwd).cron, "*/30 8-19 * * *");
 	const cadence = intakeCommand("configure", f.cwd, {
 		...f.input,
 		cron: "*/30 * * * *",
