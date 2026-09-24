@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.4.3 - 2026-09-24
+## 0.4.4 - 2026-09-24
+
+- #59: Document shared context policy for Claude and Codex
 
 - #56: Enforce intake required checks before controller merges
 
