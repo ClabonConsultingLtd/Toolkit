@@ -327,6 +327,27 @@ test("tracked config can initialize a new repository without a request file", (t
 	assert.equal(policy.scheduleId, null);
 	assert.equal(policy.paused, false);
 });
+test("request-based exclusions require canonical issue numbers", (t) => {
+	const f = fixture(t);
+	assert.throws(
+		() =>
+			intakeCommand("configure", f.cwd, {
+				...f.input,
+				excludeTickets: "1",
+			}),
+		/excludeTickets must contain issue numbers/,
+	);
+	assert.throws(
+		() =>
+			intakeCommand(
+				"tick",
+				f.cwd,
+				{ models: f.models, excludeTickets: ["01"] },
+				f.options,
+			),
+		/excludeTickets must contain issue numbers/,
+	);
+});
 test("invalid tracked config and unsafe limit decreases fail without changing policy", (t) => {
 	const f = fixture(t);
 	const configPath = join(f.cwd, "toolkit-intake.json");

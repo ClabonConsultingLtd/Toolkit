@@ -12,6 +12,20 @@ const fields = new Set([
 	"excludeTickets",
 ]);
 
+export function normalizeExcludeTickets(value, source = "intake request") {
+	if (
+		!Array.isArray(value) ||
+		value.some(
+			(n) => !/^[1-9]\d*$/.test(String(n)) || !Number.isSafeInteger(Number(n)),
+		)
+	)
+		throw new Error(`${source}: excludeTickets must contain issue numbers`);
+	const numbers = value.map(String);
+	if (new Set(numbers).size !== numbers.length)
+		throw new Error(`${source}: duplicate excludeTickets`);
+	return numbers;
+}
+
 export function readRepositoryIntakeConfig(cwd) {
 	const path = join(cwd, "toolkit-intake.json");
 	if (!existsSync(path)) return null;
@@ -41,19 +55,9 @@ export function readRepositoryIntakeConfig(cwd) {
 			(typeof config[field] !== "string" || !config[field].trim())
 		)
 			throw new Error(`invalid toolkit-intake.json: ${field} must be nonempty`);
-	if (
-		config.excludeTickets !== undefined &&
-		(!Array.isArray(config.excludeTickets) ||
-			config.excludeTickets.some(
-				(n) =>
-					!/^[1-9]\d*$/.test(String(n)) || !Number.isSafeInteger(Number(n)),
-			))
-	)
-		throw new Error(
-			"invalid toolkit-intake.json: excludeTickets must contain issue numbers",
-		);
-	const excludeTickets = (config.excludeTickets ?? []).map(String);
-	if (new Set(excludeTickets).size !== excludeTickets.length)
-		throw new Error("invalid toolkit-intake.json: duplicate excludeTickets");
+	const excludeTickets = normalizeExcludeTickets(
+		config.excludeTickets ?? [],
+		"invalid toolkit-intake.json",
+	);
 	return { ...config, excludeTickets };
 }

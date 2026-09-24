@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { readRepositoryIntakeConfig } from "./intake-config.mjs";
+import {
+	normalizeExcludeTickets,
+	readRepositoryIntakeConfig,
+} from "./intake-config.mjs";
 import { ACTIVE, atomicWrite, newBatch } from "./orchestration.mjs";
 import { github, helperIdentity } from "./orchestration-github.mjs";
 import {
@@ -106,7 +109,9 @@ function configuredPolicy(anchor, cwd, policy, input) {
 		count: input.count,
 		cron: input.cron ?? policy?.cron ?? "*/30 8-19 * * *",
 		timezone: input.timezone ?? policy?.timezone ?? "UTC",
-		excludeTickets: input.excludeTickets ?? policy?.excludeTickets ?? [],
+		excludeTickets: normalizeExcludeTickets(
+			input.excludeTickets ?? policy?.excludeTickets ?? [],
+		),
 		scheduleName: `ticket-intake:${input.repository}`,
 		scheduleId: policy?.scheduleId ?? null,
 		paused: policy?.paused ?? false,
@@ -174,11 +179,9 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				delete policy.pauseReason;
 			}
 		} else if (command === "tick") {
-			if (
-				input.excludeTickets !== undefined &&
-				!Array.isArray(input.excludeTickets)
-			)
-				throw new Error("excludeTickets must be an array");
+			const dynamicExclusions = normalizeExcludeTickets(
+				input.excludeTickets ?? [],
+			);
 			if (policy.paused)
 				return {
 					status: "paused",
@@ -258,7 +261,7 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 						models: input.models,
 						excludeTickets: [
 							...(policy.excludeTickets ?? []),
-							...(input.excludeTickets ?? []),
+							...dynamicExclusions,
 						],
 					};
 					const selection = selectNext(
