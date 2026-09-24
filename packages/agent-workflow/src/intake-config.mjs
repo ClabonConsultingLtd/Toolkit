@@ -10,7 +10,24 @@ const fields = new Set([
 	"cron",
 	"timezone",
 	"excludeTickets",
+	"requiredChecks",
 ]);
+
+export function normalizeRequiredChecks(value, source = "intake request") {
+	if (
+		!Array.isArray(value) ||
+		value.some(
+			(name) =>
+				typeof name !== "string" || !name.trim() || name !== name.trim(),
+		)
+	)
+		throw new Error(
+			`${source}: requiredChecks must contain non-empty check names`,
+		);
+	if (new Set(value).size !== value.length)
+		throw new Error(`${source}: duplicate requiredChecks`);
+	return value;
+}
 
 export function normalizeExcludeTickets(value, source = "intake request") {
 	if (
@@ -59,5 +76,16 @@ export function readRepositoryIntakeConfig(cwd) {
 		config.excludeTickets ?? [],
 		"invalid toolkit-intake.json",
 	);
-	return { ...config, excludeTickets };
+	const requiredChecks =
+		config.requiredChecks === undefined
+			? undefined
+			: normalizeRequiredChecks(
+					config.requiredChecks,
+					"invalid toolkit-intake.json",
+				);
+	return {
+		...config,
+		excludeTickets,
+		...(requiredChecks === undefined ? {} : { requiredChecks }),
+	};
 }

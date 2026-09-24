@@ -23,6 +23,7 @@ Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as 
 | review | number, evidence | Record completed worker output; begin Codex review. |
 | fix | number, reason | Increment fix count and reserve worker; third request blocks without launching. |
 | ready | number, evidence, reviewedHead | Verify open PR and check results; record awaiting_merge. |
+| merge-ready | number | Recheck the reviewed PR head, draft state, and required checks before an authorized controller merge; returns the head SHA to match during merge. |
 | block | number, reason; workerStopped:true only with evidence of stop | Human blocker; uncertain/running workers still consume a slot. |
 | resume | number, evidence; resetFixCycles:true if explicitly authorized | Recover human blocker; cannot bypass an uncertain launch. |
 | schedule | scheduleId | Persist scheduler identity; refuses replacement. |
