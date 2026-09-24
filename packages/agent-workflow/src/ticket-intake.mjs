@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
 	normalizeExcludeTickets,
+	normalizeRequiredChecks,
 	readRepositoryIntakeConfig,
 } from "./intake-config.mjs";
 import { ACTIVE, atomicWrite, newBatch } from "./orchestration.mjs";
@@ -25,6 +26,8 @@ export function readIntake(batchFile) {
 		policy.count < 1
 	)
 		throw new Error("invalid intake policy");
+	if (policy.requiredChecks !== undefined)
+		normalizeRequiredChecks(policy.requiredChecks, "invalid intake policy");
 	return policy;
 }
 export function isInProgress(ticket) {
@@ -112,6 +115,9 @@ function configuredPolicy(anchor, cwd, policy, input) {
 		excludeTickets: normalizeExcludeTickets(
 			input.excludeTickets ?? policy?.excludeTickets ?? [],
 		),
+		...(input.requiredChecks === undefined
+			? {}
+			: { requiredChecks: normalizeRequiredChecks(input.requiredChecks) }),
 		scheduleName: `ticket-intake:${input.repository}`,
 		scheduleId: policy?.scheduleId ?? null,
 		paused: policy?.paused ?? false,

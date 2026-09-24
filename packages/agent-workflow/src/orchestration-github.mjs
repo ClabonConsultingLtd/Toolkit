@@ -211,6 +211,20 @@ export function github(repository, exec = gh) {
 	return {
 		issue,
 		pr,
+		requiredStatusChecks(branch) {
+			const data = json([
+				"api",
+				`repos/${repository}/branches/${encodeURIComponent(branch)}/protection/required_status_checks`,
+			]);
+			if (!Array.isArray(data.contexts) || !Array.isArray(data.checks))
+				throw new Error("required checks response is invalid");
+			return [
+				...new Set([
+					...data.contexts,
+					...data.checks.map((check) => check.context),
+				]),
+			];
+		},
 		subTickets,
 		listReady() {
 			return json([
