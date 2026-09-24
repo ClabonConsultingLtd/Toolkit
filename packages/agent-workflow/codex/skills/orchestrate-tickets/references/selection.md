@@ -7,7 +7,7 @@ Resolve the repository from the current project, and ask for N only if absent.
 Generate a unique lowercase batch ID such as `next-5-20260920-120000` unless the
 user names one. A reference to an existing batch means resume, not reselection.
 
-Read repository guidance and discover Claude models as usual. Inspect current
+Read repository guidance, check `claude-cooldown`, and discover Claude models as usual. During a cooldown also discover Codex models. Inspect current
 Paseo agents/workspaces for this repository; place issue numbers already being
 worked on outside known batch state in `excludeTickets`. If discovery is
 unavailable or truncated such that ownership cannot be determined, resolve it
@@ -17,7 +17,8 @@ before initializing. All batch state belongs under the stable checkout's
 Pass an initialization request with `count: N` instead of `tickets`, plus `models`
 (the raw `models` array from Paseo `list_models({provider: "claude"})`, including
 each model's `thinkingOptions` objects), repository, batchId, cwd,
-baseBranch and initiating codexModel. Optional `excludeTickets` accepts issue
+baseBranch and initiating codexModel. During a cooldown pass `codexModels` from
+Paseo's Codex catalog too. Optional `excludeTickets` accepts issue
 numbers; concurrency remains 1–3 and is independent of batch size.
 
 `select-next` is a read-only preview. `init-next` repeats discovery under a shared

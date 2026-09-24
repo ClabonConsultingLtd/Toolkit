@@ -16,9 +16,14 @@ import {
 import {
 	github,
 	requireReady,
-	resolveRuntime,
+	resolveWorkerRuntime,
 	verifyPr,
 } from "./orchestration-github.mjs";
+import {
+	fallbackStatePath,
+	readClaudeCooldown,
+	recordClaudeLimit,
+} from "./provider-fallback.mjs";
 import { capacity, enforceCapacity, isInProgress } from "./ticket-intake.mjs";
 import {
 	assertUnclaimed,
@@ -27,10 +32,22 @@ import {
 } from "./ticket-selection.mjs";
 
 export function execute(command, path, input = {}, options = {}) {
+	if (command === "claude-cooldown")
+		return readClaudeCooldown(options.fallbackStatePath ?? fallbackStatePath());
+	if (command === "record-claude-limit")
+		return recordClaudeLimit(
+			options.fallbackStatePath ?? fallbackStatePath(),
+			input.error,
+			{ agentId: input.agentId, failureKey: input.failureKey },
+		);
 	const makeGitHub = options.github ?? github;
 	if (command === "status") return readState(path);
 	if (command === "select-next")
-		return selectNext(path, input, makeGitHub(input.repository));
+		return selectNext(
+			path,
+			{ ...input, fallbackStatePath: options.fallbackStatePath },
+			makeGitHub(input.repository),
+		);
 	if (command === "init" || command === "init-next") {
 		return withSelectionLock(path, () =>
 			transaction(path, (existing) => {
@@ -40,7 +57,11 @@ export function execute(command, path, input = {}, options = {}) {
 					assertUnclaimed(path, input);
 					return { state, output: state };
 				}
-				const selection = selectNext(path, input, makeGitHub(input.repository));
+				const selection = selectNext(
+					path,
+					{ ...input, fallbackStatePath: options.fallbackStatePath },
+					makeGitHub(input.repository),
+				);
 				if (!selection.tickets.length)
 					return { output: { initialized: false, ...selection } };
 				const state = newBatch({ ...input, tickets: selection.tickets });
@@ -120,7 +141,9 @@ export function execute(command, path, input = {}, options = {}) {
 					const t = state.tickets[String(input.number).replace(/^#/, "")];
 					if (!t) throw new Error("ticket outside selected batch");
 					const issue = requireReady(state, t, issues);
-					const runtime = resolveRuntime(issue.recommendation, input.models);
+					const runtime = resolveWorkerRuntime(issue.recommendation, input, {
+						statePath: options.fallbackStatePath,
+					});
 					output = changeTicket(state, input.number, "reserve", runtime);
 				} else {
 					output = { ...disposition(state), issues };
