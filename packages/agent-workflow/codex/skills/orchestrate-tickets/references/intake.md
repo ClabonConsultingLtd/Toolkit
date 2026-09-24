@@ -85,8 +85,11 @@ intake helper and checkout, and instruct the run to:
    checking both states, including after a zero-selection run. Then read all
    existing batches. Reconcile worker/PR progress using normal orchestration
    leases; skip a batch owned by another run. Review completed workers and PRs
-   before new admission. Where the user has explicitly authorized automated
-   merging, merge qualifying reviewed PRs, then `sync` their exact batches so
+   before new admission. Where the user has explicitly authorized scheduled Codex approval and
+   merging, submit an approval review when GitHub permits it, then merge only
+   exact linked PRs whose reviewed heads are unchanged and whose required checks
+   and reviews pass. Leave PRs awaiting merge when the controller cannot approve
+   its own PR or branch protection requires another reviewer. Then `sync` their exact batches so
    verified merges close their issues and release dependencies. Otherwise only
    reconcile PRs already merged outside the controller. Renew each held lease at
    least every five minutes during long reviews or tests and immediately before
