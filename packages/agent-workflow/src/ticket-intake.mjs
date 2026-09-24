@@ -1,5 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import {
+	normalizeExcludeTickets,
+	readRepositoryIntakeConfig,
+} from "./intake-config.mjs";
 import { ACTIVE, atomicWrite, newBatch } from "./orchestration.mjs";
 import { github, helperIdentity } from "./orchestration-github.mjs";
 import {
@@ -76,61 +80,89 @@ function readHourlyBatch(batchFile, repository, hour) {
 		throw new Error("intake batch ID collision");
 	return existing;
 }
+function configuredPolicy(anchor, cwd, policy, input) {
+	if (!Number.isSafeInteger(input.count) || input.count < 1)
+		throw new Error("count must be a positive integer");
+	for (const field of ["cron", "timezone"])
+		if (
+			input[field] !== undefined &&
+			(typeof input[field] !== "string" || !input[field].trim())
+		)
+			throw new Error(`${field} must be a nonempty string`);
+	newBatch({ ...input, cwd, batchId: "intake-validation", tickets: ["1"] });
+	if (
+		policy &&
+		policy.repository.toLowerCase() !== input.repository.toLowerCase()
+	)
+		throw new Error("intake already configured for another repository");
+	const current = capacity(anchor, input.repository);
+	if (current.active > input.count)
+		throw new Error(
+			"requested limit is below current active work; wait before lowering it",
+		);
+	return {
+		version: 1,
+		repository: input.repository,
+		cwd,
+		baseBranch: input.baseBranch,
+		codexModel: input.codexModel,
+		count: input.count,
+		cron: input.cron ?? policy?.cron ?? "*/30 8-19 * * *",
+		timezone: input.timezone ?? policy?.timezone ?? "UTC",
+		excludeTickets: normalizeExcludeTickets(
+			input.excludeTickets ?? policy?.excludeTickets ?? [],
+		),
+		scheduleName: `ticket-intake:${input.repository}`,
+		scheduleId: policy?.scheduleId ?? null,
+		paused: policy?.paused ?? false,
+		...(policy?.paused && {
+			pausedAt: policy.pausedAt,
+			pauseReason: policy.pauseReason,
+		}),
+		lastTick: policy?.lastTick ?? null,
+	};
+}
 export function intakeCommand(command, checkout, input = {}, options = {}) {
 	const cwd = resolve(checkout),
 		anchor = join(cwd, ".toolkit", "orchestration", "intake-anchor.json");
 	const activeHelper = helperIdentity();
 	if (command === "status") {
 		const policy = readIntake(anchor);
+		const config = readRepositoryIntakeConfig(cwd);
 		return policy
-			? { ...policy, activeHelper }
-			: { activeHelper, configured: false };
+			? {
+					...policy,
+					activeHelper,
+					repositoryConfig: config ? "toolkit-intake.json" : null,
+				}
+			: {
+					activeHelper,
+					configured: false,
+					repositoryConfig: config ? "toolkit-intake.json" : null,
+				};
 	}
 	const result = withSelectionLock(anchor, () => {
 		let policy = readIntake(anchor);
 		const path = intakePath(anchor);
-		if (command === "configure") {
-			if (!Number.isSafeInteger(input.count) || input.count < 1)
-				throw new Error("count must be a positive integer");
-			for (const field of ["cron", "timezone"])
-				if (
-					input[field] !== undefined &&
-					(typeof input[field] !== "string" || !input[field].trim())
-				)
-					throw new Error(`${field} must be a nonempty string`);
-			newBatch({ ...input, cwd, batchId: "intake-validation", tickets: ["1"] });
-			if (
-				policy &&
-				policy.repository.toLowerCase() !== input.repository.toLowerCase()
-			)
-				throw new Error("intake already configured for another repository");
-			const current = capacity(anchor, input.repository);
-			if (current.active > input.count)
+		const config = ["configure", "sync-config", "tick"].includes(command)
+			? readRepositoryIntakeConfig(cwd)
+			: null;
+		if (command === "configure" || command === "sync-config") {
+			if (command === "sync-config" && !config)
+				throw new Error("toolkit-intake.json is required for sync-config");
+			if (config && Object.keys(input).length)
 				throw new Error(
-					"requested limit is below current active work; wait before lowering it",
+					"toolkit-intake.json is authoritative; configure without a request",
 				);
-			policy = {
-				version: 1,
-				repository: input.repository,
-				cwd,
-				baseBranch: input.baseBranch,
-				codexModel: input.codexModel,
-				count: input.count,
-				cron: input.cron ?? policy?.cron ?? "*/30 8-19 * * *",
-				timezone: input.timezone ?? policy?.timezone ?? "UTC",
-				scheduleName: `ticket-intake:${input.repository}`,
-				scheduleId: policy?.scheduleId ?? null,
-				paused: policy?.paused ?? false,
-				...(policy?.paused && {
-					pausedAt: policy.pausedAt,
-					pauseReason: policy.pauseReason,
-				}),
-				lastTick: policy?.lastTick ?? null,
-			};
+			policy = configuredPolicy(anchor, cwd, policy, config ?? input);
 			atomicWrite(path, policy);
 			return policy;
 		}
 		if (!policy) throw new Error("configure intake first");
+		if (command === "tick" && config) {
+			policy = configuredPolicy(anchor, cwd, policy, config);
+			atomicWrite(path, policy);
+		}
 		if (command === "schedule") {
 			if (typeof input.scheduleId !== "string" || !input.scheduleId)
 				throw new Error("scheduleId required");
@@ -147,6 +179,9 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				delete policy.pauseReason;
 			}
 		} else if (command === "tick") {
+			const dynamicExclusions = normalizeExcludeTickets(
+				input.excludeTickets ?? [],
+			);
 			if (policy.paused)
 				return {
 					status: "paused",
@@ -224,7 +259,10 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 						count,
 						concurrency: Math.min(3, policy.count),
 						models: input.models,
-						excludeTickets: input.excludeTickets,
+						excludeTickets: [
+							...(policy.excludeTickets ?? []),
+							...dynamicExclusions,
+						],
 					};
 					const selection = selectNext(
 						batchFile,

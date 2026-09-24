@@ -140,6 +140,23 @@ tag with `node cli.mjs pin agent-workflow vX.Y.Z`, then run
 global skill symlink. Restart the Codex session or refresh the schedule prompt so
 it resolves the updated skill and helper paths.
 
+### Repository intake settings
+
+Copy `examples/toolkit-intake.json` to `toolkit-intake.json` at the consuming
+repository root and commit it. The file sets the repository, base branch, shared
+ticket limit (`count`), controller model, optional schedule cron/timezone, and
+ticket numbers that must always be excluded. Keep it separate from the ignored
+`.toolkit/orchestration/.intake/policy.json`, which holds the live schedule ID,
+pause state, and tick history.
+
+Run `node <skill>/scripts/intake.mjs configure CHECKOUT` to initialize the live
+policy from this file. Later changes are applied by `sync-config` or the next
+`tick`; an invalid file or limit lower than active work stops safely. The helper
+cannot change the Paseo schedule itself: reconcile its model and cadence with
+the tracked settings before admission, preserving any explicit pause. If no
+`toolkit-intake.json` exists, the existing request-based configure workflow still
+works. See `codex/skills/orchestrate-tickets/references/intake.md` for details.
+
 Example requests:
 
 ```text

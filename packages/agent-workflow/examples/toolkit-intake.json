@@ -1,0 +1,10 @@
+{
+	"version": 1,
+	"repository": "owner/repo",
+	"baseBranch": "main",
+	"codexModel": "gpt-6-sol",
+	"count": 2,
+	"cron": "*/30 8-19 * * *",
+	"timezone": "UTC",
+	"excludeTickets": []
+}
