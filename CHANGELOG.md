@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.4.0 - 2026-09-24
+## 0.4.1 - 2026-09-24
+
+- #50: Allow scheduled Codex orchestrator to merge reviewed PRs
 
 - #48: feat: support tracked per-repository intake settings
 
