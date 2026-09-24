@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.4.1 - 2026-09-24
+## 0.4.2 - 2026-09-24
+
+- #53: Add Codex fallback for Claude-limited ticket workers
 
 - #50: Allow scheduled Codex orchestrator to merge reviewed PRs
 
