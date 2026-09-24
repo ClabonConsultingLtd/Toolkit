@@ -95,6 +95,36 @@ test("9am selects N; 10am admits only free slots; review and awaiting-merge coun
 	assert.equal(third.capacity.admissionSlots, 0);
 	assert.match(third.skipped[0].reason, /release a slot/);
 });
+test("bad catalog cannot persist an empty tick; corrected input admits in the same hour", (t) => {
+	const f = fixture(t);
+	assert.throws(
+		() =>
+			intakeCommand(
+				"tick",
+				f.cwd,
+				{ models: [{ id: "claude-sonnet-5", thinkingOptionIds: "medium" }] },
+				f.options,
+			),
+		/invalid Paseo Claude model catalog/,
+	);
+	assert.equal(
+		JSON.parse(
+			readFileSync(
+				intakePath(join(f.cwd, ".toolkit/orchestration/intake-anchor.json")),
+				"utf8",
+			),
+		).lastTick,
+		null,
+	);
+	const admitted = intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models },
+		f.options,
+	);
+	assert.equal(admitted.status, "admitted");
+	assert.deepEqual(admitted.tickets, ["1", "2", "3"]);
+});
 test("same-hour ticks are idempotent even after a slot becomes free", (t) => {
 	const f = fixture(t),
 		a = intakeCommand("tick", f.cwd, { models: f.models }, f.options);

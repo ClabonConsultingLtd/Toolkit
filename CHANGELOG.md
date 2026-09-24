@@ -18,7 +18,7 @@
 
 - #25: Handle malformed intake dependency metadata per ticket
 
-- #21: Feed back generic hook/skill improvements from ProjectTriArch
+- #21: Feed back generic hook/skill improvements from a consumer project
 
 - #18: Add eligible ticket selection and capacity-limited hourly intake
 

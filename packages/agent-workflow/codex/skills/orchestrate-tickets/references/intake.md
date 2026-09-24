@@ -64,12 +64,30 @@ intake helper and checkout, and instruct the run to:
    the drift. Resolve a missing or mismatched schedule before new admission;
    preserve explicit user pauses. Do not claim the controller is enabled without
    checking both states, including after a zero-selection run. Then read all
-   existing batches. Reconcile worker/PR progress using
-   normal orchestration leases; skip a batch owned by another run. Resume queued
-   work in older batches first. Stop launching if the shared cap rejects a
-   reservation. Never mark a capacity wait as a human blocker.
-2. Discover current Claude models and active work. Run `intake ... tick` with
-   `models` and optional `excludeTickets` for work outside saved batches. This
+   existing batches. Reconcile worker/PR progress using normal orchestration
+   leases; skip a batch owned by another run. Review completed workers and PRs
+   before new admission. Where the user has explicitly authorized automated
+   merging, merge qualifying reviewed PRs, then `sync` their exact batches so
+   verified merges close their issues and release dependencies. Otherwise only
+   reconcile PRs already merged outside the controller. Renew each held lease at
+   least every five minutes during long reviews or tests and immediately before
+   external mutations. Release it in a cleanup step even after a failed review;
+   report a failed release rather than claiming success. Resume queued work in
+   older batches first. Stop launching if the shared cap rejects a reservation.
+   Never mark a capacity wait as a human blocker.
+2. Discover current Claude models and active work. Pass the raw `models` array
+   from Paseo `list_models({provider: "claude"})`, preserving each model's
+   `thinkingOptions: [{id, ...}]`. The helper also accepts a validated
+   `thinkingOptionIds: ["high", ...]` array, but never synthesize unsupported
+   options.
+   If the schedule prompt authorizes implementation-metadata repair, run a
+   read-only `select-next` preview with the valid catalog. For an issue skipped
+   solely because its recommendation is absent, malformed or unsupported,
+   re-read that issue and correct only its Implementation recommendation using
+   its existing requirements and a supported model/effort. Leave issues needing
+   a product decision unchanged and report them. Never edit a ticket to
+   compensate for a malformed catalog. Then run `intake ... tick` with `models`
+   and optional `excludeTickets` for work outside saved batches. This
    atomically admits up to `min(N, available capacity)` eligible tickets using the
    same readiness/dependency/model/PR exclusions as [selection.md](selection.md).
 3. If initialized, process the returned batch using the normal orchestration
@@ -79,12 +97,14 @@ intake helper and checkout, and instruct the run to:
    across them all. Existing independent batch schedules can coexist because the
    shared reservation limit and per-batch leases prevent over-dispatch/duplicate
    review, provided they use this helper version.
-4. Review completed work, request up to two fixes, and ready qualifying PRs. The
-   user alone merges. Close/relabel issues only after verifying PR merge. Release
-   any held batch leases on exit. Report new selections, active count, PR links
-   and blockers. Say whether this was a new admission, an empty evaluation,
-   a capacity wait, a replay, or a reconciliation-only run; report the actual
-   Paseo schedule state and next run from that schedule.
+4. Review any worker that finishes during this run with the same rules as step 1.
+   The user alone merges unless they explicitly authorize automated merging.
+   Close/relabel only the exact issue after verifying its linked PR merge. If a
+   catalog validation fails, correct the input and retry in the same UTC hour;
+   a nonempty admission must replay and cannot be refilled. Report new
+   selections, active count, PR links and blockers. Say whether this was a new
+   admission, an empty evaluation, a capacity wait, a replay, or a
+   reconciliation-only run; report the actual Paseo schedule state and next run.
 
 Keep an already enabled intake schedule running when capacity is full, no eligible
 issues exist, or one batch finishes: a later run may admit more. Pause it on

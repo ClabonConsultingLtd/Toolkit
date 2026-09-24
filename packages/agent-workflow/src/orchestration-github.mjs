@@ -432,11 +432,36 @@ export function requireReady(state, ticket, issues) {
 	return issue;
 }
 
+export function normalizeClaudeModels(models) {
+	if (!Array.isArray(models) || models.length === 0)
+		throw new Error("current Paseo Claude model catalog required");
+	return models.map((model, index) => {
+		if (!model || typeof model.id !== "string" || !model.id.trim())
+			throw new Error(
+				`invalid Paseo Claude model catalog: models[${index}].id required`,
+			);
+		let thinkingOptions = model.thinkingOptions;
+		if (thinkingOptions === undefined && Array.isArray(model.thinkingOptionIds))
+			thinkingOptions = model.thinkingOptionIds.map((id) => ({ id }));
+		if (
+			!Array.isArray(thinkingOptions) ||
+			thinkingOptions.some(
+				(option) =>
+					!option || typeof option.id !== "string" || !option.id.trim(),
+			)
+		)
+			throw new Error(
+				`invalid Paseo Claude model catalog: models[${index}].thinkingOptions required (or thinkingOptionIds array)`,
+			);
+		return { ...model, thinkingOptions };
+	});
+}
+
 export function resolveRuntime(rec, models) {
-	if (!rec || !Array.isArray(models))
-		throw new Error("recommendation and Paseo model catalog required");
+	if (!rec) throw new Error("Claude recommendation required");
+	const catalog = normalizeClaudeModels(models);
 	const wanted = rec.model.toLowerCase();
-	const capable = models.filter((m) =>
+	const capable = catalog.filter((m) =>
 		m.thinkingOptions?.some((o) => o.id === rec.effort),
 	);
 	let model = capable.find(
