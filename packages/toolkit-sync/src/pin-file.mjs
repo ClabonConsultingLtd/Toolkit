@@ -16,20 +16,42 @@ export function writePins(pinFilePath, pins) {
 	writeFileSync(pinFilePath, `${JSON.stringify(sorted, null, "\t")}\n`);
 }
 
-export function setPin(pinFilePath, packageName, tag, sha) {
+/**
+ * Record `{tag, sha}` for `packageName`, keeping its recorded `dest` and
+ * last-synced baseline. Pass `dest` (repo-relative, POSIX) to set or replace it.
+ */
+export function setPin(pinFilePath, packageName, tag, sha, { dest } = {}) {
 	const pins = readPins(pinFilePath);
-	const syncedFiles = pins[packageName]?.syncedFiles;
-	pins[packageName] = syncedFiles ? { tag, sha, syncedFiles } : { tag, sha };
+	const previous = pins[packageName] ?? {};
+	const entry = { tag, sha };
+	const recordedDest = dest ?? previous.dest;
+	if (recordedDest !== undefined) entry.dest = recordedDest;
+	for (const key of ["syncedSha", "syncedFiles", "syncedHashes"]) {
+		if (previous[key] !== undefined) entry[key] = previous[key];
+	}
+	pins[packageName] = entry;
 	writePins(pinFilePath, pins);
 	return pins;
 }
 
-/** Record which package-relative files a `sync` last wrote, so a later sync can remove ones no longer manifested. */
-export function setSyncedFiles(pinFilePath, packageName, files) {
+/**
+ * Record what a `sync` last wrote: the commit (`sha`), the package-relative
+ * `files` (so a later sync can remove ones no longer manifested), and their
+ * content `hashes` (the baseline that separates local edits from upstream changes).
+ */
+export function setSyncedFiles(
+	pinFilePath,
+	packageName,
+	files,
+	{ sha, hashes } = {},
+) {
 	const pins = readPins(pinFilePath);
 	if (!pins[packageName])
 		throw new Error(`no pin recorded for "${packageName}"`);
-	pins[packageName] = { ...pins[packageName], syncedFiles: files };
+	const entry = { ...pins[packageName], syncedFiles: files };
+	if (sha !== undefined) entry.syncedSha = sha;
+	if (hashes !== undefined) entry.syncedHashes = hashes;
+	pins[packageName] = entry;
 	writePins(pinFilePath, pins);
 	return pins;
 }
