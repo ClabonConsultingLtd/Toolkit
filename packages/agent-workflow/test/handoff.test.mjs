@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -104,4 +104,18 @@ test("handoff refuses symlinked editable files before including their content", 
 			),
 		/symlink|escapes/,
 	);
+});
+test("bounded-handoff skills are self-contained when copied into a skills directory", () => {
+	const skill = (provider) =>
+		readFileSync(
+			new URL(
+				`../${provider}/skills/bounded-handoff/SKILL.md`,
+				import.meta.url,
+			),
+			"utf8",
+		);
+	const claude = skill("claude");
+	assert.doesNotMatch(claude, /\]\(\.\.?\//);
+	assert.match(claude, /Editable:/);
+	assert.equal(skill("codex"), claude);
 });

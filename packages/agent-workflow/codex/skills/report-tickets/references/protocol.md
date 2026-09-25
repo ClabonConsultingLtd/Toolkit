@@ -59,13 +59,23 @@ It never writes to `orchestrate-tickets`'s batch state file.
           "recommendationMismatch": true,
           "anomalous": false
         }
+      ],
+      "archivable": [
+        {
+          "number": "6",
+          "pr": "https://github.com/example/project/pull/12",
+          "branch": "tickets/exports/6",
+          "workspaceId": "<Paseo workspace ID or null>",
+          "agentId": "<Paseo agent ID or null>",
+          "mergedAt": "<ISO timestamp>"
+        }
       ]
     }
   ]
 }
 ```
 
-`summary` counts only tickets whose `updatedAt` is newer than the previous cursor (every ticket if there is no previous cursor). The `tickets` array always lists every ticket in the batch, regardless of cursor, so fix-cycle-cap and stuck-ticket flags stay visible even when a ticket hasn't moved since the last digest. `fixCycleCapped` is `fixCycles >= 2`. A recommendation is only fetched, and `recommendationMismatch` only computed, for a ticket that already has an actual runtime (i.e. was reserved) — a still-queued ticket has nothing to compare against, so it is skipped. Model comparison mirrors `resolveRuntime`'s own matching: an exact id/label match, or a bare family name (`Sonnet`/`Opus`/`Haiku`) matching any numbered model in that family, since the digest has no model catalog to resolve a family recommendation to the exact id that was actually launched. `anomalous` is the fixed-hour-threshold stuck-ticket flag only (a non-completed ticket whose `updatedAt` is older than `stuckHours`); it is never true when `updatedAt` is unknown.
+`summary` counts only tickets whose `updatedAt` is newer than the previous cursor (every ticket if there is no previous cursor). The `tickets` array always lists every ticket in the batch, regardless of cursor, so fix-cycle-cap and stuck-ticket flags stay visible even when a ticket hasn't moved since the last digest. `fixCycleCapped` is `fixCycles >= 2`. A recommendation is only fetched, and `recommendationMismatch` only computed, for a ticket that already has an actual runtime (i.e. was reserved) — a still-queued ticket has nothing to compare against, so it is skipped. Model comparison mirrors `resolveRuntime`'s own matching: an exact id/label match, or a bare family name (`Sonnet`/`Opus`/`Haiku`) matching any numbered model in that family, since the digest has no model catalog to resolve a family recommendation to the exact id that was actually launched. `anomalous` is the fixed-hour-threshold stuck-ticket flag only (a non-completed ticket whose `updatedAt` is older than `stuckHours`); it is never true when `updatedAt` is unknown. `archivable` lists every completed ticket with a recorded `mergedAt` (its PR was verified merged into the batch base during `sync`) and a saved workspace or agent, regardless of cursor; the Markdown lists them under "worktrees can be archived". The helper only reports them; archiving is left to the user.
 
 ## Recovery
 

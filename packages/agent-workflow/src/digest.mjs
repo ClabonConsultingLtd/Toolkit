@@ -78,6 +78,25 @@ export function ticketRecord(
 		anomalous: stuck,
 	};
 }
+// A completed ticket's PR was verified merged into the batch base, so its
+// worktree and agent can be archived. Report only; the user archives them.
+export function archivableTickets(state) {
+	return Object.values(state.tickets)
+		.filter(
+			(t) =>
+				t.status === "completed" &&
+				!!t.mergedAt &&
+				!!(t.workspaceId || t.agentId),
+		)
+		.map((t) => ({
+			number: t.number,
+			pr: t.prUrl ?? t.pr ?? null,
+			branch: t.branch ?? null,
+			workspaceId: t.workspaceId ?? null,
+			agentId: t.agentId ?? null,
+			mergedAt: t.mergedAt,
+		}));
+}
 export function batchDigest(state, options) {
 	const tickets = Object.values(state.tickets).map((t) =>
 		ticketRecord(t, {
@@ -107,6 +126,7 @@ export function batchDigest(state, options) {
 			).length,
 		},
 		tickets,
+		archivable: archivableTickets(state),
 	};
 }
 export function buildDigest(states, options = {}) {
@@ -165,6 +185,23 @@ export function renderMarkdown(digest) {
 			);
 		}
 		lines.push("");
+		if (batch.archivable?.length)
+			lines.push(
+				"Merged; worktrees can be archived (left to you):",
+				"",
+				...batch.archivable.map(
+					(a) =>
+						`- #${a.number}: ${[
+							a.pr && `PR ${a.pr}`,
+							a.branch && `branch \`${a.branch}\``,
+							a.workspaceId && `workspace \`${a.workspaceId}\``,
+							a.agentId && `agent \`${a.agentId}\``,
+						]
+							.filter(Boolean)
+							.join(", ")}`,
+				),
+				"",
+			);
 	}
 	return lines.join("\n");
 }

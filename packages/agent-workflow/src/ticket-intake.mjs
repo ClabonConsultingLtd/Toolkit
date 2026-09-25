@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import {
 	normalizeExcludeTickets,
 	normalizeRequiredChecks,
+	normalizeSpecLabels,
 	readRepositoryIntakeConfig,
 } from "./intake-config.mjs";
 import { ACTIVE, atomicWrite, newBatch } from "./orchestration.mjs";
@@ -118,6 +119,9 @@ function configuredPolicy(anchor, cwd, policy, input) {
 		...(input.requiredChecks === undefined
 			? {}
 			: { requiredChecks: normalizeRequiredChecks(input.requiredChecks) }),
+		...(input.specLabels === undefined
+			? {}
+			: { specLabels: normalizeSpecLabels(input.specLabels) }),
 		scheduleName: `ticket-intake:${input.repository}`,
 		scheduleId: policy?.scheduleId ?? null,
 		paused: policy?.paused ?? false,
