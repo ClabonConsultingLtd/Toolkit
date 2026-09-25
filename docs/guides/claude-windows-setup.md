@@ -10,7 +10,7 @@ It then walks through the complete feature workflow using Matt Pocock's skills: 
 
 Out of scope: Codex, Paseo (`orchestrate-tickets`, `triage-tickets`, `report-tickets`), the bounded model handoff, and the image packages.
 
-Commands run in **Git Bash** unless a step says **PowerShell**. The guide uses Toolkit `v0.6.0`; substitute the latest [release tag](https://github.com/ClabonConsultingLtd/Toolkit/tags).
+Commands run in **Git Bash** unless a step says **PowerShell**. Agent instructions live in `AGENTS.md`, not `CLAUDE.md`: Claude Code reads `AGENTS.md` when a repository has no `CLAUDE.md`, and other coding agents read the same file, so one set of instructions serves them all. The guide uses Toolkit `v0.6.0`; substitute the latest [release tag](https://github.com/ClabonConsultingLtd/Toolkit/tags).
 
 ## Contents
 
@@ -292,15 +292,17 @@ If `.claude/settings.json` already exists, add the two `PreToolUse` entries next
 rm .claude/settings.toolkit-token-optimisation.json
 ```
 
-### 5.3 Point CLAUDE.md at the policy
+### 5.3 Point AGENTS.md at the policy
 
-If the repository has no `CLAUDE.md`, start `claude` and run `/init` to generate one. Then add:
+Create `AGENTS.md` at the repository root if it doesn't exist, and add:
 
 ```markdown
 ## Context use
 
 Follow [.claude/CONTEXT-POLICY.md](.claude/CONTEXT-POLICY.md) for targeted reads and command output.
 ```
+
+Don't add a `CLAUDE.md`, and don't run `/init`, which creates one. Claude Code only falls back to `AGENTS.md` when there is no `CLAUDE.md`, so creating one would hide these instructions from Claude. If the repository already has a `CLAUDE.md`, move its content into `AGENTS.md` and delete it.
 
 ### 5.4 Check it works
 
@@ -340,7 +342,7 @@ Start `claude` and run:
 /setup-matt-pocock-skills
 ```
 
-It asks three things and writes the answers to `docs/agents/`:
+It asks where to put its instructions: choose **`AGENTS.md`**. It then asks three things and writes the answers to `docs/agents/`:
 
 | Question | GitHub track | Local track |
 | --- | --- | --- |
@@ -348,11 +350,7 @@ It asks three things and writes the answers to `docs/agents/`:
 | Triage labels | Accept the defaults: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` | Same defaults. In local tickets they are values of the `**Status:**` line |
 | Domain docs | Single-context (`CONTEXT.md` at the root) for most apps; multi-context (`CONTEXT-MAP.md`) for a monorepo | Same |
 
-It also adds an `## Agent skills` section pointing at those files. If it writes that section to `AGENTS.md`, make sure Claude reads it by adding this line to `CLAUDE.md`:
-
-```markdown
-@AGENTS.md
-```
+It adds an `## Agent skills` section to `AGENTS.md` pointing at those files. Check that it didn't create a `CLAUDE.md`; if it did, move the section into `AGENTS.md` and delete `CLAUDE.md`.
 
 Read the generated `docs/agents/issue-tracker.md`. It's the contract every skill follows. You can edit it, for example to require a verification section in every ticket.
 
@@ -388,7 +386,7 @@ if (!ticket) {
 	process.exit(2);
 }
 
-const shared = `Follow CLAUDE.md and the docs under docs/agents/. Work on the current git branch; do not switch branches, push, or merge.
+const shared = `Follow AGENTS.md and the docs under docs/agents/. Work on the current git branch; do not switch branches, push, or merge.
 Run the project's tests and checks. Commit your work with a message that names the ticket.
 If you cannot finish, or a check fails that you cannot fix, leave the status unchanged, explain why in the ticket, and stop.`;
 
@@ -482,8 +480,7 @@ The single-ticket launcher, `tools/agent-workflow/src/ticket-launch.mjs`, has no
 ## 8. Commit the setup
 
 ```bash
-git add .gitignore .gitattributes toolkit-pins.json tools .claude CLAUDE.md docs scripts ticket-config*.json
-git add AGENTS.md 2>/dev/null   # if setup wrote one
+git add .gitignore .gitattributes toolkit-pins.json tools .claude AGENTS.md docs scripts ticket-config*.json
 git status                      # review, then:
 git commit -m "Set up Toolkit, Claude token optimisation and ticket workflow"
 ```
