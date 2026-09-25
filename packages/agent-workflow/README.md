@@ -136,8 +136,13 @@ it resolves the updated skill and helper paths.
 
 Copy `examples/toolkit-intake.json` to `toolkit-intake.json` at the consuming
 repository root and commit it. The file sets the repository, base branch, shared
-ticket limit (`count`), controller model, optional schedule cron/timezone, and
-ticket numbers that must always be excluded. Keep it separate from the ignored
+ticket limit (`count`), controller model, optional schedule cron/timezone,
+required check names, an optional `localVerificationCommand`, and ticket numbers
+that must always be excluded. The command is a relative `.mjs` path inside the
+stable checkout; it receives the PR number and current head SHA and must exit
+zero only for a complete local pass. The merge helper runs it at `ready` and
+`merge-ready`, so missing or stale evidence blocks both operations. Keep this
+file separate from the ignored
 `.toolkit/orchestration/.intake/policy.json`, which holds the schedule ID,
 last observed pause state, and tick history. The live Paseo schedule determines
 whether intake is paused.
