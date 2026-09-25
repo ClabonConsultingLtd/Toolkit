@@ -1,3 +1,4 @@
+import { lstatSync, realpathSync } from "node:fs";
 import { isAbsolute, normalize, relative, resolve, sep } from "node:path";
 
 function inside(root, path) {
@@ -22,4 +23,14 @@ export function parseTask(text, root) {
 		}),
 	);
 	return { editable, instruction };
+}
+
+export function validateEditable(root, file) {
+	const target = resolve(root, file);
+	if (
+		!inside(resolve(root), target) ||
+		!inside(realpathSync(root), realpathSync(target)) ||
+		lstatSync(target).isSymbolicLink()
+	)
+		throw new Error(`Editable path escapes root or is a symlink: ${file}`);
 }

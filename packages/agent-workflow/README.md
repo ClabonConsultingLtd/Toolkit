@@ -1,6 +1,14 @@
 # Agent workflow
 
-Provider-aware developer automation with project-defined policy. `pnpm handoff <task-directory> --dry-run` previews a bounded handoff; set `TOOLKIT_HANDOFF_ENABLED=on` plus provider credentials to execute it. `pnpm ticket <ticket> --config ticket-config.json --dry-run` validates a ticket before launching the command declared in that configuration file.
+Provider-aware developer automation with project-defined policy. `pnpm handoff <task-directory> --dry-run` previews a bounded handoff; set `TOOLKIT_HANDOFF_ENABLED=on` plus endpoint settings to execute it. `pnpm ticket <ticket> --config ticket-config.json --dry-run` validates a ticket before launching the command declared in that configuration file.
+
+## Bounded handoff from Claude or Codex
+
+The `claude/skills/bounded-handoff` and `codex/skills/bounded-handoff` entrypoints use one [shared procedure](skills/bounded-handoff.md). Install the appropriate skill directory from a persistent Toolkit checkout; for Codex, symlink `codex/skills/bounded-handoff` into `${CODEX_HOME:-$HOME/.codex}/skills/bounded-handoff`. The skill guides delegation and review; `handoff` performs the same bounded edit regardless of the calling agent.
+
+`handoff` accepts OpenAI-compatible chat-completions endpoints. Set `TOOLKIT_HANDOFF_API_URL` to the complete `/chat/completions` URL and `TOOLKIT_HANDOFF_MODEL` to the server's model ID. Set `TOOLKIT_HANDOFF_API_KEY` for a remote endpoint. For a local server on `localhost`, `127.0.0.1`, or `[::1]`, the key may be omitted. For example, Ollama can use `http://localhost:11434/v1/chat/completions` with a locally installed model such as `llama3.2`. The existing `DEEPSEEK_API_URL`, `DEEPSEEK_MODEL`, and `DEEPSEEK_API_KEY` variables remain supported when no generic handoff setting is used. Preview first, then set `TOOLKIT_HANDOFF_ENABLED=on` to execute. Credentials stay in environment variables.
+
+Only the chat-completions response shape is supported; services using a different API need a request/response adapter. The model must return the file-qualified SEARCH/REPLACE format, and the CLI validates every edit before applying it. Declared editable paths must resolve within the project and cannot be symlinks.
 
 ## Ticket workflow compatibility
 
@@ -40,27 +48,11 @@ A manifest for `ticket-batch` mixes providers only per-manifest (one `ticketConf
 
 ## Planned modules
 
-- `deepseek-handoff`: submits a bounded mechanical change to an OpenAI-compatible DeepSeek endpoint, accepts only declared editable files, saves the provider response, and applies validated SEARCH/REPLACE blocks atomically.
 - `implement-ticket`: validates a user-defined ticket schema and launches an isolated implementation session using project-supplied prompt and worktree policy.
 
 ## Non-negotiable boundaries
 
-The package will require an explicit task directory, editable-file list, and opt-in provider credential. It will not assume a ticket location, documentation filenames, source control host, pull-request policy, model, pricing schedule, or repository layout.
-
-## Configuration direction
-
-```toml
-[handoff]
-enabled = false
-provider = "deepseek"
-model = ""
-
-[tickets]
-root = "tasks"
-ready_status = "ready"
-```
-
-The final schema will be validated before any network call or worktree operation.
+The package requires an explicit task directory, editable-file list, and opt-in switch. Remote endpoints require a provider credential. It does not assume a ticket location, documentation filenames, source control host, pull-request policy, model, pricing schedule, or repository layout.
 
 ## Task format
 
