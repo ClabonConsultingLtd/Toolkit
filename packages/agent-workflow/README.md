@@ -6,7 +6,7 @@ Provider-aware developer automation with project-defined policy. `pnpm handoff <
 
 The `claude/skills/bounded-handoff` and `codex/skills/bounded-handoff` entrypoints use one [shared procedure](skills/bounded-handoff.md). Install the appropriate skill directory from a persistent Toolkit checkout; for Codex, symlink `codex/skills/bounded-handoff` into `${CODEX_HOME:-$HOME/.codex}/skills/bounded-handoff`. The skill guides delegation and review; `handoff` performs the same bounded edit regardless of the calling agent.
 
-`handoff` accepts OpenAI-compatible chat-completions endpoints. Set `TOOLKIT_HANDOFF_API_URL` to the complete `/chat/completions` URL and `TOOLKIT_HANDOFF_MODEL` to the server's model ID. Set `TOOLKIT_HANDOFF_API_KEY` for a remote endpoint. For a local server on `localhost`, `127.0.0.1`, or `[::1]`, the key may be omitted. For example, Ollama can use `http://localhost:11434/v1/chat/completions` with a locally installed model such as `llama3.2`. The existing `DEEPSEEK_API_URL`, `DEEPSEEK_MODEL`, and `DEEPSEEK_API_KEY` variables remain supported when no generic handoff setting is used. Preview first, then set `TOOLKIT_HANDOFF_ENABLED=on` to execute. Credentials stay in environment variables.
+`handoff` accepts OpenAI-compatible chat-completions endpoints. Set `TOOLKIT_HANDOFF_API_URL` to the complete `/chat/completions` URL and `TOOLKIT_HANDOFF_MODEL` to the server's model ID. Set `TOOLKIT_HANDOFF_API_KEY` for a remote endpoint. For a local server on `localhost`, `127.0.0.1`, or `[::1]`, the key may be omitted. For example, Ollama can use `http://localhost:11434/v1/chat/completions` with a locally installed model such as `qwen2.5-coder:1.5b`. The request carries only the model and messages, so set decoding options on the server: temperature 0 (SEARCH text must be copied exactly), and a context window (`num_ctx` in an Ollama Modelfile) larger than the instruction plus every editable file. Ollama truncates an over-long prompt from the start, which removes the instruction without an error. The existing `DEEPSEEK_API_URL`, `DEEPSEEK_MODEL`, and `DEEPSEEK_API_KEY` variables remain supported when no generic handoff setting is used. Preview first, then set `TOOLKIT_HANDOFF_ENABLED=on` to execute. Credentials stay in environment variables.
 
 Only the chat-completions response shape is supported; services using a different API need a request/response adapter. The model must return the file-qualified SEARCH/REPLACE format, and the CLI validates every edit before applying it. Declared editable paths must resolve within the project and cannot be symlinks.
 
@@ -300,6 +300,11 @@ catalog. Existing workers remain on their selected provider. Use the
 `claude-cooldown` and `record-claude-limit` helper commands described in the
 orchestration protocol; generic rate limits and unrelated failures do not
 activate fallback. All controllers on the host must use the same state root.
+
+The limited worker is blocked with `blockKind: "provider-limit"` and the reset
+time. Unlike other blocks, it does not pause the schedule: once the reset has
+passed (and the shared Claude cooldown has ended for a Claude worker), `sync`
+lists it in `resumable` and the controller resumes it without human evidence.
 
 ### Admit more work every hour
 
