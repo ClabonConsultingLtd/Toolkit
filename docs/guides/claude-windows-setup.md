@@ -10,7 +10,9 @@ It then walks through the complete feature workflow using Matt Pocock's skills: 
 
 Out of scope: Codex, Paseo (`orchestrate-tickets`, `triage-tickets`, `report-tickets`), the bounded model handoff, and the image packages.
 
-Commands run in **Git Bash** unless a step says **PowerShell**. Agent instructions live in `AGENTS.md`, not `CLAUDE.md`: Claude Code reads `AGENTS.md` when a repository has no `CLAUDE.md`, and other coding agents read the same file, so one set of instructions serves them all. The guide uses Toolkit `v0.6.0`; substitute the latest [release tag](https://github.com/ClabonConsultingLtd/Toolkit/tags).
+Commands run in **Git Bash** unless a step says **PowerShell**. Agent instructions live in `AGENTS.md`, not `CLAUDE.md`: Claude Code reads `AGENTS.md` when a repository has no `CLAUDE.md`, and other coding agents read the same file, so one set of instructions serves them all. The guide needs a Toolkit release newer than `v0.6.0`: earlier releases don't include the setup wizard or the Windows fix for `ticket-batch`.
+
+> **Prefer automation?** The [setup wizard](../../packages/setup-wizard/README.md) does most of sections 1 to 7 for you: a PowerShell script installs the prerequisites and clones Toolkit, then one `node` command sets up the repository. The manual steps below explain what it does and are the reference when you want to change something.
 
 ## Contents
 
@@ -34,10 +36,12 @@ Commands run in **Git Bash** unless a step says **PowerShell**. Agent instructio
 | Node.js 24+ | `toolkit-sync`, hooks, ticket runner, `npx` | Yes |
 | Claude Code | Everything Claude does | Yes |
 | GitHub CLI (`gh`) | GitHub issue tracker | GitHub track only |
-| pnpm 11 | Only for developing Toolkit itself | No |
+| pnpm 11 | The `pnpm implement-*` ticket commands | Yes |
 | Python / uv | Only the image packages | No |
 
-A consuming repository runs every Toolkit command with plain `node`, so it does not need pnpm or Python.
+Toolkit's scripts themselves run with plain `node`. pnpm only runs the short `package.json` aliases this guide adds; the repository doesn't have to use pnpm for its own dependencies.
+
+To install all of these in one step, run the wizard's [prerequisite script](../../packages/setup-wizard/README.md#1-prerequisites-windows) from PowerShell. It covers sections 1.1 to 1.5 and 2. Then sign in to Claude Code and `gh`, and continue from section 3, or let the wizard do sections 3 to 7.
 
 ### 1.1 Git for Windows
 
@@ -124,9 +128,7 @@ Claude Code on Windows uses Git Bash for its own shell commands. If it reports t
 echo 'export CLAUDE_CODE_GIT_BASH_PATH="C:\\Program Files\\Git\\bin\\bash.exe"' >> ~/.bashrc
 ```
 
-### 1.5 Optional: pnpm
-
-You only need pnpm to run Toolkit's own test suite:
+### 1.5 pnpm
 
 ```bash
 npm install -g pnpm@11
@@ -147,8 +149,12 @@ Keep one persistent Toolkit checkout. It's where you copy `toolkit-sync` and the
 ```bash
 cd /c/src
 git clone https://github.com/ClabonConsultingLtd/Toolkit.git
-git -C Toolkit switch --detach v0.6.0
+TAG=$(git -C Toolkit tag --list 'v*' --sort=-v:refname | head -1)
+echo "$TAG"
+git -C Toolkit switch --detach "$TAG"
 ```
+
+`TAG` holds the newest release, and later commands use it. It only lasts for this Git Bash window; in a new window, set it again with the same `TAG=$(...)` line.
 
 ## 3. Prepare your repository
 
@@ -189,7 +195,7 @@ All remaining commands run from the repository root.
 ```bash
 mkdir -p tools/toolkit-sync
 for f in cli git manifest package-sync pin-file; do
-  git -C /c/src/Toolkit show v0.6.0:packages/toolkit-sync/src/$f.mjs > tools/toolkit-sync/$f.mjs
+  git -C /c/src/Toolkit show "$TAG:packages/toolkit-sync/src/$f.mjs" > tools/toolkit-sync/$f.mjs
 done
 node tools/toolkit-sync/cli.mjs --help
 ```
@@ -199,8 +205,8 @@ node tools/toolkit-sync/cli.mjs --help
 Record each package, its release tag, and where it's vendored:
 
 ```bash
-node tools/toolkit-sync/cli.mjs pin agent-workflow v0.6.0 --dest tools/agent-workflow
-node tools/toolkit-sync/cli.mjs pin claude-token-optimisation v0.6.0 --dest tools/claude-token-optimisation
+node tools/toolkit-sync/cli.mjs pin agent-workflow "$TAG" --dest tools/agent-workflow
+node tools/toolkit-sync/cli.mjs pin claude-token-optimisation "$TAG" --dest tools/claude-token-optimisation
 ```
 
 This writes `toolkit-pins.json`. Nothing is copied yet. Copy the files:
@@ -210,7 +216,7 @@ node tools/toolkit-sync/cli.mjs sync
 node tools/toolkit-sync/cli.mjs check
 ```
 
-`check` should report both packages as `up to date with v0.6.0`. It exits non-zero if a vendored file differs from the pinned release. Run it in CI if you want to catch accidental edits.
+`check` should report both packages as up to date with your tag. It exits non-zero if a vendored file differs from the pinned release. Run it in CI if you want to catch accidental edits.
 
 Don't edit files under `tools/` directly: the next `sync` refuses to overwrite them and you have to resolve it by hand. Make changes upstream in Toolkit and sync the release.
 
@@ -373,44 +379,21 @@ gh label create done            --color 5319e7 --force
 
 ### 7.1 The launch script
 
-Create `scripts/claude-ticket.mjs`:
+Copy the launcher template from Toolkit:
 
-```js
-// Launched by tools/agent-workflow ticket / ticket-batch with one argument:
-// a ticket file path (local Markdown) or an issue number (GitHub).
-import { spawnSync } from "node:child_process";
-
-const ticket = process.argv[2];
-if (!ticket) {
-	console.error("usage: node scripts/claude-ticket.mjs TICKET");
-	process.exit(2);
-}
-
-const shared = `Follow AGENTS.md and the docs under docs/agents/. Work on the current git branch; do not switch branches, push, or merge.
-Run the project's tests and checks. Commit your work with a message that names the ticket.
-If you cannot finish, or a check fails that you cannot fix, leave the status unchanged, explain why in the ticket, and stop.`;
-
-const prompt = /^\d+$/.test(ticket)
-	? `Implement GitHub issue #${ticket}. Read it with: gh issue view ${ticket} --comments
-${shared}
-When every acceptance criterion is met and the checks pass, run:
-gh issue edit ${ticket} --remove-label ready-for-agent --add-label done
-and comment on the issue with a summary of the change.`
-	: `Implement the ticket in this file: ${ticket}
-Read the feature's spec.md (in the folder above this ticket's issues/ folder) first.
-${shared}
-When every acceptance criterion is met and the checks pass, tick its checkboxes and change its status line to exactly:
-**Status:** done`;
-
-const result = spawnSync("claude", ["-p", "--permission-mode", "acceptEdits"], {
-	input: prompt,
-	stdio: ["pipe", "inherit", "inherit"],
-	// On Windows, claude may be a .cmd shim that needs a shell to resolve.
-	shell: process.platform === "win32",
-});
-if (result.error) throw result.error;
-process.exit(result.status ?? 1);
+```bash
+mkdir -p scripts
+cp /c/src/Toolkit/packages/setup-wizard/templates/claude-ticket.mjs scripts/
 ```
+
+The runner calls `node scripts/claude-ticket.mjs <ticket>`, where `<ticket>` is a file path or an issue number. The script runs `claude -p --permission-mode acceptEdits` with a prompt that tells Claude to:
+
+- follow `AGENTS.md` and `docs/agents/`, and stay on the current branch without pushing or merging;
+- implement the ticket, run the checks, and commit;
+- mark the ticket done: `**Status:** done` in a local file, or swap the `ready-for-agent` label for `done` on a GitHub issue;
+- if it can't finish, leave the status alone and explain why in the ticket.
+
+The script is yours after copying it, so edit the prompt to suit the repository.
 
 `claude -p` runs one prompt with no interactive session. With `acceptEdits`, Claude can edit files, but can only run shell commands that are on the `permissions.allow` list from [5.2](#52-merge-the-settings). A command outside that list is refused, so the ticket's status stays unchanged and the batch stops. You can extend the list and run the ticket again. Keep the list narrow. Don't use `--dangerously-skip-permissions` outside a disposable sandbox.
 
@@ -444,43 +427,28 @@ The runner reads the ticket's top-level `**Status:** <value>` line.
 
 The runner reads the issue's labels with `gh`, and a closed issue counts as `done`.
 
-### 7.3 The batch wrapper
+### 7.3 Command aliases
 
-On Windows, running `tools/agent-workflow/src/ticket-batch.mjs` directly does nothing and exits 0: its check for being the entry script compares a `file://C:/...` URL with `file:///C:/...` and never matches. Call its exported `runBatch` from `scripts/ticket-batch.mjs` instead. This works on every platform:
+Add short names for the runner to the repository's `package.json`. If the repository has no `package.json`, create one containing just `{ "private": true }` first.
 
-```js
-import { runBatch } from "../tools/agent-workflow/src/ticket-batch.mjs";
-
-const args = process.argv.slice(2);
-const maxIndex = args.indexOf("--max");
-const manifestPath = args.find(
-	(arg, i) => !arg.startsWith("--") && (maxIndex === -1 || i !== maxIndex + 1),
-);
-if (!manifestPath) {
-	console.error(
-		"usage: node scripts/ticket-batch.mjs MANIFEST [--dry-run] [--continue-on-failure] [--max N]",
-	);
-	process.exit(2);
-}
-try {
-	runBatch({
-		manifestPath,
-		dryRun: args.includes("--dry-run"),
-		continueOnFailure: args.includes("--continue-on-failure"),
-		max: maxIndex === -1 ? undefined : Number(args[maxIndex + 1]),
-	});
-} catch (error) {
-	console.error(error.message);
-	process.exitCode = 1;
+```json
+{
+	"scripts": {
+		"implement-ticket": "node tools/agent-workflow/src/ticket-launch.mjs --config ticket-config.json",
+		"implement-issue": "node tools/agent-workflow/src/ticket-launch.mjs --config ticket-config.github.json",
+		"implement-batch": "node tools/agent-workflow/src/ticket-batch.mjs"
+	}
 }
 ```
 
-The single-ticket launcher, `tools/agent-workflow/src/ticket-launch.mjs`, has no such check and runs directly.
+Keep `implement-ticket` for the local track and `implement-issue` for GitHub; drop the one you don't use. `implement-batch` serves both, because each batch manifest names its own ticket configuration.
+
+These are ordinary `package.json` scripts, so `npm run` works too. npm needs `--` before the arguments, otherwise it takes `--dry-run` as its own flag: `npm run implement-ticket -- <ticket> --dry-run`.
 
 ## 8. Commit the setup
 
 ```bash
-git add .gitignore .gitattributes toolkit-pins.json tools .claude AGENTS.md docs scripts ticket-config*.json
+git add .gitignore .gitattributes toolkit-pins.json tools .claude AGENTS.md docs scripts ticket-config*.json package.json
 git status                      # review, then:
 git commit -m "Set up Toolkit, Claude token optimisation and ticket workflow"
 ```
@@ -602,10 +570,10 @@ Preview first. The preview checks the status and prints the command it would run
 
 ```bash
 # Local
-node tools/agent-workflow/src/ticket-launch.mjs .scratch/csv-export/issues/01-export-endpoint.md --config ticket-config.json --dry-run
+pnpm implement-ticket .scratch/csv-export/issues/01-export-endpoint.md --dry-run
 
 # GitHub
-node tools/agent-workflow/src/ticket-launch.mjs 41 --config ticket-config.github.json --dry-run
+pnpm implement-issue 41 --dry-run
 ```
 
 Drop `--dry-run` to run Claude on it. The command fails with `ticket status must be ready-for-agent` if the ticket isn't ready.
@@ -641,8 +609,8 @@ Write a manifest listing the tickets in the order they should be built, with blo
 Preview, then run:
 
 ```bash
-node scripts/ticket-batch.mjs .scratch/csv-export/batch.json --dry-run
-node scripts/ticket-batch.mjs .scratch/csv-export/batch.json
+pnpm implement-batch .scratch/csv-export/batch.json --dry-run
+pnpm implement-batch .scratch/csv-export/batch.json
 ```
 
 The batch launches one ticket, waits for Claude to exit, and re-reads the ticket's status. It moves on only if the status is now `done`. Otherwise it stops and prints `ticket did not complete`. Tickets already `done` are skipped. Progress is saved to `.toolkit/ticket-batch-state.json` beside the manifest, so after fixing a problem you re-run the same command and it resumes. `--max N` limits how many tickets launch in one run. `--continue-on-failure` carries on past a failed ticket, which is only safe when the remaining tickets don't depend on it.
@@ -673,34 +641,42 @@ When a new Toolkit release is tagged, update your clone:
 
 ```bash
 git -C /c/src/Toolkit fetch --tags
-git -C /c/src/Toolkit switch --detach v0.7.0
+TAG=$(git -C /c/src/Toolkit tag --list 'v*' --sort=-v:refname | head -1)
+git -C /c/src/Toolkit switch --detach "$TAG"
 ```
 
 Then, in your repository, start `claude` and ask:
 
 ```text
-Use the toolkit-upgrade skill to upgrade agent-workflow and claude-token-optimisation to v0.7.0
+Use the toolkit-upgrade skill to upgrade agent-workflow and claude-token-optimisation to <the new tag>
 ```
 
-The skill branches, re-pins, checks for local edits, syncs, runs your checks, and opens a pull request. To do it by hand:
+The skill branches, re-pins, checks for local edits, syncs, runs your checks, and opens a pull request.
+
+Alternatively, re-run the [setup wizard](../../packages/setup-wizard/README.md) on a new branch. It re-pins to the tag the clone has checked out, syncs, and refreshes the copied `toolkit-sync`, upgrade skill and hooks. It keeps your own files, and stops if `sync` finds local edits.
+
+To do it by hand:
 
 ```bash
-git switch -c toolkit/v0.7.0
-node tools/toolkit-sync/cli.mjs pin agent-workflow v0.7.0
-node tools/toolkit-sync/cli.mjs pin claude-token-optimisation v0.7.0
+git switch -c "toolkit/$TAG"
+node tools/toolkit-sync/cli.mjs pin agent-workflow "$TAG"
+node tools/toolkit-sync/cli.mjs pin claude-token-optimisation "$TAG"
 node tools/toolkit-sync/cli.mjs check    # review any local-edit / modified files first
 node tools/toolkit-sync/cli.mjs sync
 node tools/claude-token-optimisation/install.mjs .    # refresh the copied hooks and policy
+rm .claude/settings.toolkit-token-optimisation.json
 ```
 
-After re-running the installer, delete the settings fragment again. Your `.claude/settings.json` is left alone, apart from migrating old-style hook entries. Also refresh the upgrade skill and, if its files changed in the release, `toolkit-sync` itself:
+The installer leaves your `.claude/settings.json` alone, apart from migrating old-style hook entries. Also refresh the upgrade skill and `toolkit-sync` itself:
 
 ```bash
 cp -r /c/src/Toolkit/packages/toolkit-sync/claude/skills/toolkit-upgrade .claude/skills/
 for f in cli git manifest package-sync pin-file; do
-  git -C /c/src/Toolkit show v0.7.0:packages/toolkit-sync/src/$f.mjs > tools/toolkit-sync/$f.mjs
+  git -C /c/src/Toolkit show "$TAG:packages/toolkit-sync/src/$f.mjs" > tools/toolkit-sync/$f.mjs
 done
 ```
+
+`scripts/claude-ticket.mjs` belongs to you, so upgrades don't touch it. Compare it with `/c/src/Toolkit/packages/setup-wizard/templates/claude-ticket.mjs` to pick up template improvements.
 
 Read the release's [CHANGELOG](../../CHANGELOG.md) entry for any other post-upgrade steps.
 
@@ -719,9 +695,9 @@ node tools/toolkit-sync/cli.mjs check
 
 If `check` still reports differences and you haven't edited anything, `node tools/toolkit-sync/cli.mjs sync --force` rewrites the vendored files from the pinned release.
 
-### `ticket-batch` prints nothing and exits 0
+### `implement-batch` prints nothing and exits 0
 
-You ran `tools/agent-workflow/src/ticket-batch.mjs` directly. On Windows, use `scripts/ticket-batch.mjs` from [7.3](#73-the-batch-wrapper).
+The vendored `agent-workflow` is `v0.6.0` or earlier. On Windows, those releases' `ticket-batch.mjs` never recognises itself as the script being run. [Upgrade](#10-upgrading-toolkit) to a later release.
 
 ### `ticket status must be ready-for-agent`
 
