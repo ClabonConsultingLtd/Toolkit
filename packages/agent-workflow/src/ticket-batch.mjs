@@ -7,7 +7,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveProvider } from "./ticket-providers.mjs";
 
 function readJson(path, description) {
@@ -125,7 +125,7 @@ function main() {
 	});
 }
 
-if (import.meta.url === `file://${process.argv[1].replaceAll("\\", "/")}`) {
+if (import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
 	try {
 		main();
 	} catch (error) {

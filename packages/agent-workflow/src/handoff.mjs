@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { applyEdits, parseBlocks, prepareEdits } from "./blocks.mjs";
 import { parseTask, validateEditable } from "./task-file.mjs";
 export async function requestEdit(
@@ -100,7 +101,7 @@ export async function main(
 	applyEdits(prepareEdits(root, parseBlocks(text, task.editable)));
 	return "Applied bounded handoff edits. Review the diff.";
 }
-if (import.meta.url === `file://${process.argv[1].replaceAll("\\", "/")}`)
+if (import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
 	main()
 		.then(console.log)
 		.catch((error) => {
