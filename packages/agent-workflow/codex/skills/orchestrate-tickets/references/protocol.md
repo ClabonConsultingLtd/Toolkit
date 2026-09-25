@@ -16,17 +16,20 @@ Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as 
 | record-claude-limit | error, failureKey, optional agentId | Record an explicit Claude usage-limit failure once per stable failure identity; no batch lease required. |
 | acquire | none | acquired:false if busy; otherwise token and expiresAt. |
 | renew / release | none | Extend ten-minute lease / release. Release accepts the saved owner's matching token even after expiry, but cannot clear a successor's lease. |
-| sync | none | Reconcile GitHub and return issues, launchable IDs, slots, resumable (provider-limit blocks past reset), pauseSchedule. |
+| sync | none | Reconcile GitHub and return issues, launchable IDs, slots, resumable (provider-limit blocks past reset), pauseSchedule, and `baseUpdates` (open linked PRs whose merge state is conflicting or behind, with ticket status, agentId and reason). |
 | reserve | number, models (Claude catalog), codexModels (Codex catalog during cooldown) | Recheck readiness/dependencies, resolve provider/model/effort, persist branch/launchKey and reserve slot. |
 | attach | number, workspaceId and/or agentId; workerActive:true for a confirmed externally restarted saved agent | Persist identifiers immediately after each Paseo creation, or restore capacity accounting without leaving blocked. Existing different IDs are rejected. |
 | link-pr | number, pr | Fetch and verify same-repository branch/base before attaching PR. |
 | review | number, evidence | Record completed worker output; begin Codex review. |
 | fix | number, reason | Increment fix count and reserve worker; third request blocks without launching. |
-| ready | number, evidence, reviewedHead | Verify open PR and check results; record awaiting_merge. |
-| merge-ready | number | Recheck the reviewed PR head, draft state, and required checks before an authorized controller merge; returns the head SHA to match during merge. |
+| update-base | number, reason | Return a reviewing or awaiting_merge ticket to its worker to update from base; clears reviewedHead and never changes the fix count. |
+| ready | number, evidence, reviewedHead | Verify open PR, merge state and check results; record awaiting_merge. |
+| merge-ready | number | Recheck the reviewed PR head, draft state, merge state, and required checks before an authorized controller merge; returns the head SHA to match during merge. |
 | block | number, reason; workerStopped:true only with evidence of stop; blockKind:"provider-limit" with resetAt for a provider usage limit | Human blocker, or provider-limit block that keeps the schedule running until reset; uncertain/running workers still consume a slot. A provider-limit block cannot replace another block. |
 | resume | number, evidence; resetFixCycles:true if explicitly authorized | Recover human blocker; cannot bypass an uncertain launch. Evidence may be omitted only for a provider-limit block whose resetAt has passed (and, for a Claude worker, whose shared cooldown has ended). |
 | schedule | scheduleId | Persist scheduler identity; refuses replacement. |
+
+`ready` and `merge-ready` read GitHub's `mergeable` and `mergeStateStatus`. They refuse `CONFLICTING`/`DIRTY` and `BEHIND` (reported only when the base requires up-to-date branches) with the update-from-base reason. `UNKNOWN` means GitHub has not computed mergeability yet: report it as pending and retry on a later run, not as a failure.
 
 Example initialization manifest:
 
@@ -54,4 +57,4 @@ Partial completion writes are retry-safe: sync verifies PR merge and current lab
 
 Automatic selection details and invocation examples: [selection.md](selection.md). All batches for a checkout must use the canonical state directory so overlap detection sees them. Initialization is serialized by `.selection.lock`, which records its owner's host and PID. The helper reclaims it automatically once that owner has exited (same host) or after 30 minutes; do not remove it by hand. Preview is read-only and not a reservation: `init-next` rechecks eligibility.
 
-When an intake policy exists, reserve/resume/fix operations also enforce its repository-wide active-ticket limit under the shared selection lock. A capacity rejection is temporary: retain the queued/blocked state and wait; do not create another batch or agent to bypass it. See [intake.md](intake.md) for the recurring controller protocol.
+When an intake policy exists, reserve/resume/fix/update-base operations also enforce its repository-wide active-ticket limit under the shared selection lock. A capacity rejection is temporary: retain the queued/blocked state and wait; do not create another batch or agent to bypass it. See [intake.md](intake.md) for the recurring controller protocol.
