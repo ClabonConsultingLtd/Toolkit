@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { readFileSync, realpathSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
 	acquire,
@@ -14,6 +15,7 @@ import {
 	transaction,
 } from "./orchestration.mjs";
 import { requirePassingChecks } from "./orchestration-checks.mjs";
+import { readRepositoryIntakeConfig } from "./intake-config.mjs";
 import {
 	github,
 	requireReady,
@@ -191,7 +193,10 @@ export function execute(command, path, input = {}, options = {}) {
 					policy.repository.toLowerCase() !== state.repository.toLowerCase()
 				)
 					throw new Error("intake policy belongs to another repository");
-				let required = policy?.requiredChecks;
+				const repositoryConfig = readRepositoryIntakeConfig(state.cwd);
+				if (repositoryConfig && repositoryConfig.repository.toLowerCase() !== state.repository.toLowerCase())
+					throw new Error("repository intake config belongs to another repository");
+				let required = repositoryConfig?.requiredChecks ?? policy?.requiredChecks;
 				if (command === "merge-ready") {
 					if (t.status !== "awaiting_merge")
 						throw new Error("ticket is not awaiting merge");
@@ -207,6 +212,19 @@ export function execute(command, path, input = {}, options = {}) {
 					}
 				}
 				requirePassingChecks(pr.statusCheckRollup ?? [], required);
+				if (repositoryConfig?.localVerificationCommand) {
+					const checkout = realpathSync(state.cwd);
+					const gate = realpathSync(resolve(checkout, repositoryConfig.localVerificationCommand));
+					if (!gate.startsWith(`${checkout}${sep}`))
+						throw new Error("local verification gate escapes the checkout");
+					try {
+						execFileSync(process.execPath, [gate, String(pr.number), pr.headRefOid], {
+							cwd: state.cwd, encoding: "utf8", timeout: 30_000,
+							});
+					} catch (error) {
+						throw new Error(`local verification gate refused PR #${pr.number} at ${pr.headRefOid}: ${(error.stderr || error.message).trim()}`);
+					}
+				}
 				output =
 					command === "ready"
 						? changeTicket(state, input.number, command, input)
