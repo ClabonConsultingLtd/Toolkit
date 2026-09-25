@@ -74,6 +74,8 @@ function pull() {
 		headRepository: { name: "project" },
 		headRepositoryOwner: { login: "example" },
 		statusCheckRollup: [],
+		mergeable: "MERGEABLE",
+		mergeStateStatus: "CLEAN",
 	};
 }
 function fixture(t) {
@@ -311,6 +313,121 @@ test("schedule pauses for human blocked chains, waits for merges, stops when com
 	assert.equal(disposition(s).pauseSchedule, false);
 	for (const t of Object.values(s.tickets)) t.status = "completed";
 	assert.equal(disposition(s).pauseSchedule, true);
+});
+test("provider-limit blocks carry resetAt and resume without evidence only after reset", () => {
+	const s = newBatch(manifest());
+	reconcile(s, snapshot());
+	worker(s, 9);
+	const now = Date.parse("2026-09-25T10:00:00Z");
+	assert.throws(
+		() =>
+			changeTicket(s, 9, "block", {
+				reason: "limit",
+				blockKind: "provider-limit",
+			}),
+		/resetAt required/,
+	);
+	assert.throws(
+		() => changeTicket(s, 9, "block", { reason: "x", blockKind: "other" }),
+		/blockKind/,
+	);
+	changeTicket(
+		s,
+		9,
+		"block",
+		{
+			reason: "Claude weekly limit",
+			blockKind: "provider-limit",
+			resetAt: "2026-09-25T13:00:00Z",
+			workerStopped: true,
+		},
+		now,
+	);
+	assert.equal(s.tickets[9].blockKind, "provider-limit");
+	assert.equal(s.tickets[9].resetAt, "2026-09-25T13:00:00.000Z");
+	// Waiting for a reset keeps the schedule running.
+	assert.equal(disposition(s, now).pauseSchedule, false);
+	assert.deepEqual(disposition(s, now).resumable, []);
+	assert.throws(() => changeTicket(s, 9, "resume", {}, now), /resets at/);
+	const later = Date.parse("2026-09-25T13:00:00Z");
+	assert.deepEqual(disposition(s, later).resumable, ["9"]);
+	changeTicket(s, 9, "resume", {}, later);
+	assert.equal(s.tickets[9].status, "implementing");
+	assert.equal(s.tickets[9].blockKind, null);
+	assert.equal(s.tickets[9].resetAt, undefined);
+	// Human blocks stay manual and cannot be downgraded to automatic recovery.
+	changeTicket(s, 9, "block", { reason: "permission", workerStopped: true });
+	assert.deepEqual(disposition(s, later).resumable, []);
+	assert.throws(() => changeTicket(s, 9, "resume", {}, later), /evidence/);
+	assert.throws(
+		() =>
+			changeTicket(s, 9, "block", {
+				reason: "limit",
+				blockKind: "provider-limit",
+				resetAt: "2026-09-25T13:00:00Z",
+			}),
+		/human block/,
+	);
+	// A later human block replaces a provider-limit block.
+	changeTicket(s, 9, "resume", { evidence: "permission granted" });
+	changeTicket(s, 9, "block", {
+		reason: "limit",
+		blockKind: "provider-limit",
+		resetAt: "2026-09-25T13:00:00Z",
+	});
+	changeTicket(s, 9, "block", { reason: "clarify" });
+	assert.equal(s.tickets[9].blockKind, "human");
+	assert.equal(s.tickets[9].resetAt, undefined);
+	assert.throws(() => changeTicket(s, 9, "resume", {}, later), /evidence/);
+});
+test("CLI withholds provider-limit resume while the shared Claude cooldown is active", (t) => {
+	const { path, token } = fixture(t);
+	const cooldown = join(path, "..", "cooldown.json");
+	const options = {
+		fallbackStatePath: cooldown,
+		github: () => ({ snapshot, pr: pull }),
+	};
+	execute("sync", path, { token }, options);
+	execute("reserve", path, { token, number: 9, models }, options);
+	execute(
+		"attach",
+		path,
+		{ token, number: 9, workspaceId: "w9", agentId: "a9" },
+		options,
+	);
+	execute(
+		"block",
+		path,
+		{
+			token,
+			number: 9,
+			reason: "Claude weekly limit",
+			blockKind: "provider-limit",
+			resetAt: "2000-01-01T00:00:00Z",
+			workerStopped: true,
+		},
+		options,
+	);
+	execute(
+		"record-claude-limit",
+		path,
+		{
+			error: "You've hit your weekly limit; resets at 2099-01-01T00:00:00Z",
+			failureKey: "a9:turn-2",
+		},
+		options,
+	);
+	assert.deepEqual(execute("sync", path, { token }, options).resumable, []);
+	assert.throws(
+		() => execute("resume", path, { token, number: 9 }, options),
+		/cooldown still active/,
+	);
+	rmSync(cooldown);
+	assert.deepEqual(execute("sync", path, { token }, options).resumable, ["9"]);
+	assert.equal(
+		execute("resume", path, { token, number: 9 }, options).status,
+		"implementing",
+	);
 });
 test("closed ready issue cannot launch", () => {
 	const s = newBatch(manifest()),
@@ -711,4 +828,92 @@ test("completion releases dependent ticket on same sync and schedule identity ca
 		() => execute("schedule", path, { token, scheduleId: "s2" }, options),
 		/already/,
 	);
+});
+test("merge state gates ready and merge-ready; base updates keep fix cycles", (t) => {
+	const { path, token } = fixture(t);
+	const pr = pull();
+	let fields;
+	const api = github("example/project", (args) => {
+		fields = args.at(-1);
+		return JSON.stringify(pr);
+	});
+	api.pr(17);
+	assert.match(fields, /mergeable,mergeStateStatus/);
+	const options = {
+		github: () => ({ snapshot, pr: () => pr, requiredStatusChecks: () => [] }),
+	};
+	execute("reserve", path, { token, number: 7, models }, options);
+	execute(
+		"attach",
+		path,
+		{ token, number: 7, workspaceId: "w", agentId: "a" },
+		options,
+	);
+	execute("link-pr", path, { token, number: 7, pr: 17 }, options);
+	execute("review", path, { token, number: 7, evidence: "tests" }, options);
+	const ready = () =>
+		execute(
+			"ready",
+			path,
+			{ token, number: 7, evidence: "diff", reviewedHead: pr.headRefOid },
+			options,
+		);
+	const mergeReady = () =>
+		execute("merge-ready", path, { token, number: 7 }, options);
+	pr.mergeable = "CONFLICTING";
+	pr.mergeStateStatus = "DIRTY";
+	assert.throws(ready, /conflicts with its base branch/);
+	pr.mergeable = "UNKNOWN";
+	pr.mergeStateStatus = "UNKNOWN";
+	assert.throws(ready, /still being computed.*retry/);
+	pr.mergeStateStatus = "CLEAN";
+	delete pr.mergeable;
+	assert.throws(ready, /merge state is unavailable/);
+	pr.mergeable = "MERGEABLE";
+	pr.mergeStateStatus = "UNSTABLE";
+	ready();
+	pr.mergeStateStatus = "BEHIND";
+	assert.throws(mergeReady, /behind a base branch that requires up-to-date/);
+	let synced = execute("sync", path, { token }, options);
+	assert.deepEqual(synced.baseUpdates, [
+		{
+			number: "7",
+			pr: 17,
+			status: "awaiting_merge",
+			agentId: "a",
+			mergeState: "behind",
+			reason: synced.baseUpdates[0].reason,
+		},
+	]);
+	const state = JSON.parse(readFileSync(path, "utf8"));
+	state.tickets[7].fixCycles = 2;
+	atomicWrite(path, state);
+	assert.throws(
+		() => execute("update-base", path, { token, number: 7 }, options),
+		/reason required/,
+	);
+	const updated = execute(
+		"update-base",
+		path,
+		{ token, number: 7, reason: "update from main" },
+		options,
+	);
+	assert.equal(updated.status, "implementing");
+	assert.equal(updated.workerActive, true);
+	assert.equal(updated.fixCycles, 2);
+	assert.equal(updated.reviewedHead, null);
+	pr.headRefOid = "rebased";
+	pr.mergeStateStatus = "CLEAN";
+	synced = execute("sync", path, { token }, options);
+	assert.deepEqual(synced.baseUpdates, []);
+	assert.equal(execute("status", path).tickets[7].status, "implementing");
+	execute(
+		"review",
+		path,
+		{ token, number: 7, evidence: "rebased; tests pass" },
+		options,
+	);
+	ready();
+	assert.equal(mergeReady().mergeReady, true);
+	assert.equal(execute("status", path).tickets[7].fixCycles, 2);
 });

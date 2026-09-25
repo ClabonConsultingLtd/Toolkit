@@ -90,6 +90,60 @@ test("Claude session-limit wording uses its stated UTC reset time", (t) => {
 	);
 });
 
+test("Claude weekly and model limit wording parses same-day, weekday and dated resets", (t) => {
+	const f = fixture(t);
+	const now = Date.parse("2026-09-25T10:00:00Z"); // Friday
+	const message = "You've hit your weekly limit · resets 1pm (UTC)";
+	assert.deepEqual(parseClaudeLimit(message, now), {
+		resetAt: Date.parse("2026-09-25T13:00:00Z"),
+	});
+	assert.deepEqual(
+		parseClaudeLimit(message, Date.parse("2026-09-25T13:30:00Z")),
+		{ resetAt: Date.parse("2026-09-26T13:00:00Z") },
+	);
+	const state = recordClaudeLimit(f.cooldownPath, message, {
+		failureKey: "worker-9:activity-1",
+		now,
+	});
+	assert.equal(state.resetAt, "2026-09-25T13:00:00.000Z");
+	for (const [text, expected] of [
+		[
+			"You've hit your weekly limit · resets Mon 9am (UTC)",
+			"2026-09-28T09:00:00Z",
+		],
+		[
+			"You've hit your weekly limit · resets Friday, 8am (UTC)",
+			"2026-10-02T08:00:00Z",
+		],
+		[
+			"You've hit your weekly limit · resets Oct 3, 1pm (UTC)",
+			"2026-10-03T13:00:00Z",
+		],
+		[
+			"You've hit your Opus limit · resets Oct 3 at 1:30pm (UTC)",
+			"2026-10-03T13:30:00Z",
+		],
+		[
+			"You've reached your Opus weekly limit · resets Jan 2, 1pm (UTC)",
+			"2027-01-02T13:00:00Z",
+		],
+		["You've hit your 5-hour limit · resets 3am (UTC)", "2026-09-26T03:00:00Z"],
+		["Weekly limit reached · resets 11:45pm (UTC)", "2026-09-25T23:45:00Z"],
+	])
+		assert.deepEqual(
+			parseClaudeLimit(text, now),
+			{
+				resetAt: Date.parse(expected),
+			},
+			text,
+		);
+	assert.deepEqual(
+		parseClaudeLimit("You've hit your weekly limit · resets 1pm (PST)", now),
+		{ resetAt: null },
+	);
+	assert.equal(parseClaudeLimit("weekly report limit", now), null);
+});
+
 test("unknown reset uses one hour, repeated signals cannot shorten it, and a held lock fails safely", (t) => {
 	const f = fixture(t);
 	const now = Date.parse("2026-09-24T12:00:00Z");
