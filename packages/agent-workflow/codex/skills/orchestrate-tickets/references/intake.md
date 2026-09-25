@@ -20,7 +20,10 @@ For a tracked, reviewable repository configuration, commit `toolkit-intake.json`
 at the checkout root (see `examples/toolkit-intake.json`). It supports `version: 1`,
 `repository`, `baseBranch`, `codexModel`, `count`, and optional `cron`, `timezone`,
 `excludeTickets` issue numbers, `requiredChecks` check-run names or status
-contexts, and `localVerificationCommand`, a relative `.mjs` path. Set `count`
+contexts, `localVerificationCommand`, a relative `.mjs` path,
+`codexWorkerFullAccess` (see [Codex sandbox preflight](#codex-sandbox-preflight)),
+and `schedulePromptAppend`, a string or array of lines appended to the generated
+schedule prompt. Set `count`
 to the desired shared cap. List every check that must run before a controller
 merge; a missing, skipped, or neutral required check blocks it. The local
 verification command receives the PR number and current head SHA and must exit
@@ -74,12 +77,29 @@ and PRs or retry an empty evaluation. Admission still uses a UTC hour key and
 never refills an hour after a nonempty batch. Do not change an existing
 schedule's cadence implicitly.
 
-Its prompt must include the absolute paths to this skill, this reference, the
-intake helper and checkout, and instruct the run to:
+Generate its prompt with `node <skill>/scripts/intake.mjs schedule-prompt CHECKOUT`
+instead of writing it by hand. The output is deterministic for a checkout and
+helper installation: it names the absolute paths to this skill, this reference,
+both helpers, the checkout, batch state directory and intake policy, and
+summarizes the steps below. It excludes N, cadence and other runtime values, so
+changing them does not change the prompt. Put repository-specific authorizations,
+such as scheduled approval and merging or implementation-metadata repair, in
+`schedulePromptAppend` rather than editing the saved prompt. After a Toolkit
+update or config change, the operator regenerates the prompt and applies it
+with `update_schedule`; scheduled runs only report drift. The prompt instructs
+the run to:
 
 1. If `toolkit-intake.json` exists, run `sync-config` before reading policy;
    stop on invalid settings or a limit below active work. Then read saved policy
-   and fetch the current Paseo schedule by saved ID. Check its ID and name against
+   and fetch the current Paseo schedule by saved ID. Read only the fields the run
+   needs: id, name, status/paused, cron, timezone, provider/model, mode and
+   prompt. Do not read its run history, which grows with every run. Prefer
+   `paseo schedule inspect ID --json | node <skill>/scripts/intake.mjs schedule-summary CHECKOUT -`,
+   which prints only those fields and `promptMatches`; otherwise extract them
+   from `inspect_schedule` without echoing `runs`. Compare the live prompt with
+   the generated one (`promptMatches`, or `schedule-prompt CHECKOUT --check -`)
+   and report any drift with the regenerate command. Do not rewrite the prompt
+   from the controller; an operator applies the regenerated prompt. Check its ID and name against
    the policy, and read its paused state explicitly. A missing schedule, ID/name
    mismatch, or unreadable state stops new admission. Compare cron, timezone, and
    model with the policy and report any difference. If the cached `policy.paused`
@@ -154,6 +174,25 @@ explicit user request or systemic errors preventing safe reconciliation, recordi
 the reason.
 Do not pause it just because an individual ticket requires human input.
 
+## Codex sandbox preflight
+
+Codex workers launch in `auto-review`, which relies on the Codex command sandbox.
+On a host where it cannot start, every worker command escalates to a guardian
+review. Before launching a Codex worker in `auto-review`, check once per run
+that the sandbox works by running a trivial command through it, such as
+`codex sandbox true`. A non-zero exit or an error such as
+`bwrap: No permissions to create a new namespace` means it is unavailable.
+
+If it is unavailable, block each Codex reservation before creating its
+workspace or agent: call `block` with the sandbox error as the reason and
+`workerStopped: true`, since no worker exists. Claude reservations are
+unaffected. The blocked reservation keeps its slot until an operator
+reconciles it, so after the first such block stop reserving further tickets
+that could be routed to Codex in this run. Only when `toolkit-intake.json` sets `codexWorkerFullAccess: true`
+(surfaced in the generated schedule prompt) may the controller launch that
+Codex worker with `modeId: full-access` instead; record the sandbox error and
+the fallback in the run report. Never change a running worker's mode.
+
 ## Helper commands
 
 `node <skill>/scripts/intake.mjs COMMAND CHECKOUT [request.json|-]`
@@ -175,6 +214,14 @@ Do not pause it just because an individual ticket requires human input.
   The tick's `status` distinguishes `admitted`, `recovered`, `replayed`, `empty`,
   `capacity-full`, and `paused`; `capacity` is the current shared limit snapshot,
   and `skipped` explains excluded candidates or a capacity wait.
+- `schedule-prompt`: print the canonical schedule prompt for CHECKOUT from
+  `toolkit-intake.json` (or the saved policy). With `--check FILE|-`, compare a
+  live prompt, given as raw text or Paseo schedule JSON, ignoring line endings
+  and trailing whitespace. It exits non-zero with a short summary of missing and
+  unexpected lines when they differ.
+- `schedule-summary`: read Paseo schedule JSON from FILE or `-` and print only
+  id, name, status, paused, cron, timezone, provider, model, thinking option,
+  mode, cwd, next run and `promptMatches` (with `promptDrift` on mismatch).
 - `pause` / `resume`: compatibility commands that only copy a matching live
   schedule state into policy. Pause or resume the Paseo schedule first and pass
   its fresh `schedule` object; neither command changes admission independently.
@@ -200,6 +247,6 @@ If all three await merge, admit up to three. The same hour is never refilled a
 second time, even if a slot becomes free later during that run. A 9am evaluation
 with no admissions may retry at 9:30 if the schedule runs twice per hour.
 
-Update the schedule prompt with these instructions, not merely "select next N".
+Use the generated schedule prompt, not merely "select next N".
 Do not configure a live intake schedule when the user only asks to install or
 update this capability; activation requires their repository and numerical N.

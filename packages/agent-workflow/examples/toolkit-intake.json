@@ -7,5 +7,6 @@
 	"requiredChecks": ["verify"],
 	"cron": "*/30 8-19 * * *",
 	"timezone": "UTC",
-	"excludeTickets": []
+	"excludeTickets": [],
+	"codexWorkerFullAccess": false
 }
