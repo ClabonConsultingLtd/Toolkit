@@ -1,6 +1,18 @@
 # Changelog
 
-## 0.5.2 - 2026-09-25
+## 0.6.0 - 2026-09-25
+
+- #78: orchestrate-tickets: worker prompt, spec selection and reporting refinements
+
+- #81: intake: canonical schedule prompt, drift check, and Codex sandbox preflight
+
+- #79: claude-token-optimisation: portable hook commands, wrapped command summaries, context policy
+
+- #76: Gate orchestration on PR merge state and route base updates to workers
+
+- #77: toolkit-sync: record dest and sync baseline; add toolkit-upgrade skill
+
+- #75: Parse Claude weekly limits and auto-resume provider-limit blocks after reset
 
 - #66: Gate ticket merges on repository local verification
 - #67: Document local verification gate and prepare patch release
