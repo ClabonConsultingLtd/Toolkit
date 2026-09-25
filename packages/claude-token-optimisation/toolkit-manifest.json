@@ -1,6 +1,7 @@
 {
 	"include": [
 		"README.md",
+		"CONTEXT-POLICY.md",
 		"package.json",
 		"tsconfig.json",
 		"install.mjs",

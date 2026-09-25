@@ -12,6 +12,7 @@ test("installs agent, hooks and settings fragment", () => {
 		r = spawnSync(process.execPath, [cli, root], { encoding: "utf8" });
 	assert.equal(r.status, 0);
 	for (const file of [
+		"CONTEXT-POLICY.md",
 		"agents/bulk-reader.md",
 		"hooks/guard-large-read.mjs",
 		"hooks/summarize-bash.mjs",

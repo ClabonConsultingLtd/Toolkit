@@ -14,6 +14,7 @@ const root = resolve(target),
 const claude = join(root, ".claude");
 mkdirSync(join(claude, "agents"), { recursive: true });
 mkdirSync(join(claude, "hooks"), { recursive: true });
+cpSync(join(source, "CONTEXT-POLICY.md"), join(claude, "CONTEXT-POLICY.md"));
 cpSync(
 	join(source, "agents", "bulk-reader.md"),
 	join(claude, "agents", "bulk-reader.md"),

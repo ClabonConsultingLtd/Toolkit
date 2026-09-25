@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.4 - 2026-09-24
+
+- #59: Document shared context policy for Claude and Codex
+
+## 0.4.3 - 2026-09-24
+
+- #56: Enforce intake required checks before controller merges
+
+- #53: Add Codex fallback for Claude-limited ticket workers
+
+- #50: Allow scheduled Codex orchestrator to merge reviewed PRs
+
+- #48: feat: support tracked per-repository intake settings
+
 ## 0.3.7 - 2026-09-24
 
 - #46: Harden ticket intake catalog, ordering, and lease cleanup
