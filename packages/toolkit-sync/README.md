@@ -25,13 +25,29 @@ per pinned package:
 
 ```json
 {
-	"agent-workflow": { "tag": "v0.1.0", "sha": "a1b2c3..." }
+	"agent-workflow": {
+		"tag": "v0.2.0",
+		"sha": "d4e5f6...",
+		"dest": "tools/agent-workflow",
+		"syncedSha": "a1b2c3...",
+		"syncedFiles": ["README.md", "src/cli.mjs"],
+		"syncedHashes": { "README.md": "9f86d0...", "src/cli.mjs": "60303a..." }
+	}
 }
 ```
 
-`sha` is the commit the tag resolved to at pin time; `sync`/`check` re-fetch
-the tag and refuse to proceed if it now points somewhere else (the tag
-moved upstream — re-run `pin` to accept the move).
+- `tag`, `sha`: the pinned tag and the commit it resolved to at pin time.
+  `sync`/`check` re-fetch the tag and refuse to proceed if it now points
+  somewhere else (the tag moved upstream — re-run `pin` to accept the move).
+- `dest` (optional): where the package is vendored, relative to the repo
+  root with `/` separators. Set by `pin --dest`; kept by later `pin` calls.
+- `syncedSha`, `syncedFiles`, `syncedHashes`: the baseline `sync` last
+  wrote — the commit, the files, and each file's SHA-256. `sync` records them;
+  do not edit them by hand.
+
+A pin file written by an older `toolkit-sync` without these fields still
+works: `dest` falls back to the default, and the first `sync` records a
+baseline.
 
 ## Package manifests
 
@@ -51,35 +67,80 @@ simply not listing them.
 ## Commands
 
 ```bash
-node cli.mjs pin <package> <tag> [--repo <url>] [--cwd <dir>]
+node cli.mjs pin <package> <tag> [--dest <dir>] [--repo <url>] [--cwd <dir>]
 node cli.mjs check [--repo <url>] [--cwd <dir>] [--dest <dir>]
 node cli.mjs sync [package] [--force] [--repo <url>] [--cwd <dir>] [--dest <dir>]
+node cli.mjs --help
 ```
+
+`--help`, `-h`, or `help` prints usage and exits 0. No command, or an
+unknown one, prints usage and exits 1.
 
 - `--repo` overrides the Toolkit repository URL (default:
   `https://github.com/ClabonConsultingLtd/Toolkit.git`).
 - `--cwd` overrides where the pin file and object cache live (default:
   the current directory). The object cache lives at
   `.toolkit/toolkit-sync-cache` and should be gitignored.
-- `--dest` overrides where a package's files are read from / written to
-  (default: `<cwd>/<package-name>`).
+- `--dest` is where a package's files are read from / written to. For
+  `check`/`sync` it overrides the pin's recorded `dest` (default: the
+  recorded `dest`, else `<cwd>/<package-name>`); a relative `--dest` is
+  resolved against the current directory. For `pin` it records the
+  directory in the pin file, so later commands need no `--dest`; it must be
+  inside `--cwd`.
 
 **`pin <package> <tag>`** resolves `<tag>` to a commit SHA on the Toolkit
 repo via a local shallow fetch (`git ls-remote` plus `git fetch --depth 1`)
-— no GitHub-API dependency — and records `{tag, sha}` for `<package>` in
-`toolkit-pins.json`.
+— no GitHub-API dependency — and records `{tag, sha}` (and `dest`, if
+given) for `<package>` in `toolkit-pins.json`. It does not touch the
+vendored files; run `sync` next.
 
 **`check`** fetches every pinned package's pinned SHA and diffs the local
 files against it, scoped to that package's manifested surface. It writes
-nothing and exits non-zero if any pinned package has diverged.
+nothing and exits non-zero if any pinned package has diverged. Each
+difference is labelled:
+
+- `missing-local`: not vendored yet; `sync` writes it.
+- `upstream-change`: unchanged since the last sync; only upstream changed.
+  `sync` overwrites it.
+- `removed-upstream`: synced before, no longer manifested, unchanged.
+  `sync` deletes it.
+- `local-edit`: edited since the last sync. `sync` refuses without `--force`.
+- `modified`: differs from the pin, and there is no baseline (a pin file
+  from an older version) to say whether it is a local edit or an upstream
+  change. `sync` refuses without `--force`.
 
 **`sync [package]`** re-copies the manifested files for the given package
-(or every pinned package, if omitted) from its pinned SHA. If a manifested
-file's local content differs from the pinned tree, `sync` refuses to
-overwrite it and reports the divergence — pass `--force` to overwrite
-anyway. Files that simply haven't been synced yet (no local copy) are
-written normally; `--force` is only needed to overwrite a genuine local
-edit.
+(or every pinned package, if omitted) from its pinned SHA, removes files
+no longer manifested, and records the new baseline. It refuses to
+overwrite a `local-edit` or `modified` file and lists them — pass `--force`
+to overwrite anyway. Missing files and upstream-only changes are written
+without `--force`.
+
+With no baseline recorded, `sync` cannot tell a local edit from an
+upstream change, so every differing file blocks it. Review the listed files
+(compare them with the pinned tag), move any local patch upstream, then
+run `sync --force`. From then on the baseline is recorded and only real
+local edits stop a sync.
+
+## Recommended upgrade workflow
+
+1. Branch from the consumer repo's up-to-date default branch.
+2. `pin <package> <new-tag>` (add `--dest <dir>` once, if not recorded).
+3. `check`, and review every `local-edit` / `modified` file before
+   deciding whether to upstream it or overwrite it with `--force`.
+4. `sync <package>`, then run the vendored package's tests and the
+   consumer's own checks.
+5. Refresh installed skill copies or symlinks that point at the old
+   version, and run any post-sync step the package README names.
+6. Commit `toolkit-pins.json` with the synced files and open a pull
+   request; merge after CI passes.
+
+The `toolkit-upgrade` skill encodes this procedure for agents:
+`claude/skills/toolkit-upgrade` for Claude Code and
+`codex/skills/toolkit-upgrade` for Codex. Install the matching directory
+from a persistent Toolkit checkout, for example
+`ln -s /absolute/Toolkit/packages/toolkit-sync/codex/skills/toolkit-upgrade "${CODEX_HOME:-$HOME/.codex}/skills/toolkit-upgrade"`,
+or copy it into the consumer's `.claude/skills/`.
 
 ## When vendored code needs a local improvement
 
