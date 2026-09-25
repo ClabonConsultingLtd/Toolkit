@@ -129,8 +129,9 @@ consuming repo that vendors this package should also update its pin to the same
 tag with `node cli.mjs pin agent-workflow vX.Y.Z`, then run
 `node cli.mjs sync agent-workflow` from its installed `toolkit-sync` copy (see
 `packages/toolkit-sync/README.md`). A vendored update does not update a separate
-global skill symlink. Restart the Codex session or refresh the schedule prompt so
-it resolves the updated skill and helper paths.
+global skill symlink. Restart the Codex session or regenerate the schedule prompt
+(see [Schedule prompt](#schedule-prompt)) so it resolves the updated skill and
+helper paths.
 
 ### Repository intake settings
 
@@ -154,6 +155,41 @@ cannot change the Paseo schedule itself: reconcile its model and cadence with
 the tracked settings before admission, preserving any explicit pause. If no
 `toolkit-intake.json` exists, the existing request-based configure workflow still
 works. See `codex/skills/orchestrate-tickets/references/intake.md` for details.
+
+Two optional fields shape the generated schedule prompt. `schedulePromptAppend`
+(a string or array of lines) adds repository-specific instructions, such as an
+explicit authorization for scheduled approval and merging. `codexWorkerFullAccess:
+true` authorizes the controller to launch Codex workers in `full-access` when the
+Codex sandbox preflight fails; without it, those reservations are blocked with
+the sandbox error recorded as the reason.
+
+### Schedule prompt
+
+Generate the intake schedule prompt instead of writing it by hand:
+
+```bash
+node <skill>/scripts/intake.mjs schedule-prompt /absolute/consuming-repo
+```
+
+The output is deterministic for a checkout and helper installation. It names the
+absolute skill, reference, helper, checkout, batch-state and policy paths and the
+controller instructions, followed by any `schedulePromptAppend` lines. It omits N
+and cadence, which the controller reads from the saved policy. Apply it with
+`paseo schedule update` or `update_schedule` after a Toolkit update or config
+change.
+
+To detect drift, pass the live prompt as raw text or Paseo schedule JSON:
+
+```bash
+paseo schedule inspect SCHEDULE_ID --json \
+  | node <skill>/scripts/intake.mjs schedule-prompt /absolute/consuming-repo --check -
+```
+
+It exits non-zero and lists missing and unexpected lines when the prompts differ.
+`schedule-summary CHECKOUT FILE|-` prints only the schedule fields a controller
+needs (id, name, status, paused, cron, timezone, provider, model, thinking option,
+mode, cwd, next run) plus `promptMatches`, leaving out the run history that grows
+with every run. Scheduled runs report drift; they do not rewrite their own prompt.
 
 Example requests:
 
