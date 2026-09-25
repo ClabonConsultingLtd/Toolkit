@@ -2,6 +2,8 @@
 
 ## 0.6.0 - 2026-09-25
 
+- #81: intake: canonical schedule prompt, drift check, and Codex sandbox preflight
+
 - #79: claude-token-optimisation: portable hook commands, wrapped command summaries, context policy
 
 - #76: Gate orchestration on PR merge state and route base updates to workers
