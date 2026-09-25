@@ -32,6 +32,31 @@ test("summarizes an allowlisted command prefixed with a worktree cd", () => {
 	);
 });
 
+test("summarizes an allowlisted command wrapped in a tail pipeline", () => {
+	const repo = mkdtempSync(join(tmpdir(), "toolkit-"));
+	spawnSync("git", ["init"], { cwd: repo });
+	const output = runHook(
+		{ command: `cd "${repo}" && set -o pipefail; git status 2>&1 | tail -3` },
+		repo,
+	);
+	const reason = output.hookSpecificOutput.permissionDecisionReason;
+	assert.match(reason, /working tree clean/);
+	assert.match(reason, /Full raw output: /);
+});
+
+test("a tail pipeline cannot mask a failing exit status", () => {
+	const cwd = mkdtempSync(join(tmpdir(), "toolkit-"));
+	const output = runHook({ command: "git status 2>&1 | tail -1" }, cwd, {
+		GIT_CEILING_DIRECTORIES: tmpdir(),
+	});
+	assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
+	const reason = output.hookSpecificOutput.permissionDecisionReason;
+	assert.match(reason, /not a git repository/);
+	assert.match(reason, /Command exited 128\. Full raw output: (.+)/);
+	const log = /Full raw output: (.+)/.exec(reason)[1];
+	assert.match(readFileSync(log, "utf8"), /not a git repository/);
+});
+
 test("passes through an unrecognised command unchanged", () => {
 	const output = runHook({ command: "echo hello" }, process.cwd());
 	assert.equal(output, undefined);
