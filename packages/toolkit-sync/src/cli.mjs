@@ -1,6 +1,7 @@
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fetchPinnedTag, resolveTagToSha } from "./git.mjs";
 import {
+	BLOCKING_STATUSES,
 	diffPackage,
 	removeStaleFiles,
 	resolveManifestedFiles,
@@ -17,12 +18,31 @@ export const DEFAULT_REPO_URL =
 	"https://github.com/ClabonConsultingLtd/Toolkit.git";
 const DEFAULT_CACHE_DIR = ".toolkit/toolkit-sync-cache";
 
+const USAGE = `usage: toolkit-sync <command> [options]
+
+commands:
+  pin <package> <tag> [--dest <dir>]   pin a package to a Toolkit tag; --dest
+                                       records where it is vendored
+  check                                report differences from each pin
+  sync [package] [--force]             copy pinned files into place; --force
+                                       overwrites local edits
+
+options:
+  --repo <url>   Toolkit repository (default: ${DEFAULT_REPO_URL})
+  --cwd <dir>    consumer repo root holding ${PIN_FILE_NAME} (default: .)
+  --dest <dir>   vendored package directory (default: the pin's recorded
+                 dest, else <cwd>/<package>)
+  -h, --help     show this help`;
+
+class UsageError extends Error {}
+
 function parseArgs(argv) {
 	const positional = [];
-	const flags = { force: false };
+	const flags = { force: false, help: false };
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		if (arg === "--force") flags.force = true;
+		else if (arg === "--help" || arg === "-h") flags.help = true;
 		else if (arg === "--repo") flags.repo = argv[++i];
 		else if (arg === "--dest") flags.dest = argv[++i];
 		else if (arg === "--cwd") flags.cwd = argv[++i];
@@ -32,7 +52,7 @@ function parseArgs(argv) {
 }
 
 function resolvePaths(flags) {
-	const cwd = flags.cwd ?? process.cwd();
+	const cwd = resolve(flags.cwd ?? process.cwd());
 	return {
 		cwd,
 		pinFilePath: join(cwd, PIN_FILE_NAME),
@@ -41,19 +61,46 @@ function resolvePaths(flags) {
 	};
 }
 
-function destDirFor(cwd, flags, packageName) {
-	return flags.dest ?? join(cwd, packageName);
+/** `--dest`, else the pin's recorded dest (repo-relative), else `<cwd>/<package>`. */
+function destDirFor(cwd, flags, packageName, pin) {
+	if (flags.dest) return resolve(flags.dest);
+	if (pin?.dest) return resolve(cwd, pin.dest);
+	return join(cwd, packageName);
+}
+
+/** Express `dir` relative to the repo root `cwd`, with POSIX separators. */
+function toRecordedDest(cwd, dir) {
+	const rel = relative(cwd, resolve(dir));
+	if (rel === "" || rel.startsWith("..") || isAbsolute(rel))
+		throw new UsageError(
+			`--dest must be a directory inside the repo root ${cwd}, got ${dir}`,
+		);
+	return rel.split(sep).join("/");
+}
+
+function displayDest(cwd, destDir) {
+	const rel = relative(cwd, destDir);
+	return rel && !rel.startsWith("..") ? rel.split(sep).join("/") : destDir;
 }
 
 function runPin([packageName, tag], flags) {
 	if (!packageName || !tag)
-		throw new Error("usage: toolkit-sync pin <package> <tag>");
-	const { pinFilePath, cacheDir, repoUrl } = resolvePaths(flags);
+		throw new UsageError(
+			"usage: toolkit-sync pin <package> <tag> [--dest <dir>]",
+		);
+	const { pinFilePath, cacheDir, repoUrl, cwd } = resolvePaths(flags);
+	const dest = flags.dest ? toRecordedDest(cwd, flags.dest) : undefined;
 	const sha = resolveTagToSha(repoUrl, tag);
 	fetchPinnedTag(cacheDir, repoUrl, tag, sha);
 	resolveManifestedFiles(cacheDir, sha, packageName);
-	setPin(pinFilePath, packageName, tag, sha);
-	console.log(`pinned ${packageName} to ${tag} (${sha})`);
+	const pins = setPin(pinFilePath, packageName, tag, sha, { dest });
+	const recorded = pins[packageName].dest;
+	const destNote = recorded ? `, dest ${recorded}` : "";
+	console.log(`pinned ${packageName} to ${tag} (${sha}${destNote})`);
+}
+
+function diffOptions(pin) {
+	return { baseline: pin.syncedHashes, previousFiles: pin.syncedFiles };
 }
 
 function runCheck(_positional, flags) {
@@ -62,18 +109,53 @@ function runCheck(_positional, flags) {
 	let anyDiverged = false;
 	for (const [packageName, pin] of Object.entries(pins)) {
 		const sha = fetchPinnedTag(cacheDir, repoUrl, pin.tag, pin.sha);
-		const destDir = destDirFor(cwd, flags, packageName);
-		const { diverged } = diffPackage(cacheDir, sha, packageName, destDir);
+		const destDir = destDirFor(cwd, flags, packageName, pin);
+		const where = displayDest(cwd, destDir);
+		const { diverged } = diffPackage(
+			cacheDir,
+			sha,
+			packageName,
+			destDir,
+			diffOptions(pin),
+		);
 		if (diverged.length === 0) {
-			console.log(`${packageName}: up to date with ${pin.tag}`);
+			console.log(`${packageName}: up to date with ${pin.tag} in ${where}`);
 			continue;
 		}
 		anyDiverged = true;
-		console.log(`${packageName}: diverged from ${pin.tag}`);
+		console.log(`${packageName}: diverged from ${pin.tag} in ${where}`);
 		for (const entry of diverged)
 			console.log(`  ${entry.status}: ${entry.path}`);
+		if (!pin.syncedHashes && diverged.some((e) => e.status === "modified"))
+			console.log(
+				"  no sync baseline recorded: a modified file may be a local edit or an upstream change",
+			);
 	}
 	if (anyDiverged) process.exitCode = 1;
+}
+
+function reportRefusal(packageName, pin, blocked) {
+	if (pin.syncedHashes) {
+		console.log(
+			`${packageName}: local edits since the last sync would be overwritten by ${pin.tag}, refusing to overwrite`,
+		);
+		for (const entry of blocked)
+			console.log(`  ${entry.status}: ${entry.path}`);
+		console.log(
+			"  review these edits and upstream any you want to keep, then pass --force to overwrite them",
+		);
+		return;
+	}
+	console.log(
+		`${packageName}: local files differ from ${pin.tag} and no sync baseline is recorded, refusing to overwrite`,
+	);
+	for (const entry of blocked) console.log(`  ${entry.status}: ${entry.path}`);
+	console.log(
+		"  these may be local edits or just upstream changes since the vendored copy was made",
+	);
+	console.log(
+		"  review the listed files, then pass --force to overwrite; later syncs record a baseline and only stop for real local edits",
+	);
 }
 
 function runSync(positional, flags) {
@@ -86,36 +168,59 @@ function runSync(positional, flags) {
 		if (!pin)
 			throw new Error(`no pin recorded for "${packageName}"; run "pin" first`);
 		const sha = fetchPinnedTag(cacheDir, repoUrl, pin.tag, pin.sha);
-		const destDir = destDirFor(cwd, flags, packageName);
+		const destDir = destDirFor(cwd, flags, packageName, pin);
 		if (!flags.force) {
-			const { diverged } = diffPackage(cacheDir, sha, packageName, destDir);
-			const modified = diverged.filter((entry) => entry.status === "modified");
-			if (modified.length > 0) {
-				console.log(
-					`${packageName}: local files have diverged from ${pin.tag}, refusing to overwrite`,
-				);
-				for (const entry of modified)
-					console.log(`  ${entry.status}: ${entry.path}`);
-				console.log("  pass --force to overwrite anyway");
+			const { diverged } = diffPackage(
+				cacheDir,
+				sha,
+				packageName,
+				destDir,
+				diffOptions(pin),
+			);
+			const blocked = diverged.filter((e) => BLOCKING_STATUSES.has(e.status));
+			if (blocked.length > 0) {
+				reportRefusal(packageName, pin, blocked);
 				process.exitCode = 1;
 				continue;
 			}
 		}
-		const files = syncPackage(cacheDir, sha, packageName, destDir);
+		const { files, hashes } = syncPackage(cacheDir, sha, packageName, destDir);
 		const removed = removeStaleFiles(destDir, pin.syncedFiles, files);
-		setSyncedFiles(pinFilePath, packageName, files);
+		setSyncedFiles(pinFilePath, packageName, files, { sha, hashes });
 		const removedNote =
 			removed.length > 0 ? `, removed ${removed.length} stale file(s)` : "";
 		console.log(
-			`${packageName}: synced ${files.length} file(s) from ${pin.tag}${removedNote}`,
+			`${packageName}: synced ${files.length} file(s) from ${pin.tag} into ${displayDest(cwd, destDir)}${removedNote}`,
 		);
 	}
 }
 
 const commands = { pin: runPin, check: runCheck, sync: runSync };
 
-const [command, ...rest] = process.argv.slice(2);
-const handler = commands[command];
-if (!handler) throw new Error("usage: toolkit-sync <pin|check|sync> ...");
-const { positional, flags } = parseArgs(rest);
-handler(positional, flags);
+function main(argv) {
+	const [command, ...rest] = argv;
+	const { positional, flags } = parseArgs(rest);
+	if (command === "--help" || command === "-h" || command === "help") {
+		console.log(USAGE);
+		return;
+	}
+	const handler = commands[command];
+	if (!handler) {
+		const problem = command ? `unknown command "${command}"\n` : "";
+		throw new UsageError(`${problem}${USAGE}`);
+	}
+	if (flags.help) {
+		console.log(USAGE);
+		return;
+	}
+	handler(positional, flags);
+}
+
+try {
+	main(process.argv.slice(2));
+} catch (error) {
+	console.error(
+		error instanceof UsageError ? error.message : `error: ${error.message}`,
+	);
+	process.exitCode = 1;
+}
