@@ -11,6 +11,7 @@ const fields = new Set([
 	"timezone",
 	"excludeTickets",
 	"requiredChecks",
+	"localVerificationCommand",
 ]);
 
 export function normalizeRequiredChecks(value, source = "intake request") {
@@ -72,6 +73,12 @@ export function readRepositoryIntakeConfig(cwd) {
 			(typeof config[field] !== "string" || !config[field].trim())
 		)
 			throw new Error(`invalid toolkit-intake.json: ${field} must be nonempty`);
+	if (config.localVerificationCommand !== undefined &&
+		(typeof config.localVerificationCommand !== "string" ||
+		!/^[-\w./]+\.mjs$/.test(config.localVerificationCommand) ||
+		config.localVerificationCommand.startsWith("/") ||
+		config.localVerificationCommand.split("/").includes("..")))
+		throw new Error("invalid toolkit-intake.json: localVerificationCommand must be a relative .mjs path inside the checkout");
 	const excludeTickets = normalizeExcludeTickets(
 		config.excludeTickets ?? [],
 		"invalid toolkit-intake.json",
