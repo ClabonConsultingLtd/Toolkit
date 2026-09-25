@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "toolkit-image-to-3d"
-version = "0.5.0"
+version = "0.5.1"
 description = "Generic resumable image-to-GLB batch conversion"
 requires-python = ">=3.11"
 dependencies = ["gradio-client>=1.14"]
