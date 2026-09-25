@@ -2,6 +2,8 @@
 
 ## 0.6.0 - 2026-09-25
 
+- #76: Gate orchestration on PR merge state and route base updates to workers
+
 - #77: toolkit-sync: record dest and sync baseline; add toolkit-upgrade skill
 
 - #75: Parse Claude weekly limits and auto-resume provider-limit blocks after reset
