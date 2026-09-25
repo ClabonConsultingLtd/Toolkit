@@ -16,7 +16,7 @@ Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as 
 | record-claude-limit | error, failureKey, optional agentId | Record an explicit Claude usage-limit failure once per stable failure identity; no batch lease required. |
 | acquire | none | acquired:false if busy; otherwise token and expiresAt. |
 | renew / release | none | Extend ten-minute lease / release. Release accepts the saved owner's matching token even after expiry, but cannot clear a successor's lease. |
-| sync | none | Reconcile GitHub and return issues, launchable IDs, slots, pauseSchedule. |
+| sync | none | Reconcile GitHub and return issues, launchable IDs, slots, resumable (provider-limit blocks past reset), pauseSchedule. |
 | reserve | number, models (Claude catalog), codexModels (Codex catalog during cooldown) | Recheck readiness/dependencies, resolve provider/model/effort, persist branch/launchKey and reserve slot. |
 | attach | number, workspaceId and/or agentId; workerActive:true for a confirmed externally restarted saved agent | Persist identifiers immediately after each Paseo creation, or restore capacity accounting without leaving blocked. Existing different IDs are rejected. |
 | link-pr | number, pr | Fetch and verify same-repository branch/base before attaching PR. |
@@ -24,8 +24,8 @@ Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as 
 | fix | number, reason | Increment fix count and reserve worker; third request blocks without launching. |
 | ready | number, evidence, reviewedHead | Verify open PR and check results; record awaiting_merge. |
 | merge-ready | number | Recheck the reviewed PR head, draft state, and required checks before an authorized controller merge; returns the head SHA to match during merge. |
-| block | number, reason; workerStopped:true only with evidence of stop | Human blocker; uncertain/running workers still consume a slot. |
-| resume | number, evidence; resetFixCycles:true if explicitly authorized | Recover human blocker; cannot bypass an uncertain launch. |
+| block | number, reason; workerStopped:true only with evidence of stop; blockKind:"provider-limit" with resetAt for a provider usage limit | Human blocker, or provider-limit block that keeps the schedule running until reset; uncertain/running workers still consume a slot. A provider-limit block cannot replace another block. |
+| resume | number, evidence; resetFixCycles:true if explicitly authorized | Recover human blocker; cannot bypass an uncertain launch. Evidence may be omitted only for a provider-limit block whose resetAt has passed (and, for a Claude worker, whose shared cooldown has ended). |
 | schedule | scheduleId | Persist scheduler identity; refuses replacement. |
 
 Example initialization manifest:
