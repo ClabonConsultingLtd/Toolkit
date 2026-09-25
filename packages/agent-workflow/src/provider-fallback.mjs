@@ -20,13 +20,32 @@ export function fallbackStatePath(env = process.env) {
 	return join(root, "toolkit", "agent-workflow", "claude-cooldown.json");
 }
 
+const MONTHS = [
+	"jan",
+	"feb",
+	"mar",
+	"apr",
+	"may",
+	"jun",
+	"jul",
+	"aug",
+	"sep",
+	"oct",
+	"nov",
+	"dec",
+];
+const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const LIMIT_KIND =
+	"(?:claude|usage|session|weekly|daily|opus|sonnet|5.hour|five.hour|seven.day)";
+
 export function parseClaudeLimit(message, now = Date.now()) {
 	if (typeof message !== "string") return null;
 	// A generic HTTP 429 may be transient or come from GitHub or another tool.
 	if (
-		!/(?:you['’]ve (?:hit|reached) your (?:claude )?(?:usage |session )?limit|claude (?:code )?usage limit (?:reached|exceeded)|(?:session|weekly|5.hour|seven.day) (?:usage )?limit (?:reached|exceeded)|usage limit (?:reached|exceeded).*(?:claude|anthropic))/i.test(
-			message,
-		)
+		!new RegExp(
+			`you['’]ve (?:hit|reached) your (?:${LIMIT_KIND}[ -]){0,3}limit|claude (?:code )?usage limit (?:reached|exceeded)|(?:session|weekly|opus|sonnet|5.hour|seven.day) (?:usage )?limit (?:reached|exceeded)|usage limit (?:reached|exceeded).*(?:claude|anthropic)`,
+			"i",
+		).test(message)
 	)
 		return null;
 	const iso =
@@ -34,28 +53,50 @@ export function parseClaudeLimit(message, now = Date.now()) {
 			message,
 		)?.[1];
 	let resetAt = iso ? Date.parse(iso.replace(" ", "T")) : NaN;
-	if (!Number.isFinite(resetAt)) {
-		const utcTime =
-			/(?:reset(?:s)?(?: at| on|:)?|until)\s+(\d{1,2}):(\d\d)\s*(am|pm)\s*\(UTC\)/i.exec(
-				message,
-			);
-		if (utcTime) {
-			const hour = Number(utcTime[1]);
-			const minute = Number(utcTime[2]);
-			if (hour >= 1 && hour <= 12 && minute <= 59) {
-				const date = new Date(now);
-				resetAt = Date.UTC(
-					date.getUTCFullYear(),
-					date.getUTCMonth(),
-					date.getUTCDate(),
-					(hour % 12) + (utcTime[3].toLowerCase() === "pm" ? 12 : 0),
-					minute,
-				);
-				if (resetAt <= now) resetAt += 24 * ONE_HOUR;
-			}
-		}
-	}
+	if (!Number.isFinite(resetAt)) resetAt = parseUtcClockReset(message, now);
 	return { resetAt: Number.isFinite(resetAt) ? resetAt : null };
+}
+
+// Claude prints "resets 6:20pm (UTC)" within a day and may prefix a weekday or
+// month/day ("resets Fri 1pm (UTC)", "resets Oct 3, 1pm (UTC)") for later resets.
+function parseUtcClockReset(message, now) {
+	const match =
+		/(?:reset(?:s)?(?: at| on|:)?|until)\s+(?:(sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s+)?(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+)?(?:at\s+)?(\d{1,2})(?::(\d\d))?\s*(am|pm)\s*\((?:UTC|GMT)\)/i.exec(
+			message,
+		);
+	if (!match) return NaN;
+	const [, weekday, month, day, hourText, minuteText = "0", meridiem] = match;
+	const hour = Number(hourText);
+	const minute = Number(minuteText);
+	if (hour < 1 || hour > 12 || minute > 59) return NaN;
+	const hours = (hour % 12) + (meridiem.toLowerCase() === "pm" ? 12 : 0);
+	const date = new Date(now);
+	const year = date.getUTCFullYear();
+	if (month) {
+		const monthIndex = MONTHS.indexOf(month.toLowerCase());
+		const dayOfMonth = Number(day);
+		let resetAt = Date.UTC(year, monthIndex, dayOfMonth, hours, minute);
+		if (new Date(resetAt).getUTCDate() !== dayOfMonth) return NaN;
+		// A date well in the past is next year's (for example a December message
+		// naming January); a recent past date is a stale message, left as is.
+		if (resetAt < now - 180 * 24 * ONE_HOUR)
+			resetAt = Date.UTC(year + 1, monthIndex, dayOfMonth, hours, minute);
+		return resetAt;
+	}
+	let resetAt = Date.UTC(
+		year,
+		date.getUTCMonth(),
+		date.getUTCDate(),
+		hours,
+		minute,
+	);
+	if (weekday) {
+		const offset =
+			(WEEKDAYS.indexOf(weekday.toLowerCase()) - date.getUTCDay() + 7) % 7;
+		resetAt += offset * 24 * ONE_HOUR;
+		if (resetAt <= now) resetAt += 7 * 24 * ONE_HOUR;
+	} else if (resetAt <= now) resetAt += 24 * ONE_HOUR;
+	return resetAt;
 }
 
 export function readClaudeCooldown(
