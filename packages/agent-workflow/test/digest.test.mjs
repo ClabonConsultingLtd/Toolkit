@@ -178,6 +178,37 @@ test("renderMarkdown produces a table per batch with flags", () => {
 	assert.match(markdown, /model-mismatch/);
 	assert.match(markdown, /fix-cap/);
 });
+test("digest lists merged tickets whose worktrees can be archived, without archiving", () => {
+	const s = fixtureState();
+	Object.assign(s.tickets[8], {
+		status: "completed",
+		mergedAt: "2026-01-02T00:00:00Z",
+		branch: "tickets/pilot/8",
+		prUrl: "https://github.com/example/project/pull/12",
+	});
+	Object.assign(s.tickets[9], { status: "completed", mergedAt: null });
+	const before = structuredClone(s);
+	const digest = buildDigest([s], { now: 10_000, activity: () => null });
+	assert.deepEqual(digest.batches[0].archivable, [
+		{
+			number: "8",
+			pr: "https://github.com/example/project/pull/12",
+			branch: "tickets/pilot/8",
+			workspaceId: "w8",
+			agentId: "a8",
+			mergedAt: "2026-01-02T00:00:00Z",
+		},
+	]);
+	assert.deepEqual(s, before);
+	assert.match(
+		renderMarkdown(digest),
+		/can be archived[\s\S]*- #8: PR https:\/\/github\.com\/example\/project\/pull\/12, branch `tickets\/pilot\/8`, workspace `w8`, agent `a8`/,
+	);
+	assert.doesNotMatch(
+		renderMarkdown(buildDigest([fixtureState()], { now: 10_000 })),
+		/can be archived/,
+	);
+});
 test("renderMarkdown reports batches with no tickets", () => {
 	const digest = buildDigest(
 		[

@@ -11,6 +11,7 @@ const fields = new Set([
 	"timezone",
 	"excludeTickets",
 	"requiredChecks",
+	"specLabels",
 	"localVerificationCommand",
 ]);
 
@@ -28,6 +29,20 @@ export function normalizeRequiredChecks(value, source = "intake request") {
 	if (new Set(value).size !== value.length)
 		throw new Error(`${source}: duplicate requiredChecks`);
 	return value;
+}
+
+// Labels marking spec/umbrella issues that are implemented through other
+// tickets; selection skips them alongside issues with sub-issues.
+export function normalizeSpecLabels(value, source = "intake request") {
+	if (
+		!Array.isArray(value) ||
+		value.some(
+			(name) =>
+				typeof name !== "string" || !name.trim() || name !== name.trim(),
+		)
+	)
+		throw new Error(`${source}: specLabels must contain non-empty label names`);
+	return [...new Set(value)];
 }
 
 export function normalizeExcludeTickets(value, source = "intake request") {
@@ -90,9 +105,14 @@ export function readRepositoryIntakeConfig(cwd) {
 					config.requiredChecks,
 					"invalid toolkit-intake.json",
 				);
+	const specLabels =
+		config.specLabels === undefined
+			? undefined
+			: normalizeSpecLabels(config.specLabels, "invalid toolkit-intake.json");
 	return {
 		...config,
 		excludeTickets,
+		...(specLabels === undefined ? {} : { specLabels }),
 		...(requiredChecks === undefined ? {} : { requiredChecks }),
 	};
 }
