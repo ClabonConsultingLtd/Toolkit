@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.4.4 - 2026-09-24
+## 0.5.0 - 2026-09-25
+
+- #61: Add Codex handoff and context skills with configurable model endpoints
 
 - #59: Document shared context policy for Claude and Codex
 
