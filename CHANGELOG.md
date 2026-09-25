@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.5.2 - 2026-09-25
+## 0.6.0 - 2026-09-25
+
+- #75: Parse Claude weekly limits and auto-resume provider-limit blocks after reset
 
 - #66: Gate ticket merges on repository local verification
 - #67: Document local verification gate and prepare patch release
