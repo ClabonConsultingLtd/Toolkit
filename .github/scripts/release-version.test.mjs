@@ -27,6 +27,7 @@ function fixture() {
 		"agent-workflow",
 		"claude-token-optimisation",
 		"toolkit-sync",
+		"setup-wizard",
 		"image-generation",
 		"image-to-3d",
 	])
@@ -35,6 +36,7 @@ function fixture() {
 		"agent-workflow",
 		"claude-token-optimisation",
 		"toolkit-sync",
+		"setup-wizard",
 	])
 		writeFileSync(
 			join(root, "packages", relative, "package.json"),
@@ -69,6 +71,7 @@ test("updates lockstep versions and aggregates release PRs", () => {
 		"packages/agent-workflow/package.json",
 		"packages/claude-token-optimisation/package.json",
 		"packages/toolkit-sync/package.json",
+		"packages/setup-wizard/package.json",
 		"packages/image-generation/pyproject.toml",
 		"packages/image-to-3d/pyproject.toml",
 		"packages/image-generation/uv.lock",

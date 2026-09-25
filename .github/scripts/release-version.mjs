@@ -4,6 +4,7 @@ const packageFiles = [
 	"packages/agent-workflow/package.json",
 	"packages/claude-token-optimisation/package.json",
 	"packages/toolkit-sync/package.json",
+	"packages/setup-wizard/package.json",
 ];
 const pythonFiles = [
 	"packages/image-generation/pyproject.toml",
