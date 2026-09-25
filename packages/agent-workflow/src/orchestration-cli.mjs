@@ -9,6 +9,7 @@ import {
 	checkCycles,
 	disposition,
 	newBatch,
+	PROVIDER_LIMIT,
 	readState,
 	reconcile,
 	renew,
@@ -39,6 +40,14 @@ import {
 	withSelectionLock,
 } from "./ticket-selection.mjs";
 
+// A resumed Claude worker would hit the limit again while the shared cooldown lasts.
+function claudeLimitPending(ticket, options) {
+	return (
+		ticket.blockKind === PROVIDER_LIMIT &&
+		ticket.provider?.startsWith("claude/") &&
+		readClaudeCooldown(options.fallbackStatePath ?? fallbackStatePath()).active
+	);
+}
 export function execute(command, path, input = {}, options = {}) {
 	if (command === "claude-cooldown")
 		return readClaudeCooldown(options.fallbackStatePath ?? fallbackStatePath());
@@ -155,6 +164,9 @@ export function execute(command, path, input = {}, options = {}) {
 					output = changeTicket(state, input.number, "reserve", runtime);
 				} else {
 					output = { ...disposition(state), issues };
+					output.resumable = output.resumable.filter(
+						(n) => !claudeLimitPending(state.tickets[n], options),
+					);
 					const budget = capacity(path, state.repository, state);
 					if (budget.limit !== null) {
 						output.slots = Math.min(output.slots, budget.executionSlots);
@@ -234,7 +246,17 @@ export function execute(command, path, input = {}, options = {}) {
 								head: pr.headRefOid,
 								requiredChecks: required,
 							};
-			} else output = changeTicket(state, input.number, command, input);
+			} else {
+				const t = state.tickets[String(input.number).replace(/^#/, "")];
+				if (
+					command === "resume" &&
+					input.evidence === undefined &&
+					t &&
+					claudeLimitPending(t, options)
+				)
+					throw new Error("Claude cooldown still active; wait for its reset");
+				output = changeTicket(state, input.number, command, input);
+			}
 			if (["reserve", "resume", "fix"].includes(command))
 				enforceCapacity(path, state, previousActive);
 			assertLease(state, input.token);
