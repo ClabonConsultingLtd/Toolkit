@@ -298,6 +298,11 @@ catalog. Existing workers remain on their selected provider. Use the
 orchestration protocol; generic rate limits and unrelated failures do not
 activate fallback. All controllers on the host must use the same state root.
 
+The limited worker is blocked with `blockKind: "provider-limit"` and the reset
+time. Unlike other blocks, it does not pause the schedule: once the reset has
+passed (and the shared Claude cooldown has ended for a Claude worker), `sync`
+lists it in `resumable` and the controller resumes it without human evidence.
+
 ### Admit more work every hour
 
 ```text
