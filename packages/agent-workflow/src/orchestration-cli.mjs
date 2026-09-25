@@ -14,7 +14,11 @@ import {
 	renew,
 	transaction,
 } from "./orchestration.mjs";
-import { requirePassingChecks } from "./orchestration-checks.mjs";
+import {
+	mergeState,
+	requireMergeable,
+	requirePassingChecks,
+} from "./orchestration-checks.mjs";
 import { readRepositoryIntakeConfig } from "./intake-config.mjs";
 import {
 	github,
@@ -110,6 +114,7 @@ export function execute(command, path, input = {}, options = {}) {
 							reason: issues[ticket.number].dependencyError,
 						});
 				checkCycles(issues);
+				const baseUpdates = [];
 				for (const t of Object.values(state.tickets)) {
 					t.dependencies = issues[t.number].dependencies;
 					if (t.pr && t.status !== "completed") {
@@ -132,6 +137,16 @@ export function execute(command, path, input = {}, options = {}) {
 							t.reason =
 								"PR head changed after review; resume for a new review";
 						}
+						const merge = pr.state === "OPEN" ? mergeState(pr) : null;
+						if (merge?.state === "conflicting" || merge?.state === "behind")
+							baseUpdates.push({
+								number: t.number,
+								pr: pr.number,
+								status: t.status,
+								agentId: t.agentId ?? null,
+								mergeState: merge.state,
+								reason: merge.reason,
+							});
 					}
 				}
 				for (const t of Object.values(state.tickets)) {
@@ -154,7 +169,7 @@ export function execute(command, path, input = {}, options = {}) {
 					});
 					output = changeTicket(state, input.number, "reserve", runtime);
 				} else {
-					output = { ...disposition(state), issues };
+					output = { ...disposition(state), issues, baseUpdates };
 					const budget = capacity(path, state.repository, state);
 					if (budget.limit !== null) {
 						output.slots = Math.min(output.slots, budget.executionSlots);
@@ -187,6 +202,7 @@ export function execute(command, path, input = {}, options = {}) {
 					command === "ready" ? input.reviewedHead : t.reviewedHead;
 				if (pr.state !== "OPEN" || pr.headRefOid !== reviewedHead)
 					throw new Error("review must match current open PR head");
+				requireMergeable(pr);
 				const policy = readIntake(path);
 				if (
 					policy &&
@@ -235,13 +251,13 @@ export function execute(command, path, input = {}, options = {}) {
 								requiredChecks: required,
 							};
 			} else output = changeTicket(state, input.number, command, input);
-			if (["reserve", "resume", "fix"].includes(command))
+			if (["reserve", "resume", "fix", "update-base"].includes(command))
 				enforceCapacity(path, state, previousActive);
 			assertLease(state, input.token);
 			return { state, output };
 		});
 	const mutatesCapacity =
-		["reserve", "resume", "fix"].includes(command) ||
+		["reserve", "resume", "fix", "update-base"].includes(command) ||
 		(command === "attach" && input.workerActive === true);
 	return mutatesCapacity ? withSelectionLock(path, run) : run();
 }

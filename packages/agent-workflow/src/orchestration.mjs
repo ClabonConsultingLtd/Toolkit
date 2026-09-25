@@ -294,6 +294,21 @@ export function changeTicket(
 				updatedAt: new Date(now).toISOString(),
 			});
 		}
+	} else if (action === "update-base") {
+		// Routing a conflicting or behind PR back to its worker is not a review
+		// fix, so it never consumes one of the two fix cycles.
+		requireStatus("reviewing", "awaiting_merge");
+		requireText("reason");
+		if (!t.agentId) throw new Error("agent must be attached");
+		if (!ACTIVE.has(t.status) && disposition(state).slots === 0)
+			throw new Error("no execution slot to update from base");
+		Object.assign(t, {
+			status: "implementing",
+			workerActive: true,
+			reviewedHead: null,
+			reason: data.reason,
+			updatedAt: new Date(now).toISOString(),
+		});
 	} else if (action === "ready") {
 		requireStatus("reviewing");
 		requireText("evidence");
