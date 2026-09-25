@@ -312,6 +312,121 @@ test("schedule pauses for human blocked chains, waits for merges, stops when com
 	for (const t of Object.values(s.tickets)) t.status = "completed";
 	assert.equal(disposition(s).pauseSchedule, true);
 });
+test("provider-limit blocks carry resetAt and resume without evidence only after reset", () => {
+	const s = newBatch(manifest());
+	reconcile(s, snapshot());
+	worker(s, 9);
+	const now = Date.parse("2026-09-25T10:00:00Z");
+	assert.throws(
+		() =>
+			changeTicket(s, 9, "block", {
+				reason: "limit",
+				blockKind: "provider-limit",
+			}),
+		/resetAt required/,
+	);
+	assert.throws(
+		() => changeTicket(s, 9, "block", { reason: "x", blockKind: "other" }),
+		/blockKind/,
+	);
+	changeTicket(
+		s,
+		9,
+		"block",
+		{
+			reason: "Claude weekly limit",
+			blockKind: "provider-limit",
+			resetAt: "2026-09-25T13:00:00Z",
+			workerStopped: true,
+		},
+		now,
+	);
+	assert.equal(s.tickets[9].blockKind, "provider-limit");
+	assert.equal(s.tickets[9].resetAt, "2026-09-25T13:00:00.000Z");
+	// Waiting for a reset keeps the schedule running.
+	assert.equal(disposition(s, now).pauseSchedule, false);
+	assert.deepEqual(disposition(s, now).resumable, []);
+	assert.throws(() => changeTicket(s, 9, "resume", {}, now), /resets at/);
+	const later = Date.parse("2026-09-25T13:00:00Z");
+	assert.deepEqual(disposition(s, later).resumable, ["9"]);
+	changeTicket(s, 9, "resume", {}, later);
+	assert.equal(s.tickets[9].status, "implementing");
+	assert.equal(s.tickets[9].blockKind, null);
+	assert.equal(s.tickets[9].resetAt, undefined);
+	// Human blocks stay manual and cannot be downgraded to automatic recovery.
+	changeTicket(s, 9, "block", { reason: "permission", workerStopped: true });
+	assert.deepEqual(disposition(s, later).resumable, []);
+	assert.throws(() => changeTicket(s, 9, "resume", {}, later), /evidence/);
+	assert.throws(
+		() =>
+			changeTicket(s, 9, "block", {
+				reason: "limit",
+				blockKind: "provider-limit",
+				resetAt: "2026-09-25T13:00:00Z",
+			}),
+		/human block/,
+	);
+	// A later human block replaces a provider-limit block.
+	changeTicket(s, 9, "resume", { evidence: "permission granted" });
+	changeTicket(s, 9, "block", {
+		reason: "limit",
+		blockKind: "provider-limit",
+		resetAt: "2026-09-25T13:00:00Z",
+	});
+	changeTicket(s, 9, "block", { reason: "clarify" });
+	assert.equal(s.tickets[9].blockKind, "human");
+	assert.equal(s.tickets[9].resetAt, undefined);
+	assert.throws(() => changeTicket(s, 9, "resume", {}, later), /evidence/);
+});
+test("CLI withholds provider-limit resume while the shared Claude cooldown is active", (t) => {
+	const { path, token } = fixture(t);
+	const cooldown = join(path, "..", "cooldown.json");
+	const options = {
+		fallbackStatePath: cooldown,
+		github: () => ({ snapshot, pr: pull }),
+	};
+	execute("sync", path, { token }, options);
+	execute("reserve", path, { token, number: 9, models }, options);
+	execute(
+		"attach",
+		path,
+		{ token, number: 9, workspaceId: "w9", agentId: "a9" },
+		options,
+	);
+	execute(
+		"block",
+		path,
+		{
+			token,
+			number: 9,
+			reason: "Claude weekly limit",
+			blockKind: "provider-limit",
+			resetAt: "2000-01-01T00:00:00Z",
+			workerStopped: true,
+		},
+		options,
+	);
+	execute(
+		"record-claude-limit",
+		path,
+		{
+			error: "You've hit your weekly limit; resets at 2099-01-01T00:00:00Z",
+			failureKey: "a9:turn-2",
+		},
+		options,
+	);
+	assert.deepEqual(execute("sync", path, { token }, options).resumable, []);
+	assert.throws(
+		() => execute("resume", path, { token, number: 9 }, options),
+		/cooldown still active/,
+	);
+	rmSync(cooldown);
+	assert.deepEqual(execute("sync", path, { token }, options).resumable, ["9"]);
+	assert.equal(
+		execute("resume", path, { token, number: 9 }, options).status,
+		"implementing",
+	);
+});
 test("closed ready issue cannot launch", () => {
 	const s = newBatch(manifest()),
 		issues = snapshot();
