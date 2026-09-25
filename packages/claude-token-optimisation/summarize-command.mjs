@@ -5,7 +5,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { commandKind, summarize } from "./hooks/command-summary.mjs";
 
-const command = process.argv.slice(2).join(" ").trim();
+const command =
+	process.argv[2] === "--encoded"
+		? Buffer.from(process.argv[3] ?? "", "base64url")
+				.toString("utf8")
+				.trim()
+		: process.argv.slice(2).join(" ").trim();
 const candidate = commandKind(command);
 if (!candidate) {
 	console.error("Command is outside the narrow summary allowlist");
