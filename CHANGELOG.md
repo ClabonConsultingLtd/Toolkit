@@ -2,6 +2,8 @@
 
 ## 0.6.0 - 2026-09-25
 
+- #79: claude-token-optimisation: portable hook commands, wrapped command summaries, context policy
+
 - #76: Gate orchestration on PR merge state and route base updates to workers
 
 - #77: toolkit-sync: record dest and sync baseline; add toolkit-upgrade skill
