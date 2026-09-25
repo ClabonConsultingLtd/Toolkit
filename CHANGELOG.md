@@ -2,6 +2,8 @@
 
 ## 0.6.0 - 2026-09-25
 
+- #77: toolkit-sync: record dest and sync baseline; add toolkit-upgrade skill
+
 - #75: Parse Claude weekly limits and auto-resume provider-limit blocks after reset
 
 - #66: Gate ticket merges on repository local verification
