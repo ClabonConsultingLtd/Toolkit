@@ -19,9 +19,13 @@ This is a local shared limit for managed tickets, not a distributed worker quota
 For a tracked, reviewable repository configuration, commit `toolkit-intake.json`
 at the checkout root (see `examples/toolkit-intake.json`). It supports `version: 1`,
 `repository`, `baseBranch`, `codexModel`, `count`, and optional `cron`, `timezone`,
-`excludeTickets` issue numbers, and `requiredChecks` check-run names or status
-contexts. Set `count` to the desired shared cap. List every check that must run
-before a controller merge; a missing check blocks it. An empty list explicitly
+`excludeTickets` issue numbers, `requiredChecks` check-run names or status
+contexts, and `localVerificationCommand`, a relative `.mjs` path. Set `count`
+to the desired shared cap. List every check that must run before a controller
+merge; a missing, skipped, or neutral required check blocks it. The local
+verification command receives the PR number and current head SHA and must exit
+zero only for a complete trusted pass. It runs at `ready` and `merge-ready`, so
+a stale result blocks both. Failure or timeout blocks the controller. An empty list explicitly
 requires none, while every reported pending or failing check still blocks it. Do not
 put pause state, schedule IDs, paths, or tick history in this file. Run
 `node <skill>/scripts/intake.mjs configure CHECKOUT` to initialize the local
