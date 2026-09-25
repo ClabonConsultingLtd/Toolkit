@@ -138,8 +138,9 @@ Copy `examples/toolkit-intake.json` to `toolkit-intake.json` at the consuming
 repository root and commit it. The file sets the repository, base branch, shared
 ticket limit (`count`), controller model, optional schedule cron/timezone, and
 ticket numbers that must always be excluded. Keep it separate from the ignored
-`.toolkit/orchestration/.intake/policy.json`, which holds the live schedule ID,
-pause state, and tick history.
+`.toolkit/orchestration/.intake/policy.json`, which holds the schedule ID,
+last observed pause state, and tick history. The live Paseo schedule determines
+whether intake is paused.
 
 Run `node <skill>/scripts/intake.mjs configure CHECKOUT` to initialize the live
 policy from this file. Later changes are applied by `sync-config` or the next
@@ -311,12 +312,15 @@ or it may use a deliberately chosen cron and timezone. Runs between UTC hour
 boundaries can reconcile existing work and retry a zero-admission evaluation
 after readiness or capacity changes. Once a batch is admitted, later
 ticks in that UTC hour replay it without adding tickets. Reconfiguration preserves
-the saved schedule cadence unless a new one is supplied. Compare the saved policy
-with the live Paseo schedule before describing it as enabled; preserve user pauses.
+the saved schedule cadence unless a new one is supplied. Fetch the saved Paseo
+schedule by ID immediately before each tick and pass its `{id, name, paused}`
+state in the tick request. A missing, mismatched, or unreadable schedule stops
+admission. A stale cached pause is reconciled from Paseo, so a UI resume enables
+the next eligible tick without an intake helper command.
 An enabled intake schedule keeps running when no work qualifies or capacity is full.
 It merges PRs only when explicitly authorized and after the skill's exact-link,
 independent-review, unchanged-head, check, and branch-protection gates. Use `scripts/intake.mjs` (or the package's `ticket-intake`
-command) for configure/status/tick/pause/resume, as documented in the skill's
+command) for configure/status/tick and schedule-state reconciliation, as documented in the skill's
 `references/intake.md`. Tick output distinguishes admissions, empty evaluations,
 capacity waits, and replays, and includes the current shared capacity. Policies
 live under `.toolkit/orchestration/.intake/`, with normal batch
