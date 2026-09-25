@@ -220,6 +220,25 @@ test("parent specs are skipped in favour of their sub-tickets", (t) => {
 		},
 	]);
 });
+test("configured spec labels skip umbrella issues", (t) => {
+	const f = fixture(t);
+	f.items[1].labels.push("spec");
+	const result = selectNext(
+		f.path,
+		{ ...f.input, specLabels: ["spec"] },
+		f.api,
+	);
+	assert.deepEqual(result.tickets, ["2", "3"]);
+	assert.deepEqual(result.skipped, [
+		{ number: "1", reason: "spec or umbrella label" },
+	]);
+	assert.deepEqual(selectNext(f.path, f.input, f.api).tickets, ["1", "2"]);
+	for (const invalid of ["spec", [""], [" spec"], [7]])
+		assert.throws(
+			() => selectNext(f.path, { ...f.input, specLabels: invalid }, f.api),
+			/specLabels/,
+		);
+});
 function parentApi(issues, subIssues = {}) {
 	const calls = [];
 	const api = github("example/project", (args) => {

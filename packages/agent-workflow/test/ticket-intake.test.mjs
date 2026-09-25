@@ -417,6 +417,29 @@ test("requiredChecks validates names, duplicates, and array type", (t) => {
 	rmSync(configPath);
 	assert.equal(intakeCommand("status", f.cwd).requiredChecks, undefined);
 });
+test("tracked specLabels are saved and skip umbrella issues at intake", (t) => {
+	const f = fixture(t);
+	writeFileSync(
+		join(f.cwd, "toolkit-intake.json"),
+		JSON.stringify({ version: 1, ...f.input, specLabels: ["umbrella"] }),
+	);
+	assert.deepEqual(intakeCommand("sync-config", f.cwd).specLabels, [
+		"umbrella",
+	]);
+	const issue = f.api.issue;
+	f.api.issue = (n) => {
+		const item = issue(n);
+		if (n === "1") item.labels.push("umbrella");
+		return item;
+	};
+	const tick = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	assert.deepEqual(tick.tickets, ["2", "3", "4"]);
+	writeFileSync(
+		join(f.cwd, "toolkit-intake.json"),
+		JSON.stringify({ version: 1, ...f.input, specLabels: [""] }),
+	);
+	assert.throws(() => intakeCommand("sync-config", f.cwd), /specLabels/);
+});
 test("capacity-full tick can retry after a slot frees within the hour", (t) => {
 	const f = fixture(t);
 	intakeCommand("configure", f.cwd, { ...f.input, count: 1 });

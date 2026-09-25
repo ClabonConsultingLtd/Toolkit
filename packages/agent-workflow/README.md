@@ -4,7 +4,7 @@ Provider-aware developer automation with project-defined policy. `pnpm handoff <
 
 ## Bounded handoff from Claude or Codex
 
-The `claude/skills/bounded-handoff` and `codex/skills/bounded-handoff` entrypoints use one [shared procedure](skills/bounded-handoff.md). Install the appropriate skill directory from a persistent Toolkit checkout; for Codex, symlink `codex/skills/bounded-handoff` into `${CODEX_HOME:-$HOME/.codex}/skills/bounded-handoff`. The skill guides delegation and review; `handoff` performs the same bounded edit regardless of the calling agent.
+The `claude/skills/bounded-handoff` and `codex/skills/bounded-handoff` entrypoints carry the same self-contained procedure, so either directory works when copied or symlinked into a skills directory (for Claude, `.claude/skills/bounded-handoff`). Keep the two files identical; a test enforces this. Install the appropriate skill directory from a persistent Toolkit checkout; for Codex, symlink `codex/skills/bounded-handoff` into `${CODEX_HOME:-$HOME/.codex}/skills/bounded-handoff`. The skill guides delegation and review; `handoff` performs the same bounded edit regardless of the calling agent.
 
 `handoff` accepts OpenAI-compatible chat-completions endpoints. Set `TOOLKIT_HANDOFF_API_URL` to the complete `/chat/completions` URL and `TOOLKIT_HANDOFF_MODEL` to the server's model ID. Set `TOOLKIT_HANDOFF_API_KEY` for a remote endpoint. For a local server on `localhost`, `127.0.0.1`, or `[::1]`, the key may be omitted. For example, Ollama can use `http://localhost:11434/v1/chat/completions` with a locally installed model such as `qwen2.5-coder:1.5b`. The request carries only the model and messages, so set decoding options on the server: temperature 0 (SEARCH text must be copied exactly), and a context window (`num_ctx` in an Ollama Modelfile) larger than the instruction plus every editable file. Ollama truncates an over-long prompt from the start, which removes the instruction without an error. The existing `DEEPSEEK_API_URL`, `DEEPSEEK_MODEL`, and `DEEPSEEK_API_KEY` variables remain supported when no generic handoff setting is used. Preview first, then set `TOOLKIT_HANDOFF_ENABLED=on` to execute. Credentials stay in environment variables.
 
@@ -138,8 +138,9 @@ helper paths.
 Copy `examples/toolkit-intake.json` to `toolkit-intake.json` at the consuming
 repository root and commit it. The file sets the repository, base branch, shared
 ticket limit (`count`), controller model, optional schedule cron/timezone,
-required check names, an optional `localVerificationCommand`, and ticket numbers
-that must always be excluded. The command is a relative `.mjs` path inside the
+required check names, an optional `localVerificationCommand`, ticket numbers
+that must always be excluded, and optional `specLabels` naming labels that mark
+spec/umbrella issues selection must skip (issues with sub-issues are always skipped). The command is a relative `.mjs` path inside the
 stable checkout; it receives the PR number and current head SHA and must exit
 zero only for a complete local pass. The merge helper runs it at `ready` and
 `merge-ready`, so missing or stale evidence blocks both operations. Keep this
@@ -274,7 +275,8 @@ into a periodic digest: tickets completed/in-flight/blocked-on-you since the
 last digest, fix cycles nearing the two-cycle cap, token/turn cost per
 ticket compared against the ticket's own `**Claude:** \`Model / effort\``
 recommendation, and any ticket stuck longer than a configurable hour
-threshold (default 24h). It never mutates `orchestrate-tickets`'s batch
+threshold (default 24h). It also lists merged tickets whose worktrees and
+agents can be archived; archiving is left to the user. It never mutates `orchestrate-tickets`'s batch
 state, creates a worktree, or launches a worker, and it runs on its own
 schedule (default `*/30 8-19 * * *` UTC), independent of both
 `orchestrate-tickets` and `triage-tickets`. Install it the same way:

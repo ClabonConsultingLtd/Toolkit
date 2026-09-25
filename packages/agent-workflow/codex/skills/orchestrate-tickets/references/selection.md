@@ -37,6 +37,10 @@ Eligibility and order:
   implemented through those sub-tickets, never directly. `skipped[].subTickets`
   lists them. A parent already in a batch is blocked for readiness at sync and
   refused at `reserve`. If sub-tickets cannot be read, selection stops.
+- Skip spec/umbrella issues carrying a label from the optional `specLabels`
+  list (request field or tracked `toolkit-intake.json`), with reason
+  `spec or umbrella label`. Use it for specs that track work without native
+  sub-issues or `Parent:` references. The list is empty by default.
 - Require all native/fallback blockers closed, and no unfinished local batch
   owning a blocker. An open blocker is never included speculatively in the batch.
 - Inspect timeline cross-references using the REST PR response. Skip only an open
