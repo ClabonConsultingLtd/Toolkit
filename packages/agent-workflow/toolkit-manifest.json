@@ -5,6 +5,7 @@
 		"src/**",
 		"claude/**",
 		"codex/**",
+		"skills/**",
 		"examples/**"
 	]
 }

@@ -11,7 +11,7 @@ Toolkit is a collection of small, reusable packages—not a framework that takes
 
 | Need | Package | Outcome |
 | --- | --- | --- |
-| Keep Claude Code context focused | [`claude-token-optimisation`](packages/claude-token-optimisation/README.md) | Broad reads and routine passing command output are compressed without hiding failures. |
+| Keep Claude or Codex context focused | [`claude-token-optimisation`](packages/claude-token-optimisation/README.md) | Broad reads and routine passing command output are compressed without hiding failures. |
 | Delegate a mechanical edit safely | [`agent-workflow`](packages/agent-workflow/README.md) | Provider handoffs are limited to declared files, transcripted, and reviewable. |
 | Run a queue of implementation tickets | [`agent-workflow`](packages/agent-workflow/README.md#ticket-batches) | Tickets run serially, require a completion status, and resume from recorded state. |
 | Generate a batch of images | [`image-generation`](packages/image-generation/README.md) | A caller-chosen runner gains retries, quota stops, logs, and resumable state. |
@@ -58,7 +58,7 @@ toolkit-image-to-3d queue.json --source-root . --dry-run
 | Python packages | Python 3.11+ and [uv](https://docs.astral.sh/uv/) |
 | Claude integration | Claude Code, only when using the optional `.claude` assets |
 | Image-to-3D conversion | A user-supplied token, normally `HF_TOKEN` |
-| Provider handoff | Explicit opt-in, `DEEPSEEK_API_KEY`, and `DEEPSEEK_MODEL` |
+| Provider handoff | Explicit opt-in, an OpenAI-compatible endpoint and model; a key for remote endpoints |
 | Worktree helper | Git, only when deliberately creating a worktree |
 
 Install Node dependencies from the repository root:

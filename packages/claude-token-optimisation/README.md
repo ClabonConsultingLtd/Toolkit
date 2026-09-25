@@ -1,6 +1,6 @@
-# Claude token optimisation
+# Context optimisation for Claude and Codex
 
-Claude Code integration assets for keeping broad reads and routine successful command output from consuming the primary session's context.
+Integration assets for keeping broad reads and routine successful command output from consuming the primary session's context. Claude Code uses automatic hooks; Codex uses an explicit skill and command wrapper around the same summary logic.
 
 ## Included assets
 
@@ -11,6 +11,8 @@ Claude Code integration assets for keeping broad reads and routine successful co
 ## Install
 
 Run `node install.mjs <target-repository>`. It copies the agent and hooks into the target’s `.claude` directory and writes a non-overwriting `settings.toolkit-token-optimisation.json` fragment for the project owner to merge into its Claude settings.
+
+For Codex, symlink `codex/skills/context-optimisation` from a persistent Toolkit checkout into `${CODEX_HOME:-$HOME/.codex}/skills/context-optimisation`. The skill uses the same bulk-reader guidance and the `summarize-command.mjs` wrapper. For an allowlisted command, run `node /absolute/Toolkit/packages/claude-token-optimisation/summarize-command.mjs git status` (or `pnpm -r list --depth -1`, or a single-file `vitest run` command). The wrapper writes full successful output to `.toolkit/claude-token-optimisation/bash-summary-logs`; failures print full output and retain their exit status. Codex does not use the Claude `.claude` hook settings.
 
 Set `BULK_READER_MIN_LINES` to change the large-read threshold; it defaults to 350 lines.
 

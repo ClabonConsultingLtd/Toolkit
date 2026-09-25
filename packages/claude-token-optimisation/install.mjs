@@ -18,7 +18,7 @@ cpSync(
 	join(source, "agents", "bulk-reader.md"),
 	join(claude, "agents", "bulk-reader.md"),
 );
-for (const file of ["guard-large-read.mjs", "summarize-bash.mjs"])
+for (const file of ["guard-large-read.mjs", "summarize-bash.mjs", "command-summary.mjs"])
 	cpSync(join(source, "hooks", file), join(claude, "hooks", file));
 const settings = join(claude, "settings.toolkit-token-optimisation.json");
 if (existsSync(settings)) throw new Error(`refusing to overwrite ${settings}`);

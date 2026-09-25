@@ -4,8 +4,10 @@
 		"package.json",
 		"tsconfig.json",
 		"install.mjs",
+		"summarize-command.mjs",
 		"claude-settings.example.json",
 		"agents/**",
-		"hooks/**"
+		"hooks/**",
+		"codex/**"
 	]
 }
