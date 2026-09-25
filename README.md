@@ -78,6 +78,10 @@ Use `uv sync` from either Python package directory when installing its dependenc
 - Model handoffs require an explicit enable switch and may edit only task-declared files.
 - Image batches verify output before recording success and stop on quota or rate-limit signals.
 
+## Guides
+
+- [Toolkit with Claude Code on Windows](docs/guides/claude-windows-setup.md): set up a repository from a fresh machine with `toolkit-sync`, token optimisation and the ticket workflow.
+
 ## Project standards
 
 - [Contributing](CONTRIBUTING.md)
