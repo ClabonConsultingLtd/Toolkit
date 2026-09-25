@@ -18,6 +18,23 @@ test("Codex command wrapper keeps full output on command failure", () => {
 	assert.match(result.stdout, /fatal: not a git repository/);
 });
 
+test("Codex command wrapper drops a tail pipeline so failure keeps its exit status", () => {
+	const root = mkdtempSync(join(tmpdir(), "summary-command-"));
+	const result = spawnSync(
+		process.execPath,
+		[script.pathname, "git status 2>&1 | tail -1"],
+		{
+			cwd: root,
+			encoding: "utf8",
+			env: { ...process.env, GIT_CEILING_DIRECTORIES: tmpdir() },
+		},
+	);
+	assert.equal(result.status, 128);
+	assert.match(result.stdout, /not a git repository/);
+	const log = /Full raw output: (.+)/.exec(result.stderr)?.[1];
+	assert.ok(log && existsSync(log));
+});
+
 test("Codex command wrapper summarizes success and saves raw output", () => {
 	const root = mkdtempSync(join(tmpdir(), "summary-command-"));
 	assert.equal(

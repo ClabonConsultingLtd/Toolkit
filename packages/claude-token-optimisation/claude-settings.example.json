@@ -6,8 +6,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node",
-						"args": ["YOUR_HOOK_DIRECTORY/guard-large-read.mjs"]
+						"command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-large-read.mjs\""
 					}
 				]
 			},
@@ -16,8 +15,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node",
-						"args": ["YOUR_HOOK_DIRECTORY/summarize-bash.mjs"]
+						"command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/summarize-bash.mjs\""
 					}
 				]
 			}
