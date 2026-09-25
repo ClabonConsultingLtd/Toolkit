@@ -13,6 +13,8 @@ const fields = new Set([
 	"requiredChecks",
 	"specLabels",
 	"localVerificationCommand",
+	"schedulePromptAppend",
+	"codexWorkerFullAccess",
 ]);
 
 export function normalizeRequiredChecks(value, source = "intake request") {
@@ -88,12 +90,36 @@ export function readRepositoryIntakeConfig(cwd) {
 			(typeof config[field] !== "string" || !config[field].trim())
 		)
 			throw new Error(`invalid toolkit-intake.json: ${field} must be nonempty`);
-	if (config.localVerificationCommand !== undefined &&
+	if (
+		config.localVerificationCommand !== undefined &&
 		(typeof config.localVerificationCommand !== "string" ||
-		!/^[-\w./]+\.mjs$/.test(config.localVerificationCommand) ||
-		config.localVerificationCommand.startsWith("/") ||
-		config.localVerificationCommand.split("/").includes("..")))
-		throw new Error("invalid toolkit-intake.json: localVerificationCommand must be a relative .mjs path inside the checkout");
+			!/^[-\w./]+\.mjs$/.test(config.localVerificationCommand) ||
+			config.localVerificationCommand.startsWith("/") ||
+			config.localVerificationCommand.split("/").includes(".."))
+	)
+		throw new Error(
+			"invalid toolkit-intake.json: localVerificationCommand must be a relative .mjs path inside the checkout",
+		);
+	const append = config.schedulePromptAppend;
+	if (
+		append !== undefined &&
+		!(typeof append === "string" && append.trim()) &&
+		!(
+			Array.isArray(append) &&
+			append.length &&
+			append.every((line) => typeof line === "string" && line.trim())
+		)
+	)
+		throw new Error(
+			"invalid toolkit-intake.json: schedulePromptAppend must be a nonempty string or array of strings",
+		);
+	if (
+		config.codexWorkerFullAccess !== undefined &&
+		typeof config.codexWorkerFullAccess !== "boolean"
+	)
+		throw new Error(
+			"invalid toolkit-intake.json: codexWorkerFullAccess must be a boolean",
+		);
 	const excludeTickets = normalizeExcludeTickets(
 		config.excludeTickets ?? [],
 		"invalid toolkit-intake.json",
