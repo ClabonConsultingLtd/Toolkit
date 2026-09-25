@@ -74,6 +74,8 @@ function pull() {
 		headRepository: { name: "project" },
 		headRepositoryOwner: { login: "example" },
 		statusCheckRollup: [],
+		mergeable: "MERGEABLE",
+		mergeStateStatus: "CLEAN",
 	};
 }
 function fixture(t) {
@@ -711,4 +713,92 @@ test("completion releases dependent ticket on same sync and schedule identity ca
 		() => execute("schedule", path, { token, scheduleId: "s2" }, options),
 		/already/,
 	);
+});
+test("merge state gates ready and merge-ready; base updates keep fix cycles", (t) => {
+	const { path, token } = fixture(t);
+	const pr = pull();
+	let fields;
+	const api = github("example/project", (args) => {
+		fields = args.at(-1);
+		return JSON.stringify(pr);
+	});
+	api.pr(17);
+	assert.match(fields, /mergeable,mergeStateStatus/);
+	const options = {
+		github: () => ({ snapshot, pr: () => pr, requiredStatusChecks: () => [] }),
+	};
+	execute("reserve", path, { token, number: 7, models }, options);
+	execute(
+		"attach",
+		path,
+		{ token, number: 7, workspaceId: "w", agentId: "a" },
+		options,
+	);
+	execute("link-pr", path, { token, number: 7, pr: 17 }, options);
+	execute("review", path, { token, number: 7, evidence: "tests" }, options);
+	const ready = () =>
+		execute(
+			"ready",
+			path,
+			{ token, number: 7, evidence: "diff", reviewedHead: pr.headRefOid },
+			options,
+		);
+	const mergeReady = () =>
+		execute("merge-ready", path, { token, number: 7 }, options);
+	pr.mergeable = "CONFLICTING";
+	pr.mergeStateStatus = "DIRTY";
+	assert.throws(ready, /conflicts with its base branch/);
+	pr.mergeable = "UNKNOWN";
+	pr.mergeStateStatus = "UNKNOWN";
+	assert.throws(ready, /still being computed.*retry/);
+	pr.mergeStateStatus = "CLEAN";
+	delete pr.mergeable;
+	assert.throws(ready, /merge state is unavailable/);
+	pr.mergeable = "MERGEABLE";
+	pr.mergeStateStatus = "UNSTABLE";
+	ready();
+	pr.mergeStateStatus = "BEHIND";
+	assert.throws(mergeReady, /behind a base branch that requires up-to-date/);
+	let synced = execute("sync", path, { token }, options);
+	assert.deepEqual(synced.baseUpdates, [
+		{
+			number: "7",
+			pr: 17,
+			status: "awaiting_merge",
+			agentId: "a",
+			mergeState: "behind",
+			reason: synced.baseUpdates[0].reason,
+		},
+	]);
+	const state = JSON.parse(readFileSync(path, "utf8"));
+	state.tickets[7].fixCycles = 2;
+	atomicWrite(path, state);
+	assert.throws(
+		() => execute("update-base", path, { token, number: 7 }, options),
+		/reason required/,
+	);
+	const updated = execute(
+		"update-base",
+		path,
+		{ token, number: 7, reason: "update from main" },
+		options,
+	);
+	assert.equal(updated.status, "implementing");
+	assert.equal(updated.workerActive, true);
+	assert.equal(updated.fixCycles, 2);
+	assert.equal(updated.reviewedHead, null);
+	pr.headRefOid = "rebased";
+	pr.mergeStateStatus = "CLEAN";
+	synced = execute("sync", path, { token }, options);
+	assert.deepEqual(synced.baseUpdates, []);
+	assert.equal(execute("status", path).tickets[7].status, "implementing");
+	execute(
+		"review",
+		path,
+		{ token, number: 7, evidence: "rebased; tests pass" },
+		options,
+	);
+	ready();
+	assert.equal(mergeReady().mergeReady, true);
+	assert.equal(execute("status", path).tickets[7].fixCycles, 2);
 });

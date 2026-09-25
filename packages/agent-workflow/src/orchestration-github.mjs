@@ -205,7 +205,7 @@ export function github(repository, exec = gh) {
 			"--repo",
 			repository,
 			"--json",
-			"number,state,mergedAt,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,url,isDraft,statusCheckRollup",
+			"number,state,mergedAt,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,url,isDraft,statusCheckRollup,mergeable,mergeStateStatus",
 		]);
 	}
 	return {
