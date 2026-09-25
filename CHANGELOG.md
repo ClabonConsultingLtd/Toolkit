@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.5.0 - 2026-09-25
+## 0.5.1 - 2026-09-25
+
+- #64: fix: make Paseo schedule authoritative for intake pause
 
 - #61: Add Codex handoff and context skills with configurable model endpoints
 
