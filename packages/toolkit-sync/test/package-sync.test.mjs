@@ -5,6 +5,7 @@ import test from "node:test";
 import { fetchPinnedTag, resolveTagToSha } from "../src/git.mjs";
 import {
 	diffPackage,
+	hashContent,
 	removeStaleFiles,
 	resolveManifestedFiles,
 	syncPackage,
@@ -63,11 +64,47 @@ test("diffPackage reports a locally modified file", () => {
 	assert.deepEqual(diverged, [{ path: "README.md", status: "modified" }]);
 });
 
+test("diffPackage uses the sync baseline to separate local edits from upstream changes", () => {
+	const { cacheDir, sha, packageName } = setUpCache();
+	const destDir = mkTempDir();
+	syncPackage(cacheDir, sha, packageName, destDir);
+	writeFileSync(join(destDir, "README.md"), "# older upstream\n");
+	writeFileSync(join(destDir, "src/index.mjs"), "// edited locally\n");
+	const baseline = {
+		"README.md": hashContent("# older upstream\n"),
+		"src/index.mjs": hashContent("export const value = 0;\n"),
+	};
+	const { diverged } = diffPackage(cacheDir, sha, packageName, destDir, {
+		baseline,
+	});
+	assert.deepEqual(diverged, [
+		{ path: "README.md", status: "upstream-change" },
+		{ path: "src/index.mjs", status: "local-edit" },
+	]);
+});
+
+test("diffPackage reports previously synced files dropped from the manifest", () => {
+	const { cacheDir, sha, packageName } = setUpCache();
+	const destDir = mkTempDir();
+	syncPackage(cacheDir, sha, packageName, destDir);
+	writeFileSync(join(destDir, "old.md"), "old\n");
+	writeFileSync(join(destDir, "edited.md"), "edited\n");
+	const { diverged } = diffPackage(cacheDir, sha, packageName, destDir, {
+		baseline: { "old.md": hashContent("old\n"), "edited.md": hashContent("x") },
+		previousFiles: ["README.md", "old.md", "edited.md", "gone.md"],
+	});
+	assert.deepEqual(diverged, [
+		{ path: "old.md", status: "removed-upstream" },
+		{ path: "edited.md", status: "local-edit" },
+	]);
+});
+
 test("syncPackage copies only manifested files, excluding test files not in the manifest", () => {
 	const { cacheDir, sha, packageName } = setUpCache();
 	const destDir = mkTempDir();
-	const files = syncPackage(cacheDir, sha, packageName, destDir);
+	const { files, hashes } = syncPackage(cacheDir, sha, packageName, destDir);
 	assert.deepEqual(files.sort(), ["README.md", "src/index.mjs"]);
+	assert.equal(hashes["README.md"], hashContent("# widget\n"));
 	assert.equal(
 		readFileSync(join(destDir, "src/index.mjs"), "utf8"),
 		"export const value = 1;\n",
