@@ -136,7 +136,9 @@ the run to:
    from Paseo `list_models({provider: "codex"})`. If a Claude worker fails with
    an explicit usage-limit error during reconciliation or creation, record that
    error with `record-claude-limit` before launching another worker. The next
-   reservation will use Codex; leave the failed worker blocked for reconciliation.
+   reservation will use Codex; block the failed worker with
+   `blockKind: "provider-limit"` and the returned `resetAt`. Once `sync` lists it
+   in `resumable`, resume it without evidence and continue the saved worker.
    If the schedule prompt authorizes implementation-metadata repair, run a
    read-only `select-next` preview with the valid catalog. For an issue skipped
    solely because its recommendation is absent, malformed or unsupported,
