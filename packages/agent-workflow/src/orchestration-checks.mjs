@@ -30,3 +30,33 @@ export function requirePassingChecks(rollup, requiredChecks = []) {
 				.join("; "),
 		);
 }
+
+// Classify GitHub's mergeable/mergeStateStatus pair. GitHub reports BEHIND only
+// when the base branch requires up-to-date heads, so it blocks merging too.
+export function mergeState(pr) {
+	const { mergeable, mergeStateStatus } = pr ?? {};
+	const detail = `mergeable ${mergeable ?? "missing"}, mergeStateStatus ${mergeStateStatus ?? "missing"}`;
+	if (mergeable === "CONFLICTING" || mergeStateStatus === "DIRTY")
+		return {
+			state: "conflicting",
+			reason: `PR conflicts with its base branch (${detail}); update from base, resolve conflicts, re-verify and push`,
+		};
+	if (mergeStateStatus === "BEHIND")
+		return {
+			state: "behind",
+			reason: `PR head is behind a base branch that requires up-to-date branches (${detail}); update from base, re-verify and push`,
+		};
+	if (mergeable === "UNKNOWN" || mergeStateStatus === "UNKNOWN")
+		return {
+			state: "pending",
+			reason: `PR merge state is still being computed by GitHub (${detail}); retry shortly`,
+		};
+	if (mergeable === undefined || mergeStateStatus === undefined)
+		return { state: "unavailable", reason: "PR merge state is unavailable" };
+	return { state: "mergeable", reason: null };
+}
+
+export function requireMergeable(pr) {
+	const { state, reason } = mergeState(pr);
+	if (state !== "mergeable") throw new Error(reason);
+}
