@@ -34,3 +34,17 @@ test("ambiguous search is rejected before any write", () => {
 	assert.throws(() => prepareEdits(root, b), /ambiguous/);
 	assert.equal(readFileSync(join(root, "a.txt"), "utf8"), "old old");
 });
+test("replacement text is inserted literally", () => {
+	const root = mkdtempSync(join(tmpdir(), "workflow-"));
+	writeFileSync(join(root, "a.sh"), "before\nold\nafter\n");
+	const replacement = 'echo "$$ $& $` $\' $1"';
+	const b = parseBlocks(
+		`@@ a.sh @@\n<<<<<<< SEARCH\nold\n=======\n${replacement}\n>>>>>>> REPLACE`,
+		new Set(["a.sh"]),
+	);
+	applyEdits(prepareEdits(root, b));
+	assert.equal(
+		readFileSync(join(root, "a.sh"), "utf8"),
+		`before\n${replacement}\nafter\n`,
+	);
+});
