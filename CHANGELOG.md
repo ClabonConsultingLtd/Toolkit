@@ -2,6 +2,8 @@
 
 ## 0.6.0 - 2026-09-25
 
+- #78: orchestrate-tickets: worker prompt, spec selection and reporting refinements
+
 - #81: intake: canonical schedule prompt, drift check, and Codex sandbox preflight
 
 - #79: claude-token-optimisation: portable hook commands, wrapped command summaries, context policy
