@@ -180,7 +180,10 @@ its approval and all required checks and reviews pass. Independent batch
 schedules and Claude workers do not approve or merge. Only a verified merged PR lets
 orchestration replace `ready-for-agent` with `done` and
 close the issue. Closed issues without a linked merged PR need reconciliation;
-readiness labels do not make a closed issue launchable. Independent work continues
+readiness labels do not make a closed issue launchable. `ready` and `merge-ready` also refuse PRs that
+conflict with or are behind their base branch, and `sync` lists them in
+`baseUpdates` so the controller can send them back to the owning worker through
+`update-base`, which does not consume a review/fix cycle. Independent work continues
 while PRs await a permitted merge. Schedules pause on completion or when only human
 blockers remain, and can be resumed explicitly after recovery.
 
