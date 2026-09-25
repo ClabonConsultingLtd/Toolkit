@@ -15,7 +15,7 @@ powershell -ExecutionPolicy Bypass -File install-prerequisites.ps1 -GitHub -Name
 
 It installs Git for Windows, Node.js LTS, pnpm, Claude Code and, with `-GitHub`, the GitHub CLI, using `winget`. It then sets `core.autocrlf input` and `core.longpaths true`, adds Claude Code to your user `PATH`, and clones Toolkit into `C:\src\Toolkit` (change this with `-ToolkitDir`) at the newest release tag. You can run it again safely: anything already installed is skipped.
 
-Afterwards, open **Git Bash**, run `claude` once to sign in, and for GitHub run `gh auth login` and `gh auth setup-git`.
+The script finishes by checking that every tool is on `PATH`, and names any that aren't. Terminals that were already open keep the old `PATH`, so afterwards open a **new** Git Bash window, run `claude` once to sign in, and for GitHub run `gh auth login` and `gh auth setup-git`.
 
 On other platforms, install Git, Node.js 24+, pnpm and Claude Code yourself, then clone Toolkit and check out a release tag.
 
@@ -43,7 +43,7 @@ It asks which issue tracker you use, whether to create a `chore/toolkit-setup` b
 
 ## What it does
 
-1. Checks for Node.js 24+, Git, Claude Code and (for GitHub) a signed-in `gh`. Runs `git init` if the target isn't a repository, after asking.
+1. Checks for Node.js 24+, Git, pnpm, Claude Code and (for GitHub) a signed-in `gh`. If a tool isn't on `PATH`, it says where the tool is normally installed; see [Checking PATH](../../docs/guides/claude-windows-setup.md#checking-path). Runs `git init` if the target isn't a repository, after asking.
 2. Adds `.toolkit/` to `.gitignore` and `tools/** -text` to `.gitattributes`.
 3. Copies `toolkit-sync` into `tools/toolkit-sync/`, pins and syncs `agent-workflow` and `claude-token-optimisation` into `tools/`, runs `check`, and copies the `toolkit-upgrade` skill into `.claude/skills/`.
 4. Runs the token-optimisation installer and merges its settings fragment into `.claude/settings.json`, along with `permissions.allow` rules for Git, your `test` script and, for GitHub, `gh issue`. It then deletes the fragment.

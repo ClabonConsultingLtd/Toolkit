@@ -115,3 +115,10 @@ test("formatJson keeps the file's indentation", () => {
 	assert.equal(formatJson({ a: 1 }), '{\n\t"a": 1\n}\n');
 	assert.equal(formatJson({ a: 1 }, '{\n  "b": 2\n}\n'), '{\n  "a": 1\n}\n');
 });
+
+test("notOnPath says what is missing and how to recover", async () => {
+	const { notOnPath } = await import("../src/wizard.mjs");
+	const message = notOnPath("claude", "Tickets need Claude Code.");
+	assert.match(message, /^claude is not on PATH\. Tickets need Claude Code\./);
+	assert.match(message, /open a new terminal and re-run the wizard\.$/);
+});

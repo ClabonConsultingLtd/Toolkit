@@ -43,6 +43,8 @@ Toolkit's scripts themselves run with plain `node`. pnpm only runs the short `pa
 
 To install all of these in one step, run the wizard's [prerequisite script](../../packages/setup-wizard/README.md#1-prerequisites-windows) from PowerShell. It covers sections 1.1 to 1.5 and 2. Then sign in to Claude Code and `gh`, and continue from section 3, or let the wizard do sections 3 to 7.
 
+Windows programs read `PATH` when they start. Git Bash copies the Windows `PATH` when you open it, so **open a new Git Bash window after each install** before checking the tool works. [Checking PATH](#checking-path) lists every check in one place.
+
 ### 1.1 Git for Windows
 
 Git Bash doesn't exist yet, so open **PowerShell** and run:
@@ -113,12 +115,13 @@ It installs `claude.exe` into `%USERPROFILE%\.local\bin`. Back in a new Git Bash
 claude --version
 ```
 
-If Git Bash reports `claude: command not found`, add the install directory to your `PATH`:
+If Git Bash reports `claude: command not found`, add the install directory to your Windows user `PATH`, so every terminal finds it:
 
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
+1. Press Start, type "environment variables", and open **Edit environment variables for your account**.
+2. Select **Path** → **Edit** → **New**, enter `%USERPROFILE%\.local\bin`, and press **OK** twice.
+3. Close every Git Bash window and open a new one.
+
+A quicker fix that only affects Git Bash, and programs started from it, is `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`. That's enough if you always run Claude and the ticket commands from Git Bash, but PowerShell, cmd and editor terminals won't find `claude`.
 
 Run `claude` once and complete the browser sign-in, then `/exit`.
 
@@ -133,6 +136,8 @@ echo 'export CLAUDE_CODE_GIT_BASH_PATH="C:\\Program Files\\Git\\bin\\bash.exe"' 
 ```bash
 npm install -g pnpm@11
 ```
+
+Open a new Git Bash window and run `pnpm --version`. npm installs global commands into `%APPDATA%\npm`, which the Node.js installer adds to your `PATH`. If `pnpm` isn't found, check that folder is on your user `PATH` (`npm prefix -g` prints it) and add it the same way as in 1.4.
 
 ### 1.6 Pick a working folder without spaces
 
@@ -711,9 +716,29 @@ The issue has none of the labels listed in `ticket-config.github.json`. Label it
 
 Claude finished without marking the ticket `done`. The usual causes are a shell command outside `permissions.allow`, failing checks, or an unclear ticket. Read Claude's output above the message and the explanation it left in the ticket, fix the cause, and re-run the batch.
 
+### Checking PATH
+
+Run this in a new Git Bash window. Each tool should print a location:
+
+```bash
+for tool in git node npm pnpm claude gh; do printf '%-7s' "$tool"; command -v "$tool" || echo "NOT FOUND"; done
+```
+
+`gh` is only needed for the GitHub track. For anything missing:
+
+| Tool | Where it's installed | Fix |
+| --- | --- | --- |
+| `git` | `C:\Program Files\Git\cmd` | Re-run the Git installer and choose "Git from the command line and also from 3rd-party software". Node and `toolkit-sync` need `git.exe` on the Windows `PATH`. |
+| `node`, `npm` | `C:\Program Files\nodejs` | Reopen Git Bash. If it's still missing, reinstall Node.js. |
+| `pnpm` | `%APPDATA%\npm` | See [1.5](#15-pnpm). |
+| `claude` | `%USERPROFILE%\.local\bin` | See [1.4](#14-claude-code). |
+| `gh` | `C:\Program Files\GitHub CLI` | Reopen Git Bash. If it's still missing, reinstall the GitHub CLI. |
+
+Programs started from Git Bash inherit its `PATH`, including anything `~/.bashrc` adds. This covers `pnpm`, the ticket runner, and the `cmd.exe` shell the runner uses to start Claude. PowerShell, cmd, and editor terminals such as VS Code's read only the Windows `PATH`. To check what they see, run `cmd //c where claude` from Git Bash, or `where.exe claude` in PowerShell.
+
 ### `claude` not found when the runner launches it
 
-The runner starts `node scripts/claude-ticket.mjs` through `cmd.exe`, not Git Bash, so `claude` has to be on the Windows `PATH` as well as Git Bash's. Add `%USERPROFILE%\.local\bin` under Windows Settings → "Edit environment variables for your account" → `Path`, then open a new terminal.
+The runner found no `claude` on the `PATH` it inherited. If you started it from Git Bash, `command -v claude` fails there too; fix it as in [1.4](#14-claude-code). If you started it from PowerShell, cmd or an editor terminal, `claude` must be on the Windows user `PATH`, not only in `~/.bashrc`. Open a new terminal after changing `PATH`.
 
 ### Paths with spaces
 

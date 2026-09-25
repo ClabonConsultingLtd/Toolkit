@@ -22,6 +22,22 @@ const UPGRADE_SKILL = "packages/toolkit-sync/claude/skills/toolkit-upgrade";
 const TEMPLATES = join(import.meta.dirname, "..", "templates");
 const WINDOWS = process.platform === "win32";
 
+// How to put each tool on PATH, for "not on PATH" messages.
+const PATH_HINTS = WINDOWS
+	? {
+			git: 'If it is installed, re-run the Git installer and choose "Git from the command line and also from 3rd-party software".',
+			claude:
+				"If it is installed, add %USERPROFILE%\\.local\\bin to your user PATH.",
+			pnpm: "If it is installed, add the folder npm prefix -g prints (normally %APPDATA%\\npm) to your user PATH.",
+			gh: "If it is installed, add C:\\Program Files\\GitHub CLI to your user PATH.",
+		}
+	: {};
+
+export function notOnPath(tool, install) {
+	const hint = PATH_HINTS[tool] ? ` ${PATH_HINTS[tool]}` : "";
+	return `${tool} is not on PATH. ${install}${hint} Then open a new terminal and re-run the wizard.`;
+}
+
 export const LABELS = {
 	"needs-triage": "d4c5f9",
 	"needs-info": "fbca04",
@@ -165,7 +181,7 @@ export async function runSetup(options, io) {
 			`Node.js 24 or later is required (found ${process.versions.node})`,
 		);
 	if (!run("git", ["--version"]).ok)
-		throw new Error("git is not on PATH; install Git for Windows first");
+		throw new Error(notOnPath("git", "Install Git for Windows."));
 
 	const target = resolve(options.target ?? ".");
 	if (!existsSync(target)) throw new Error(`target does not exist: ${target}`);
@@ -220,17 +236,23 @@ export async function runSetup(options, io) {
 	io.log(`Tracker: ${tracker}`);
 
 	if (!run("claude", ["--version"], { shell: true }).ok)
-		warn("claude is not on PATH. Install Claude Code before running tickets.");
+		warn(notOnPath("claude", "Tickets need Claude Code."));
 	if (!run("pnpm", ["--version"], { shell: true }).ok)
 		warn(
-			"pnpm is not on PATH; install it (npm install -g pnpm@11) to use the pnpm implement-* commands.",
+			notOnPath(
+				"pnpm",
+				"The implement-* commands need it: npm install -g pnpm@11.",
+			),
 		);
-	const githubReady =
-		tracker !== "local" && run("gh", ["auth", "status"], { shell: true }).ok;
-	if (tracker !== "local" && !githubReady)
-		warn(
-			"gh is missing or not signed in; run gh auth login. GitHub labels were not created.",
-		);
+	let githubReady = false;
+	if (tracker !== "local") {
+		if (!run("gh", ["--version"], { shell: true }).ok)
+			warn(notOnPath("gh", "The GitHub track needs the GitHub CLI."));
+		else if (!run("gh", ["auth", "status"], { shell: true }).ok)
+			warn("gh is not signed in; run gh auth login and gh auth setup-git.");
+		else githubReady = true;
+		if (!githubReady) warn("GitHub labels were not created.");
+	}
 	if (git(root, ["status", "--porcelain"]))
 		warn(
 			"The working tree has uncommitted changes; review the diff carefully before committing.",

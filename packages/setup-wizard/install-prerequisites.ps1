@@ -58,8 +58,8 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue) -and
 }
 else { Write-Host 'Claude Code is already installed' }
 
-# The ticket runner starts claude through cmd.exe, so it must be on the
-# Windows PATH, not only Git Bash's.
+# Put Claude Code on the Windows user PATH so every terminal finds it:
+# Git Bash, PowerShell, cmd and editor terminals.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if (($userPath -split ';') -notcontains $claudeBin) {
 	[Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $claudeBin), 'User')
@@ -95,10 +95,19 @@ $tag = git -C $ToolkitDir tag --list 'v*' --sort=-v:refname | Select-Object -Fir
 git -C $ToolkitDir -c advice.detachedHead=false switch --detach $tag
 if ($LASTEXITCODE -ne 0) { throw "could not check out $tag in $ToolkitDir" }
 
+# Every tool must now resolve from the refreshed PATH. New terminals see the
+# same PATH; terminals that were already open need reopening.
+$tools = @('git', 'node', 'npm', 'pnpm', 'claude')
+if ($GitHub) { $tools += 'gh' }
+$missing = @($tools | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
+if ($missing.Count -gt 0) {
+	Write-Warning ("Not on PATH: " + ($missing -join ', ') + '. See "Checking PATH" in docs/guides/claude-windows-setup.md.')
+}
+
 $bashDir = '/' + $ToolkitDir.Substring(0, 1).ToLower() + $ToolkitDir.Substring(2).Replace('\', '/')
 Write-Host ''
 Write-Host "Done. Toolkit $tag is in $ToolkitDir."
-Write-Host 'Next, in a new Git Bash window:'
+Write-Host 'Next, in a NEW Git Bash window (already-open terminals keep the old PATH):'
 if ($GitHub) { Write-Host '  - Sign in to GitHub: gh auth login, then gh auth setup-git' }
 Write-Host '  - Run claude once, sign in, then /exit'
 Write-Host "  - From your repository, run: node $bashDir/packages/setup-wizard/setup.mjs"
