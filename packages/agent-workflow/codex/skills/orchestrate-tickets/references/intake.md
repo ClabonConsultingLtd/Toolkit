@@ -42,8 +42,8 @@ using `node <skill>/scripts/intake.mjs configure CHECKOUT request.json` with:
 Discover repository/base/model normally. The helper stores runtime policy under
 `.toolkit/orchestration/.intake/policy.json`, separate from batch reports.
 When a tracked config exists, it is authoritative over those stable policy
-fields. `sync-config` applies edits under the shared lock, preserving pause state,
-schedule ID, and last tick; `tick` also syncs it before admission. Invalid config
+fields. `sync-config` applies edits under the shared lock, preserving the schedule
+ID, last tick, and cached pause state; `tick` also syncs it before admission. Invalid config
 or a reduction below active work stops the tick without overwriting the policy.
 The saved `excludeTickets` are always passed to selection, alongside any dynamic
 exclusions in the tick request. A hard-coded N in a schedule prompt can become
@@ -53,8 +53,9 @@ N. Choose `cron` and `timezone` with the user; these fields default to every 30
 minutes from 08:00 through 19:30 UTC when omitted. Reconfiguring without them
 preserves the saved cadence. Every worker reservation/resume uses a shared lock
 and enforces this policy,
-including existing manually selected batches. Pausing intake stops new admission,
-not already authorized implementation or the shared execution limit.
+including existing manually selected batches. The live Paseo schedule is the pause
+source of truth. Its paused state stops new admission, not already authorized
+implementation or the shared execution limit.
 
 Ensure exactly one Paseo schedule named `ticket-intake:<owner/repo>`; list existing
 schedules before creating to recover interrupted configuration. Use the saved
@@ -74,18 +75,17 @@ intake helper and checkout, and instruct the run to:
 
 1. If `toolkit-intake.json` exists, run `sync-config` before reading policy;
    stop on invalid settings or a limit below active work. Then read saved policy
-   and fetch the current Paseo schedule by saved ID. Compare
-   its paused state, cron, timezone, and model with the policy and report any difference,
-   missing schedule, or ID/name mismatch. A paused schedule with a false
-   `policy.paused` value is still paused; never resume it merely because policy
-   says enabled. If the two pause states disagree, stop before `tick` and ask the
-   user which state to keep; do not infer consent to resume from a routine run.
-   If policy is paused and the schedule is running, pause the schedule and report
-   the drift. For a committed cadence or model change, explicitly update the
+   and fetch the current Paseo schedule by saved ID. Check its ID and name against
+   the policy, and read its paused state explicitly. A missing schedule, ID/name
+   mismatch, or unreadable state stops new admission. Compare cron, timezone, and
+   model with the policy and report any difference. If the cached `policy.paused`
+   differs from Paseo, report the drift; the Paseo state wins and `tick` will
+   reconcile the cache. An Active schedule must not be paused because of a stale
+   policy flag. For a committed cadence or model change, explicitly update the
    Paseo schedule to match the tracked config before admission; never change its
    paused state as a side effect. Resolve a missing or mismatched schedule before new admission;
    preserve explicit user pauses. Do not claim the controller is enabled without
-   checking both states, including after a zero-selection run. Then read all
+   checking the live schedule, including after a zero-selection run. Then read all
    existing batches. Reconcile worker/PR progress using normal orchestration
    leases; skip a batch owned by another run. Review completed workers and PRs
    before new admission. Where the user has explicitly authorized scheduled Codex approval and
@@ -119,8 +119,10 @@ intake helper and checkout, and instruct the run to:
    re-read that issue and correct only its Implementation recommendation using
    its existing requirements and a supported model/effort. Leave issues needing
    a product decision unchanged and report them. Never edit a ticket to
-   compensate for a malformed catalog. Then run `intake ... tick` with `models`
-   and `codexModels` during a cooldown,
+   compensate for a malformed catalog. Immediately before `tick`, re-fetch the
+   saved Paseo schedule by ID. Refuse admission if the fetch fails, its ID/name
+   differs, or its paused state is unknown. Pass `schedule: {id, name, paused}`
+   from that live result with `models` and `codexModels` during a cooldown,
    and optional `excludeTickets` for work outside saved batches. This
    atomically admits up to `min(N, available capacity)` eligible tickets using the
    same readiness/dependency/model/PR exclusions as [selection.md](selection.md).
@@ -154,11 +156,12 @@ Do not pause it just because an individual ticket requires human input.
   pass a request with repository, baseBranch, codexModel, count and optional cron,
   timezone, and excludeTickets. Persist the chosen cadence across later configurations.
 - `sync-config`: apply the tracked file to runtime policy, retaining schedule ID,
-  pause state, and last tick. Requires `toolkit-intake.json`. It also copies
+  last tick, and cached pause state. Requires `toolkit-intake.json`. It also copies
   `requiredChecks`; removing the field removes the saved list.
-- `status`: read-only policy, including schedule ID and last hourly result.
+- `status`: read-only policy, including schedule ID, cached pause state, and last hourly result.
 - `schedule`: persist scheduleId; rejects replacement by a different schedule.
-- `tick`: current models array and optional excludeTickets; admits at most once
+- `tick`: current models array, fresh `schedule: {id, name, paused}` from Paseo,
+  and optional excludeTickets; admits at most once
   per UTC hour. A zero-admission result may be evaluated again in that hour after
   capacity or readiness changes. A nonempty batch is replayed on later ticks.
   An overlapping tick is rejected by the shared lock. If a crash occurs after
@@ -166,8 +169,17 @@ Do not pause it just because an individual ticket requires human input.
   The tick's `status` distinguishes `admitted`, `recovered`, `replayed`, `empty`,
   `capacity-full`, and `paused`; `capacity` is the current shared limit snapshot,
   and `skipped` explains excluded candidates or a capacity wait.
-- `pause` / `resume`: toggle admission. Also pause/resume the saved Paseo schedule
-  using its tools. Do not automatically bypass a user's paused policy.
+- `pause` / `resume`: compatibility commands that only copy a matching live
+  schedule state into policy. Pause or resume the Paseo schedule first and pass
+  its fresh `schedule` object; neither command changes admission independently.
+
+Existing policies may contain a stale `paused` value. Keep their schedule ID and
+hourly history, inspect the live Paseo schedule, and pass its state to the next
+`tick`; the helper rewrites the cached pause fields before deciding admission.
+An Active schedule resumes admission without `intake resume`. If the saved ID is
+missing, register the verified schedule with `intake schedule` before ticking.
+If it points to another schedule, stop and reconcile the ID with the operator;
+do not guess from a matching name or clear hourly history.
 
 Every response includes `activeHelper` with the running package version, source
 path, and SHA-256 of the GitHub identity helper. `status.lastTick.helper` records

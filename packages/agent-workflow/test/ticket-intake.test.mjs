@@ -54,9 +54,15 @@ function fixture(t) {
 	const options = {
 		github: () => api,
 		now: Date.parse("2026-09-21T09:00:00Z"),
+		schedule: {
+			id: "s1",
+			name: "ticket-intake:example/project",
+			paused: false,
+		},
 	};
 	intakeCommand("configure", cwd, input);
-	return { cwd, input, models, api, options };
+	intakeCommand("schedule", cwd, { scheduleId: options.schedule.id });
+	return { cwd, input, models, api, options, schedule: options.schedule };
 }
 function update(path, fn) {
 	const state = JSON.parse(readFileSync(path, "utf8"));
@@ -247,10 +253,11 @@ test("reconfigure preserves a chosen schedule cadence", (t) => {
 	const repeated = intakeCommand("configure", f.cwd, f.input);
 	assert.equal(repeated.cron, cadence.cron);
 	assert.equal(repeated.timezone, cadence.timezone);
-	intakeCommand("pause", f.cwd, { reason: "user request" });
+	f.schedule.paused = true;
+	intakeCommand("pause", f.cwd, { schedule: f.schedule });
 	const paused = intakeCommand("configure", f.cwd, f.input);
 	assert.equal(paused.paused, true);
-	assert.equal(paused.pauseReason, "user request");
+	assert.equal(paused.pauseReason, "Paused in Paseo");
 	assert.ok(paused.pausedAt);
 	assert.throws(
 		() =>
@@ -274,18 +281,18 @@ test("tracked repository config updates capacity and exclusions without resettin
 		requiredChecks: ["ci", "smoke"],
 	};
 	writeFileSync(configPath, JSON.stringify(tracked));
-	intakeCommand("schedule", f.cwd, { scheduleId: "existing-schedule" });
-	intakeCommand("pause", f.cwd, { reason: "user request" });
+	f.schedule.paused = true;
+	intakeCommand("pause", f.cwd, { schedule: f.schedule });
 	const synced = intakeCommand("sync-config", f.cwd);
 	assert.equal(synced.count, 2);
 	assert.equal(synced.cron, tracked.cron);
 	assert.equal(synced.timezone, tracked.timezone);
 	assert.deepEqual(synced.excludeTickets, ["1"]);
 	assert.deepEqual(synced.requiredChecks, ["ci", "smoke"]);
-	assert.equal(synced.scheduleId, "existing-schedule");
+	assert.equal(synced.scheduleId, "s1");
 	assert.equal(synced.paused, true);
-	assert.equal(synced.pauseReason, "user request");
-	intakeCommand("resume", f.cwd);
+	assert.equal(synced.pauseReason, "Paused in Paseo");
+	f.schedule.paused = false;
 	const first = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
 	assert.deepEqual(first.tickets, ["2", "3"]);
 	tracked.count = 3;
@@ -361,8 +368,16 @@ test("invalid tracked config and unsafe limit decreases fail without changing po
 		() => intakeCommand("sync-config", f.cwd),
 		/unknown field unexpected/,
 	);
-	assert.equal(intakeCommand("pause", f.cwd).paused, true);
-	assert.equal(intakeCommand("resume", f.cwd).paused, false);
+	f.schedule.paused = true;
+	assert.equal(
+		intakeCommand("pause", f.cwd, { schedule: f.schedule }).paused,
+		true,
+	);
+	f.schedule.paused = false;
+	assert.equal(
+		intakeCommand("resume", f.cwd, { schedule: f.schedule }).paused,
+		false,
+	);
 	assert.equal(
 		JSON.parse(
 			readFileSync(
@@ -510,13 +525,102 @@ test("empty hours leave intake enabled; pause and resume affect admission, and s
 		() => intakeCommand("schedule", f.cwd, { scheduleId: "s2" }),
 		/already/,
 	);
-	intakeCommand("pause", f.cwd);
+	assert.throws(
+		() => intakeCommand("pause", f.cwd, { schedule: f.schedule }),
+		/pause the Paseo schedule first/,
+	);
+	f.schedule.paused = true;
 	assert.equal(
 		intakeCommand("tick", f.cwd, { models: f.models }, f.options).paused,
 		true,
 	);
-	intakeCommand("resume", f.cwd);
+	f.schedule.paused = false;
+	intakeCommand("tick", f.cwd, { models: f.models }, f.options);
 	assert.equal(intakeCommand("status", f.cwd).paused, false);
+});
+test("live Paseo resume clears a stale policy pause and admits without a helper resume", (t) => {
+	const f = fixture(t);
+	const policyFile = intakePath(
+		join(f.cwd, ".toolkit/orchestration/intake-anchor.json"),
+	);
+	const policy = intakeCommand("status", f.cwd);
+	policy.paused = true;
+	policy.pausedAt = "2026-09-20T05:06:00.000Z";
+	policy.pauseReason = "old controller pause";
+	atomicWrite(policyFile, policy);
+	const admitted = intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models, schedule: f.schedule },
+		{
+			github: f.options.github,
+			now: f.options.now,
+		},
+	);
+	assert.equal(admitted.status, "admitted");
+	assert.deepEqual(admitted.tickets, ["1", "2", "3"]);
+	assert.equal(intakeCommand("status", f.cwd).paused, false);
+	assert.equal(intakeCommand("status", f.cwd).pausedAt, undefined);
+	assert.equal(intakeCommand("status", f.cwd).pauseReason, undefined);
+	assert.equal(
+		intakeCommand("tick", f.cwd, { models: f.models }, f.options).status,
+		"replayed",
+	);
+});
+test("live Paseo pause overrides a stale active policy; UI resume admits the same hour", (t) => {
+	const f = fixture(t);
+	f.schedule.paused = true;
+	const paused = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	assert.equal(paused.status, "paused");
+	assert.equal(intakeCommand("status", f.cwd).paused, true);
+	assert.equal(intakeCommand("status", f.cwd).lastTick, null);
+	f.schedule.paused = false;
+	const admitted = intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models },
+		f.options,
+	);
+	assert.equal(admitted.status, "admitted");
+	assert.deepEqual(admitted.tickets, ["1", "2", "3"]);
+	assert.equal(intakeCommand("status", f.cwd).paused, false);
+});
+test("missing, mismatched, or unreadable schedule state fails before admission", (t) => {
+	const f = fixture(t);
+	const request = { models: f.models };
+	const options = { github: f.options.github, now: f.options.now };
+	assert.throws(
+		() => intakeCommand("tick", f.cwd, request, options),
+		/schedule state is required/,
+	);
+	for (const schedule of [
+		{ ...f.schedule, id: "other" },
+		{ ...f.schedule, name: "ticket-intake:other/project" },
+		{ ...f.schedule, paused: undefined },
+	]) {
+		assert.throws(
+			() => intakeCommand("tick", f.cwd, { ...request, schedule }, options),
+			/schedule ID or name does not match|paused state is unavailable/,
+		);
+	}
+	assert.equal(intakeCommand("status", f.cwd).lastTick, null);
+	const policyFile = intakePath(
+		join(f.cwd, ".toolkit/orchestration/intake-anchor.json"),
+	);
+	const policy = intakeCommand("status", f.cwd);
+	policy.scheduleId = null;
+	atomicWrite(policyFile, policy);
+	assert.throws(
+		() =>
+			intakeCommand(
+				"tick",
+				f.cwd,
+				{ ...request, schedule: f.schedule },
+				options,
+			),
+		/schedule ID is missing/,
+	);
+	assert.equal(intakeCommand("status", f.cwd).lastTick, null);
 });
 test("recover batch created before a crash without duplicating the hourly selection", (t) => {
 	const f = fixture(t),

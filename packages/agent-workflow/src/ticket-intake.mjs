@@ -128,6 +128,31 @@ function configuredPolicy(anchor, cwd, policy, input) {
 		lastTick: policy?.lastTick ?? null,
 	};
 }
+function reconcileSchedule(policy, schedule, now) {
+	if (!policy.scheduleId)
+		throw new Error(
+			"intake schedule ID is missing; register the Paseo schedule before admission",
+		);
+	if (!schedule || typeof schedule !== "object")
+		throw new Error("live Paseo schedule state is required before admission");
+	if (
+		schedule.id !== policy.scheduleId ||
+		schedule.name !== policy.scheduleName
+	)
+		throw new Error(
+			"live Paseo schedule ID or name does not match intake policy",
+		);
+	if (typeof schedule.paused !== "boolean")
+		throw new Error("live Paseo schedule paused state is unavailable");
+	if (schedule.paused && !policy.paused) {
+		policy.pausedAt = new Date(now).toISOString();
+		policy.pauseReason = "Paused in Paseo";
+	} else if (!schedule.paused) {
+		delete policy.pausedAt;
+		delete policy.pauseReason;
+	}
+	policy.paused = schedule.paused;
+}
 export function intakeCommand(command, checkout, input = {}, options = {}) {
 	const cwd = resolve(checkout),
 		anchor = join(cwd, ".toolkit", "orchestration", "intake-anchor.json");
@@ -167,7 +192,6 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 		if (!policy) throw new Error("configure intake first");
 		if (command === "tick" && config) {
 			policy = configuredPolicy(anchor, cwd, policy, config);
-			atomicWrite(path, policy);
 		}
 		if (command === "schedule") {
 			if (typeof input.scheduleId !== "string" || !input.scheduleId)
@@ -175,26 +199,30 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 			if (policy.scheduleId && policy.scheduleId !== input.scheduleId)
 				throw new Error("intake schedule already registered");
 			policy.scheduleId = input.scheduleId;
-		} else if (command === "pause" || command === "resume") {
-			policy.paused = command === "pause";
-			if (policy.paused) {
-				policy.pausedAt = new Date(options.now ?? Date.now()).toISOString();
-				policy.pauseReason = input.reason || "Paused by controller";
-			} else {
-				delete policy.pausedAt;
-				delete policy.pauseReason;
+		} else if (["tick", "pause", "resume"].includes(command)) {
+			reconcileSchedule(
+				policy,
+				options.schedule ?? input.schedule,
+				options.now ?? Date.now(),
+			);
+			if (command === "pause" || command === "resume") {
+				if (policy.paused !== (command === "pause"))
+					throw new Error(`${command} the Paseo schedule first`);
+				atomicWrite(path, policy);
+				return policy;
 			}
-		} else if (command === "tick") {
 			const dynamicExclusions = normalizeExcludeTickets(
 				input.excludeTickets ?? [],
 			);
-			if (policy.paused)
+			atomicWrite(path, policy);
+			if (policy.paused) {
 				return {
 					status: "paused",
 					paused: true,
 					initialized: false,
 					capacity: capacity(anchor, policy.repository),
 				};
+			}
 			const now = options.now ?? Date.now(),
 				hour = new Date(now).toISOString().slice(0, 13);
 			const batchId = `intake-${hour.replace(/[-T:]/g, "")}`,
