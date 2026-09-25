@@ -6,7 +6,7 @@ Provider-aware developer automation with project-defined policy. `pnpm handoff <
 
 The `claude/skills/bounded-handoff` and `codex/skills/bounded-handoff` entrypoints carry the same self-contained procedure, so either directory works when copied or symlinked into a skills directory (for Claude, `.claude/skills/bounded-handoff`). Keep the two files identical; a test enforces this. Install the appropriate skill directory from a persistent Toolkit checkout; for Codex, symlink `codex/skills/bounded-handoff` into `${CODEX_HOME:-$HOME/.codex}/skills/bounded-handoff`. The skill guides delegation and review; `handoff` performs the same bounded edit regardless of the calling agent.
 
-`handoff` accepts OpenAI-compatible chat-completions endpoints. Set `TOOLKIT_HANDOFF_API_URL` to the complete `/chat/completions` URL and `TOOLKIT_HANDOFF_MODEL` to the server's model ID. Set `TOOLKIT_HANDOFF_API_KEY` for a remote endpoint. For a local server on `localhost`, `127.0.0.1`, or `[::1]`, the key may be omitted. For example, Ollama can use `http://localhost:11434/v1/chat/completions` with a locally installed model such as `llama3.2`. The existing `DEEPSEEK_API_URL`, `DEEPSEEK_MODEL`, and `DEEPSEEK_API_KEY` variables remain supported when no generic handoff setting is used. Preview first, then set `TOOLKIT_HANDOFF_ENABLED=on` to execute. Credentials stay in environment variables.
+`handoff` accepts OpenAI-compatible chat-completions endpoints. Set `TOOLKIT_HANDOFF_API_URL` to the complete `/chat/completions` URL and `TOOLKIT_HANDOFF_MODEL` to the server's model ID. Set `TOOLKIT_HANDOFF_API_KEY` for a remote endpoint. For a local server on `localhost`, `127.0.0.1`, or `[::1]`, the key may be omitted. For example, Ollama can use `http://localhost:11434/v1/chat/completions` with a locally installed model such as `qwen2.5-coder:1.5b`. The request carries only the model and messages, so set decoding options on the server: temperature 0 (SEARCH text must be copied exactly), and a context window (`num_ctx` in an Ollama Modelfile) larger than the instruction plus every editable file. Ollama truncates an over-long prompt from the start, which removes the instruction without an error. The existing `DEEPSEEK_API_URL`, `DEEPSEEK_MODEL`, and `DEEPSEEK_API_KEY` variables remain supported when no generic handoff setting is used. Preview first, then set `TOOLKIT_HANDOFF_ENABLED=on` to execute. Credentials stay in environment variables.
 
 Only the chat-completions response shape is supported; services using a different API need a request/response adapter. The model must return the file-qualified SEARCH/REPLACE format, and the CLI validates every edit before applying it. Declared editable paths must resolve within the project and cannot be symlinks.
 
@@ -129,8 +129,9 @@ consuming repo that vendors this package should also update its pin to the same
 tag with `node cli.mjs pin agent-workflow vX.Y.Z`, then run
 `node cli.mjs sync agent-workflow` from its installed `toolkit-sync` copy (see
 `packages/toolkit-sync/README.md`). A vendored update does not update a separate
-global skill symlink. Restart the Codex session or refresh the schedule prompt so
-it resolves the updated skill and helper paths.
+global skill symlink. Restart the Codex session or regenerate the schedule prompt
+(see [Schedule prompt](#schedule-prompt)) so it resolves the updated skill and
+helper paths.
 
 ### Repository intake settings
 
@@ -155,6 +156,41 @@ cannot change the Paseo schedule itself: reconcile its model and cadence with
 the tracked settings before admission, preserving any explicit pause. If no
 `toolkit-intake.json` exists, the existing request-based configure workflow still
 works. See `codex/skills/orchestrate-tickets/references/intake.md` for details.
+
+Two optional fields shape the generated schedule prompt. `schedulePromptAppend`
+(a string or array of lines) adds repository-specific instructions, such as an
+explicit authorization for scheduled approval and merging. `codexWorkerFullAccess:
+true` authorizes the controller to launch Codex workers in `full-access` when the
+Codex sandbox preflight fails; without it, those reservations are blocked with
+the sandbox error recorded as the reason.
+
+### Schedule prompt
+
+Generate the intake schedule prompt instead of writing it by hand:
+
+```bash
+node <skill>/scripts/intake.mjs schedule-prompt /absolute/consuming-repo
+```
+
+The output is deterministic for a checkout and helper installation. It names the
+absolute skill, reference, helper, checkout, batch-state and policy paths and the
+controller instructions, followed by any `schedulePromptAppend` lines. It omits N
+and cadence, which the controller reads from the saved policy. Apply it with
+`paseo schedule update` or `update_schedule` after a Toolkit update or config
+change.
+
+To detect drift, pass the live prompt as raw text or Paseo schedule JSON:
+
+```bash
+paseo schedule inspect SCHEDULE_ID --json \
+  | node <skill>/scripts/intake.mjs schedule-prompt /absolute/consuming-repo --check -
+```
+
+It exits non-zero and lists missing and unexpected lines when the prompts differ.
+`schedule-summary CHECKOUT FILE|-` prints only the schedule fields a controller
+needs (id, name, status, paused, cron, timezone, provider, model, thinking option,
+mode, cwd, next run) plus `promptMatches`, leaving out the run history that grows
+with every run. Scheduled runs report drift; they do not rewrite their own prompt.
 
 Example requests:
 
@@ -181,7 +217,10 @@ its approval and all required checks and reviews pass. Independent batch
 schedules and Claude workers do not approve or merge. Only a verified merged PR lets
 orchestration replace `ready-for-agent` with `done` and
 close the issue. Closed issues without a linked merged PR need reconciliation;
-readiness labels do not make a closed issue launchable. Independent work continues
+readiness labels do not make a closed issue launchable. `ready` and `merge-ready` also refuse PRs that
+conflict with or are behind their base branch, and `sync` lists them in
+`baseUpdates` so the controller can send them back to the owning worker through
+`update-base`, which does not consume a review/fix cycle. Independent work continues
 while PRs await a permitted merge. Schedules pause on completion or when only human
 blockers remain, and can be resumed explicitly after recovery.
 

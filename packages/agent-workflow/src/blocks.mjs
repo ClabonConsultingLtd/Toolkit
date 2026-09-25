@@ -23,7 +23,12 @@ export function prepareEdits(root, blocks) {
 		const n = before.indexOf(b.search);
 		if (n < 0 || before.indexOf(b.search, n + 1) >= 0)
 			throw new Error(`SEARCH text is absent or ambiguous in ${b.file}`);
-		next.set(b.file, before.replace(b.search, b.replace));
+		// Splice rather than String#replace, which expands $$, $&, $1… in the
+		// replacement and would corrupt shell, regex, or template text.
+		next.set(
+			b.file,
+			before.slice(0, n) + b.replace + before.slice(n + b.search.length),
+		);
 	}
 	return [...next].map(([file, content]) => ({
 		path: resolve(root, file),

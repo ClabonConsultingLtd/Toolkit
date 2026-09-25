@@ -8,5 +8,6 @@
 	"cron": "*/30 8-19 * * *",
 	"timezone": "UTC",
 	"excludeTickets": [],
-	"specLabels": []
+	"specLabels": [],
+	"codexWorkerFullAccess": false
 }
