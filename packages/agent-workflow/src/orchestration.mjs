@@ -10,6 +10,16 @@ import {
 import { dirname, resolve } from "node:path";
 
 export const ACTIVE = new Set(["implementing", "reviewing"]);
+export const PROVIDER_LIMIT = "provider-limit";
+// A provider usage-limit block recovers without human evidence once its reset passes.
+export function limitResumable(ticket, now = Date.now()) {
+	return (
+		ticket.status === "blocked" &&
+		ticket.blockKind === PROVIDER_LIMIT &&
+		!ticket.launchUncertain &&
+		Date.parse(ticket.resetAt) <= now
+	);
+}
 export function issueNumber(value) {
 	const text = String(value).replace(/^#/, "");
 	if (!/^[1-9]\d*$/.test(text) || !Number.isSafeInteger(Number(text)))
@@ -165,7 +175,7 @@ export function reconcile(state, issues) {
 	}
 	return disposition(state);
 }
-export function disposition(state) {
+export function disposition(state, now = Date.now()) {
 	const tickets = (state.ticketOrder ?? Object.keys(state.tickets)).map(
 		(n) => state.tickets[n],
 	);
@@ -188,6 +198,7 @@ export function disposition(state) {
 			)
 		)
 			return true;
+		if (t.blockKind === PROVIDER_LIMIT) return true;
 		if (t.blockKind !== "dependency") return false;
 		// External dependencies may change without intervention in this batch.
 		seen.add(t.number);
@@ -198,6 +209,9 @@ export function disposition(state) {
 	return {
 		launchable,
 		slots,
+		resumable: tickets
+			.filter((t) => limitResumable(t, now))
+			.map((t) => t.number),
 		pauseSchedule:
 			tickets.every((t) => t.status === "completed") ||
 			!tickets.some((t) => canProgress(t)),
@@ -311,20 +325,40 @@ export function changeTicket(
 		if (t.status === "completed")
 			throw new Error("completed ticket cannot be blocked");
 		requireText("reason");
+		const providerLimit = data.blockKind === PROVIDER_LIMIT;
+		if (data.blockKind !== undefined && !providerLimit)
+			throw new Error(`blockKind must be ${PROVIDER_LIMIT} when supplied`);
+		if (providerLimit) {
+			if (!Number.isFinite(Date.parse(data.resetAt)))
+				throw new Error("resetAt required for a provider-limit block");
+			// Never downgrade another manual or readiness block to automatic recovery.
+			if (t.status === "blocked" && t.blockKind !== PROVIDER_LIMIT)
+				throw new Error(
+					`${t.blockKind ?? "existing"} block must be resumed first`,
+				);
+		}
 		Object.assign(t, {
 			previousStatus: t.status === "blocked" ? t.previousStatus : t.status,
 			status: "blocked",
-			blockKind: "human",
+			blockKind: providerLimit ? PROVIDER_LIMIT : "human",
 			reason: data.reason,
 			updatedAt: new Date(now).toISOString(),
 		});
+		if (providerLimit)
+			t.resetAt = new Date(Date.parse(data.resetAt)).toISOString();
+		else delete t.resetAt;
 		// A permission wait or uncertain launch still consumes a slot until confirmed stopped.
 		if (data.workerStopped === true) t.workerActive = false;
 	} else if (action === "resume") {
 		requireStatus("blocked");
-		requireText("evidence");
 		if (t.launchUncertain)
 			throw new Error("reconcile the uncertain launch before resuming");
+		if (t.blockKind === PROVIDER_LIMIT && data.evidence === undefined) {
+			if (!limitResumable(t, now))
+				throw new Error(
+					`provider limit resets at ${t.resetAt}; wait or resume with evidence`,
+				);
+		} else requireText("evidence");
 		const repairLimitBlock =
 			t.repairLimitReached === true ||
 			(t.fixCycles >= 2 && t.previousStatus !== "implementing");
@@ -337,6 +371,7 @@ export function changeTicket(
 		t.status = next;
 		t.blockKind = null;
 		t.reason = null;
+		delete t.resetAt;
 		delete t.repairLimitReached;
 		t.updatedAt = new Date(now).toISOString();
 	} else throw new Error(`unknown ticket action: ${action}`);
