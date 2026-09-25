@@ -27,6 +27,8 @@ node <skill>/scripts/digest.mjs /absolute/checkout [request.json|-]
 
 Request is optional JSON: `{ "stuckHours": 24, "activity": { "<agentId>": { "tokenCost": 12000, "turnCost": 8 } } }`. Omit `stuckHours` to use the default 24-hour threshold; a repo may override it. Output is the digest JSON (with a `markdown` field appended) printed to stdout, and also written to `<checkout>/.toolkit/report-tickets/digest.json` and `digest.md`. The helper advances its own cursor (`<checkout>/.toolkit/report-tickets/cursor.json`) only after successfully writing both output files.
 
+Each batch's `archivable` list names completed tickets whose PR was verified merged into the batch base, with their PR, branch, Paseo workspace and agent IDs. Include them in the report as worktrees the user can archive. Never archive, delete or stop them yourself.
+
 ## Delivery
 
 This skill produces content only. Delivery (Slack, email, push notification, or any other channel) is the host project's responsibility — hand the Markdown file to whatever automation the project already has wired up, or use the JSON as a contract for anything beyond copy-pasting the Markdown. Document per-project delivery configuration outside this skill.

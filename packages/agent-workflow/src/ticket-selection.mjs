@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
+import { normalizeSpecLabels } from "./intake-config.mjs";
 import { issueNumber, newBatch } from "./orchestration.mjs";
 import {
 	normalizeClaudeModels,
@@ -160,6 +161,7 @@ export function selectNext(file, input, api) {
 		!Array.isArray(input.excludeTickets)
 	)
 		throw new Error("excludeTickets must be an array");
+	const specLabels = normalizeSpecLabels(input.specLabels ?? []);
 	const claimed = claimedTickets(file, input.repository);
 	for (const n of input.excludeTickets ?? []) claimed.add(issueNumber(n));
 	const selected = [],
@@ -208,6 +210,8 @@ export function selectNext(file, input, api) {
 			)
 				reason = "conflicting status label";
 			else if (issue.assignees?.length) reason = "already assigned";
+			else if (issue.labels.some((l) => specLabels.includes(l)))
+				reason = "spec or umbrella label";
 			else {
 				const children = api.subTickets(number);
 				if (children.length) {
