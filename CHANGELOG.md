@@ -2,6 +2,7 @@
 
 ## 0.5.2 - 2026-09-25
 
+- #66: Gate ticket merges on repository local verification
 - #67: Document local verification gate and prepare patch release
 
 - #64: fix: make Paseo schedule authoritative for intake pause
