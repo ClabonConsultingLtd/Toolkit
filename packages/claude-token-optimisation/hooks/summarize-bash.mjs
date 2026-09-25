@@ -7,7 +7,12 @@ import { spawnSync } from "node:child_process";
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { commandKind, summarize, surveyUnmatched } from "./command-summary.mjs";
+import {
+	commandKind,
+	limitOutput,
+	summarize,
+	surveyUnmatched,
+} from "./command-summary.mjs";
 
 async function readHookInput() {
 	const chunks = [];
@@ -48,7 +53,25 @@ if (!candidate) {
 	process.exit(0);
 }
 
-const result = spawnSync(`${trimmedCommand} 2>&1`, {
+function writeLog(raw) {
+	const stateRoot = resolve(
+		input.cwd ?? process.cwd(),
+		process.env.TOOLKIT_STATE_DIR ?? ".toolkit",
+	);
+	const logDirectory = join(
+		stateRoot,
+		"claude-token-optimisation",
+		"bash-summary-logs",
+	);
+	mkdirSync(logDirectory, { recursive: true });
+	const logPath = join(logDirectory, `${Date.now()}-${candidate.kind}.log`);
+	writeFileSync(logPath, raw, "utf8");
+	return logPath;
+}
+
+// Run the normalised command: any `| tail`/`| head` is dropped so a failing
+// exit status cannot be masked by the pipeline.
+const result = spawnSync(`${candidate.run} 2>&1`, {
 	shell: true,
 	cwd: input.cwd ?? process.cwd(),
 	encoding: "utf8",
@@ -59,27 +82,21 @@ const raw = result.stdout ?? "";
 const failed =
 	result.status !== 0 || result.signal !== null || Boolean(result.error);
 if (failed) {
-	deny(
-		raw ||
-			(result.error
+	const exit = `exited ${result.status ?? `on signal ${result.signal}`}`;
+	if (!raw)
+		deny(
+			result.error
 				? `(command failed to start: ${result.error.message})`
-				: `(command exited ${result.status ?? `on signal ${result.signal}`} with no output)`),
-	);
+				: `(command ${exit} with no output)`,
+		);
+	else if (candidate.outputLimit)
+		deny(
+			`${limitOutput(raw, candidate.outputLimit)}\nCommand ${exit}. Full raw output: ${writeLog(raw)}`,
+		);
+	else deny(`${raw}\nCommand ${exit}.`);
 	process.exit(0);
 }
 
-const stateRoot = resolve(
-	input.cwd ?? process.cwd(),
-	process.env.TOOLKIT_STATE_DIR ?? ".toolkit",
-);
-const logDirectory = join(
-	stateRoot,
-	"claude-token-optimisation",
-	"bash-summary-logs",
-);
-mkdirSync(logDirectory, { recursive: true });
-const logPath = join(logDirectory, `${Date.now()}-${candidate.kind}.log`);
-writeFileSync(logPath, raw, "utf8");
 deny(
-	`${summarize(candidate.kind, raw, candidate.testPath)}\n\nFull raw output: ${logPath}`,
+	`${summarize(candidate.kind, raw, candidate.label)}\n\nFull raw output: ${writeLog(raw)}`,
 );
