@@ -16,6 +16,7 @@ test("installs agent, hooks and settings fragment", () => {
 		"agents/bulk-reader.md",
 		"hooks/guard-large-read.mjs",
 		"hooks/summarize-bash.mjs",
+		"hooks/command-summary.mjs",
 		"settings.toolkit-token-optimisation.json",
 	])
 		assert.ok(existsSync(join(root, ".claude", file)));
