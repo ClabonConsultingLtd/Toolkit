@@ -488,6 +488,25 @@ test("dependency errors fail closed except unsupported endpoint; empty native ed
 		else assert.deepEqual(api.issue(7).dependencies, ["2"]);
 	}
 });
+test("plan-gated branch protection is reported as unavailable, not retryable", () => {
+	const denied = (message) =>
+		github("example/project", () => {
+			throw Object.assign(new Error("Command failed: gh api"), {
+				stderr: message,
+			});
+		});
+	assert.throws(
+		() =>
+			denied(
+				"gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)",
+			).requiredStatusChecks("main"),
+		(error) => error.code === "BRANCH_PROTECTION_UNAVAILABLE",
+	);
+	assert.throws(
+		() => denied("gh: Bad credentials (HTTP 401)").requiredStatusChecks("main"),
+		(error) => !error.code && /Command failed/.test(error.message),
+	);
+});
 test("completion requires matching merged PR and retries partial label/closure writes", () => {
 	const s = newBatch(manifest());
 	worker(s, 7);
@@ -742,7 +761,20 @@ test("controller merge fails closed without configured or readable required chec
 	);
 	assert.throws(
 		() => execute("merge-ready", path, { token, number: 7 }, options),
-		/required checks not configured/,
+		/required checks not configured and branch protection is unavailable/,
+	);
+	options.github = () => ({
+		snapshot,
+		pr: () => pr,
+		requiredStatusChecks: () => {
+			throw Object.assign(new Error("GitHub denied the branch protection API"), {
+				code: "BRANCH_PROTECTION_UNAVAILABLE",
+			});
+		},
+	});
+	assert.throws(
+		() => execute("merge-ready", path, { token, number: 7 }, options),
+		/required checks not configured: .*Set requiredChecks in toolkit-intake.json; retrying will not help/,
 	);
 	assert.equal(execute("status", path).tickets[7].status, "awaiting_merge");
 	options.github = () => ({

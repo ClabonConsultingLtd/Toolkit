@@ -157,6 +157,15 @@ function reconcileSchedule(policy, schedule, now) {
 	}
 	policy.paused = schedule.paused;
 }
+// Controller merges otherwise read branch protection, which GitHub hides on private repositories without a paid plan.
+const REQUIRED_CHECKS_WARNING =
+	"requiredChecks is not configured: controller merges fall back to the branch protection API, which GitHub denies for private repositories on plans without protected branches. List the checks in toolkit-intake.json.";
+function withRequiredChecksWarning(result, requiredChecks) {
+	return requiredChecks === undefined
+		? { ...result, warnings: [REQUIRED_CHECKS_WARNING] }
+		: result;
+}
+
 export function intakeCommand(command, checkout, input = {}, options = {}) {
 	const cwd = resolve(checkout),
 		anchor = join(cwd, ".toolkit", "orchestration", "intake-anchor.json");
@@ -165,11 +174,14 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 		const policy = readIntake(anchor);
 		const config = readRepositoryIntakeConfig(cwd);
 		return policy
-			? {
-					...policy,
-					activeHelper,
-					repositoryConfig: config ? "toolkit-intake.json" : null,
-				}
+			? withRequiredChecksWarning(
+					{
+						...policy,
+						activeHelper,
+						repositoryConfig: config ? "toolkit-intake.json" : null,
+					},
+					config?.requiredChecks ?? policy.requiredChecks,
+				)
 			: {
 					activeHelper,
 					configured: false,
@@ -191,7 +203,7 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				);
 			policy = configuredPolicy(anchor, cwd, policy, config ?? input);
 			atomicWrite(path, policy);
-			return policy;
+			return withRequiredChecksWarning(policy, policy.requiredChecks);
 		}
 		if (!policy) throw new Error("configure intake first");
 		if (command === "tick" && config) {
