@@ -15,6 +15,7 @@ const fields = new Set([
 	"localVerificationCommand",
 	"schedulePromptAppend",
 	"codexWorkerFullAccess",
+	"selfAuthoredMerge",
 ]);
 
 export function normalizeRequiredChecks(value, source = "intake request") {
@@ -119,6 +120,15 @@ export function readRepositoryIntakeConfig(cwd) {
 	)
 		throw new Error(
 			"invalid toolkit-intake.json: codexWorkerFullAccess must be a boolean",
+		);
+	// Opt-in for single-account setups, where GitHub always refuses the
+	// controller's approval of a PR its own account opened.
+	if (
+		config.selfAuthoredMerge !== undefined &&
+		config.selfAuthoredMerge !== "comment-review"
+	)
+		throw new Error(
+			'invalid toolkit-intake.json: selfAuthoredMerge must be "comment-review"',
 		);
 	const excludeTickets = normalizeExcludeTickets(
 		config.excludeTickets ?? [],

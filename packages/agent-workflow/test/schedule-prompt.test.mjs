@@ -92,6 +92,30 @@ test("config authorizes worker full-access and appends repository instructions",
 	);
 });
 
+test("selfAuthoredMerge adds the comment-review rule only when set", (t) => {
+	const cwd = checkout(t, base);
+	const plain = schedulePrompt(cwd);
+	assert.doesNotMatch(plain, /PR comment naming the reviewed head SHA/);
+	writeFileSync(
+		join(cwd, "toolkit-intake.json"),
+		JSON.stringify({ ...base, selfAuthoredMerge: "comment-review" }),
+	);
+	const opted = schedulePrompt(cwd);
+	assert.match(
+		opted,
+		/refuses the approval only because the controller's account opened the PR, post the independent review as a PR comment naming the reviewed head SHA/,
+	);
+	assert.match(opted, /never use `--admin`/);
+	assert.equal(
+		opted.replace(
+			/ When GitHub refuses the approval[^\n]*? stays awaiting a human\./,
+			"",
+		),
+		plain,
+		"only step 9 changes",
+	);
+});
+
 test("new config fields are validated", (t) => {
 	for (const [field, value] of [
 		["schedulePromptAppend", ""],
@@ -99,6 +123,8 @@ test("new config fields are validated", (t) => {
 		["schedulePromptAppend", ["ok", " "]],
 		["schedulePromptAppend", 3],
 		["codexWorkerFullAccess", "yes"],
+		["selfAuthoredMerge", true],
+		["selfAuthoredMerge", "approve"],
 	]) {
 		const cwd = checkout(t, { ...base, [field]: value });
 		assert.throws(() => readRepositoryIntakeConfig(cwd), new RegExp(field));

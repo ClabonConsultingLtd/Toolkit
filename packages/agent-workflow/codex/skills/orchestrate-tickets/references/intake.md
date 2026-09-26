@@ -22,6 +22,7 @@ at the checkout root (see `examples/toolkit-intake.json`). It supports `version:
 `excludeTickets` issue numbers, `requiredChecks` check-run names or status
 contexts, `localVerificationCommand`, a relative `.mjs` path,
 `codexWorkerFullAccess` (see [Codex sandbox preflight](#codex-sandbox-preflight)),
+`selfAuthoredMerge: "comment-review"` (see controller step on approval and merging),
 and `schedulePromptAppend`, a string or array of lines appended to the generated
 schedule prompt. Set `count`
 to the desired shared cap. List every check that must run before a controller
@@ -125,7 +126,10 @@ the run to:
    token immediately before each merge. Merge only when it returns `mergeReady: true`,
    using the returned head SHA as the merge command's head match. Leave PRs awaiting
    merge when the controller cannot approve its own PR or branch protection requires
-   another reviewer. Then `sync` their exact batches so
+   another reviewer, except under `selfAuthoredMerge: "comment-review"`: when GitHub
+   refuses the approval only because the controller's account opened the PR, post the
+   independent review as a PR comment naming the reviewed head SHA and merge without
+   `--admin`, so any required reviewer still blocks the merge. Then `sync` their exact batches so
    verified merges close their issues and release dependencies. Otherwise only
    reconcile PRs already merged outside the controller. Renew each held lease at
    least every five minutes during long reviews or tests and immediately before

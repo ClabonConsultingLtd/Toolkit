@@ -46,6 +46,10 @@ export function schedulePrompt(checkout) {
 	const workerMode = settings.codexWorkerFullAccess
 		? "This schedule authorizes `full-access` for Codex workers only when that preflight fails; record the sandbox error and the fallback in the run report."
 		: "This schedule does not authorize `full-access` for Codex workers: when that preflight fails, block the Codex reservation with the recorded sandbox error instead of launching or changing its mode.";
+	const selfAuthored =
+		settings.selfAuthoredMerge === "comment-review"
+			? " When GitHub refuses the approval only because the controller's account opened the PR, post the independent review as a PR comment naming the reviewed head SHA instead, then merge; never use `--admin` or otherwise bypass branch protection, so a merge GitHub rejects stays awaiting a human."
+			: "";
 	const lines = [
 		`Run the ticket intake controller for ${settings.repository} (schedule \`ticket-intake:${settings.repository}\`).`,
 		"",
@@ -67,7 +71,7 @@ export function schedulePrompt(checkout) {
 		"6. Check `claude-cooldown`, pass the raw Paseo model catalogs, then re-fetch the schedule and pass `schedule: {id, name, paused}` to `tick`. Process admitted batches with the orchestration workflow; `managedByIntake` batches get no per-batch schedule, and this shared schedule is not paused when a batch completes.",
 		`7. Before launching a Codex worker in \`auto-review\`, run the sandbox preflight from the skill (for example \`codex sandbox true\`). Errors such as \`bwrap: No permissions to create a new namespace\` mean the sandbox is unavailable. ${workerMode}`,
 		"8. Workers implement only their ticket and open draft PRs. They never merge, close issues, change labels or batch state, create schedules or launch other workers. Preserve each worker's selected mode; never widen permissions or batch scope beyond this prompt.",
-		"9. Approve or merge only where this prompt explicitly authorizes it, and only after `merge-ready` returns `mergeReady: true` for the exact linked PR head. Otherwise leave PRs awaiting a human merge.",
+		`9. Approve or merge only where this prompt explicitly authorizes it, and only after \`merge-ready\` returns \`mergeReady: true\` for the exact linked PR head.${selfAuthored} Otherwise leave PRs awaiting a human merge.`,
 		"10. Keep this schedule running when capacity is full or nothing qualifies. Pause it only on explicit user request or a systemic error that prevents safe reconciliation, recording the reason. Report the run type, new selections, active count, PR links, blockers, prompt drift, and the live schedule state and next run.",
 	];
 	const append = settings.schedulePromptAppend;
