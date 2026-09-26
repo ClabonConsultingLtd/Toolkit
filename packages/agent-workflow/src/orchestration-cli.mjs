@@ -234,7 +234,9 @@ export function execute(command, path, input = {}, options = {}) {
 							required = api.requiredStatusChecks(state.baseBranch);
 						} catch (error) {
 							throw new Error(
-								`required checks not configured and branch protection is unavailable: ${error.message}`,
+								error.code === "BRANCH_PROTECTION_UNAVAILABLE"
+									? `required checks not configured: ${error.message}. Set requiredChecks in toolkit-intake.json; retrying will not help`
+									: `required checks not configured and branch protection is unavailable: ${error.message}`,
 							);
 						}
 					}

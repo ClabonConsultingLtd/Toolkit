@@ -25,7 +25,14 @@ contexts, `localVerificationCommand`, a relative `.mjs` path,
 and `schedulePromptAppend`, a string or array of lines appended to the generated
 schedule prompt. Set `count`
 to the desired shared cap. List every check that must run before a controller
-merge; a missing, skipped, or neutral required check blocks it. The local
+merge; a missing, skipped, or neutral required check blocks it. `merge-ready`
+verifies the list against the PR's `statusCheckRollup` (as `gh pr checks` shows),
+so treat `requiredChecks` as required for any repository where the controller
+merges. Without it, `merge-ready` reads branch protection's required status checks
+instead. GitHub denies that API with HTTP 403 for private repositories on plans
+without protected branches; `merge-ready` then reports that retrying will not help
+and every controller merge stays blocked until the list is set. `status` and
+`configure` return a `warnings` entry while it is missing. The local
 verification command receives the PR number and current head SHA and must exit
 zero only for a complete trusted pass. It runs at `ready` and `merge-ready`, so
 a stale result blocks both. Failure or timeout blocks the controller. An empty list explicitly
