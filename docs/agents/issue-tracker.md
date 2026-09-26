@@ -2,6 +2,10 @@
 
 Issues and specs for this repo live as GitHub issues on `ClabonConsultingLtd/Toolkit`. Use the `gh` CLI for all operations.
 
+## Public repository
+
+This repository is public. When describing behaviour seen in another repository, call it "a consumer repository" and leave out its name, issue and PR numbers, paths, host names and infrastructure details. The same applies to commit messages and branch names. A workflow redacts private terms from issues, PRs and comments after posting, but GitHub keeps the original in the edit history, so write it cleanly the first time.
+
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
