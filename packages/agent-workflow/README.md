@@ -10,6 +10,17 @@ The `claude/skills/bounded-handoff` and `codex/skills/bounded-handoff` entrypoin
 
 Only the chat-completions response shape is supported; services using a different API need a request/response adapter. The model must return the file-qualified SEARCH/REPLACE format, and the CLI validates every edit before applying it: a response containing an incomplete block is rejected whole rather than partially applied. Declared editable paths must resolve within the project and cannot be symlinks.
 
+### Running handoff against a small local model
+
+Findings from benchmarking 1.5B–7B local models (CPU-only, Ollama) against this format:
+
+- **Pin decoding on the server.** The request carries only the model and messages, so set temperature 0 and a context window larger than the instruction plus every editable file (for Ollama, `PARAMETER temperature 0` and `num_ctx` in a Modelfile). Ollama truncates an over-long prompt from the start, which drops the instruction without an error. A `num_predict` cap stops a runaway answer from hanging the CLI.
+- **Turn thinking off.** Recent small models (for example Qwen3.5 and Gemma 4) reason before answering by default, which can take minutes on CPU. Set `TOOLKIT_HANDOFF_REASONING_EFFORT=none`. Some of these models can't have thinking disabled in a Modelfile.
+- **Give the format an example.** A server-side system prompt plus one example exchange (for Ollama, `SYSTEM` and `MESSAGE` in the Modelfile) keeps small models on the SEARCH/REPLACE format. Telling them to replace the whole file when it's short (under about 60 lines) was the largest single improvement.
+- **Newer generations beat bigger old ones.** 2026 models of about 4B parameters outscored a 2024 7B coding model.
+- **One region per handoff.** Single-region edits were reliable. Multi-site edits (rename plus call site, add a field plus its default) sometimes came back well-formed but wrong, and were applied. The CLI rejects malformed or incomplete blocks, but only a diff review catches a clean wrong edit.
+- **Treat small benchmarks as rough.** Outputs can differ between inference servers even at temperature 0.
+
 ## Ticket workflow compatibility
 
 `ticket` and `ticket-batch` read ticket status through a pluggable provider, declared as `"provider"` in the ticket config file. A ticket reference (a manifest entry, or the argument to `pnpm ticket`) is resolved and its status compared against `readyStatus` (to launch) and `completeStatus` (to mark done). Toolkit does not bundle or invoke any ticket-authoring workflow; a project remains free to produce compatible tickets by whatever means it likes.
