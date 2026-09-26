@@ -8,12 +8,15 @@ export function parseBlocks(text, editable) {
 	];
 	if (!found.length)
 		throw new Error("No file-qualified SEARCH/REPLACE blocks returned");
-	// A block that starts but doesn't match (e.g. a missing =======) would
-	// otherwise be skipped silently and the rest applied as a partial edit.
-	const started = text.match(/^<<<<<<< SEARCH\r?$/gm).length;
-	if (started !== found.length)
+	// Every opener and terminator must belong to a complete block. Otherwise a
+	// malformed block (a missing =======, a stray or duplicated marker) would
+	// be skipped silently and the rest applied as a partial or wrong edit.
+	const count = (re) => (text.match(re) ?? []).length;
+	const started = count(/^<<<<<<< search\s*$/gim);
+	const ended = count(/^>>>>>>> replace\s*$/gim);
+	if (started !== found.length || ended !== found.length)
 		throw new Error(
-			`Response has an incomplete SEARCH/REPLACE block (${started} started, ${found.length} complete)`,
+			`Response has an incomplete SEARCH/REPLACE block (${found.length} complete, ${started} openers, ${ended} terminators)`,
 		);
 	return found.map((m) => {
 		const file = m[1].replaceAll("\\", "/");
