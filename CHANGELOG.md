@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.7.1 - 2026-09-26
+## 0.8.0 - 2026-09-26
+
+- #95: feat(agent-workflow): opt-in comment review for self-authored controller merges
 
 - #92: fix(agent-workflow): report plan-gated branch protection clearly
 
