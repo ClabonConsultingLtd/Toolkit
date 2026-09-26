@@ -22,7 +22,7 @@ jobs:
       - name: Check for private terms
         env:
           FORBIDDEN_TERMS: ${{ secrets.FORBIDDEN_TERMS }}
-          PR_TEXT: ${{ github.event.pull_request.title }} ${{ github.event.pull_request.body }}
+          PR_TEXT: ${{ github.head_ref }} ${{ github.event.pull_request.title }} ${{ github.event.pull_request.body }}
           RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || format('{0}..{1}', github.event.before, github.event.after) }}
         run: |
           if [ -z "$FORBIDDEN_TERMS" ]; then
@@ -39,7 +39,7 @@ jobs:
           esac
           messages=$(git log --format=%B "$RANGE" 2>/dev/null || git log -1 --format=%B)
           if printf '%s\n%s\n' "$messages" "$PR_TEXT" | grep -q -i -E -e "$FORBIDDEN_TERMS"; then
-            echo "::error::Private terms found in commit messages or the pull request title or body"
+            echo "::error::Private terms found in commit messages or the pull request branch, title or body"
             status=1
           fi
           exit $status
