@@ -175,6 +175,16 @@ true` authorizes the controller to launch Codex workers in `full-access` when th
 Codex sandbox preflight fails; without it, those reservations are blocked with
 the sandbox error recorded as the reason.
 
+`selfAuthoredMerge: "comment-review"` is for setups where the controller and
+its workers share one GitHub account. GitHub never lets an account approve a
+PR it opened, so without this setting every controller-authorized merge waits
+for a human. With it, when GitHub refuses the approval for that reason alone,
+the controller posts its independent review as a PR comment naming the
+reviewed head SHA and merges after `merge-ready`. It never uses `--admin`, so
+branch protection or a ruleset that requires a reviewer still blocks the merge.
+Scheduled merging still needs the explicit authorization in
+`schedulePromptAppend`.
+
 ### Schedule prompt
 
 Generate the intake schedule prompt instead of writing it by hand:
