@@ -8,6 +8,13 @@ export function parseBlocks(text, editable) {
 	];
 	if (!found.length)
 		throw new Error("No file-qualified SEARCH/REPLACE blocks returned");
+	// A block that starts but doesn't match (e.g. a missing =======) would
+	// otherwise be skipped silently and the rest applied as a partial edit.
+	const started = text.match(/^<<<<<<< SEARCH\r?$/gm).length;
+	if (started !== found.length)
+		throw new Error(
+			`Response has an incomplete SEARCH/REPLACE block (${started} started, ${found.length} complete)`,
+		);
 	return found.map((m) => {
 		const file = m[1].replaceAll("\\", "/");
 		if (!editable.has(file))
