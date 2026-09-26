@@ -30,8 +30,9 @@ jobs:
             exit 0
           fi
           status=0
-          git grep -l -I -i -E -e "$FORBIDDEN_TERMS"
-          case $? in
+          scan=0
+          git grep -l -I -i -E -e "$FORBIDDEN_TERMS" || scan=$?
+          case $scan in
             0) echo "::error::Private terms found in the files listed above"; status=1 ;;
             1) ;;
             *) echo "::error::The file scan failed"; status=1 ;;
