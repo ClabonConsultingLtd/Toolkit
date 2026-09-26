@@ -119,3 +119,48 @@ test("bounded-handoff skills are self-contained when copied into a skills direct
 	assert.match(claude, /Editable:/);
 	assert.equal(skill("codex"), claude);
 });
+
+test("prompt example names a real editable file, not a placeholder", () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-"));
+	writeFileSync(join(root, "a.ts"), "x\n");
+	const prompt = promptFor(
+		{ instruction: "Do it.", editable: new Set(["a.ts"]) },
+		root,
+	);
+	// Small models copy the example header verbatim, so it must be valid.
+	assert.match(prompt, /Return only blocks:\n@@ a\.ts @@\n/);
+	assert.doesNotMatch(prompt, /relative\/file/);
+});
+test("optional reasoning effort is sent only when configured", async () => {
+	const bodies = [];
+	const fetcher = async (_, options) => {
+		bodies.push(JSON.parse(options.body));
+		return {
+			ok: true,
+			json: async () => ({ choices: [{ message: { content: "edit" } }] }),
+		};
+	};
+	const base = {
+		TOOLKIT_HANDOFF_API_URL: "http://localhost:11434/v1/chat/completions",
+		TOOLKIT_HANDOFF_MODEL: "gemma4",
+	};
+	const plain = handoffEndpoint(base);
+	const none = handoffEndpoint({
+		...base,
+		TOOLKIT_HANDOFF_REASONING_EFFORT: "none",
+	});
+	for (const e of [plain, none])
+		await requestEdit(fetcher, e.url, e.key, e.model, "p", 1, {
+			reasoningEffort: e.reasoningEffort,
+		});
+	assert.equal("reasoning_effort" in bodies[0], false);
+	assert.equal(bodies[1].reasoning_effort, "none");
+	assert.throws(
+		() =>
+			handoffEndpoint({
+				...base,
+				TOOLKIT_HANDOFF_REASONING_EFFORT: "none; rm -rf",
+			}),
+		/TOOLKIT_HANDOFF_REASONING_EFFORT/,
+	);
+});
