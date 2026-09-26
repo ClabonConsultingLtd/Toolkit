@@ -5,6 +5,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
       - uses: actions/setup-node@v7
         with: { node-version: 24 }
       - uses: actions/setup-python@v7
@@ -17,4 +18,29 @@ jobs:
       - run: python -m unittest discover -s packages/image-generation/tests -v
       - run: python -m unittest discover -s packages/image-to-3d/tests -v
       - run: node --check packages/claude-token-optimisation/install.mjs
-      - run: "! rg -i 'private-terms-redacted' ."
+      # The terms live in the FORBIDDEN_TERMS secret (an extended regex) so this
+      # public workflow doesn't publish them. Output names files only.
+      - name: Check for private terms
+        env:
+          FORBIDDEN_TERMS: ${{ secrets.FORBIDDEN_TERMS }}
+          PR_TEXT: ${{ github.event.pull_request.title }} ${{ github.event.pull_request.body }}
+          RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || format('{0}..{1}', github.event.before, github.event.after) }}
+        run: |
+          if [ -z "$FORBIDDEN_TERMS" ]; then
+            echo "::notice::FORBIDDEN_TERMS is not available to this run; skipping"
+            exit 0
+          fi
+          status=0
+          scan=0
+          git grep -l -I -i -E -e "$FORBIDDEN_TERMS" || scan=$?
+          case $scan in
+            0) echo "::error::Private terms found in the files listed above"; status=1 ;;
+            1) ;;
+            *) echo "::error::The file scan failed"; status=1 ;;
+          esac
+          messages=$(git log --format=%B "$RANGE" 2>/dev/null || git log -1 --format=%B)
+          if printf '%s\n%s\n' "$messages" "$PR_TEXT" | grep -q -i -E -e "$FORBIDDEN_TERMS"; then
+            echo "::error::Private terms found in commit messages or the pull request title or body"
+            status=1
+          fi
+          exit $status

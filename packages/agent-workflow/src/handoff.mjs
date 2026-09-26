@@ -10,6 +10,7 @@ export async function requestEdit(
 	model,
 	prompt,
 	retries = 1,
+	{ reasoningEffort } = {},
 ) {
 	let last;
 	for (let n = 0; n <= retries; n++) {
@@ -23,6 +24,7 @@ export async function requestEdit(
 				body: JSON.stringify({
 					model,
 					messages: [{ role: "user", content: prompt }],
+					...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
 				}),
 			});
 			if (!r.ok) throw new Error(`provider returned ${r.status}`);
@@ -43,7 +45,9 @@ export function promptFor(task, root) {
 			return `FILE: ${f}\n${readFileSync(resolve(root, f), "utf8")}`;
 		})
 		.join("\n\n");
-	return `${task.instruction}\n\nReturn only blocks:\n@@ relative/file @@\n<<<<<<< SEARCH\nexact text\n=======\nreplacement\n>>>>>>> REPLACE\n\n${files}`;
+	// Name a real editable file: small models copy the example header verbatim.
+	const example = [...task.editable][0] ?? "relative/file";
+	return `${task.instruction}\n\nReturn only blocks:\n@@ ${example} @@\n<<<<<<< SEARCH\nexact text\n=======\nreplacement\n>>>>>>> REPLACE\n\n${files}`;
 }
 export function handoffEndpoint(env) {
 	const generic =
@@ -67,7 +71,14 @@ export function handoffEndpoint(env) {
 		throw new Error("remote handoff API URL must use https");
 	if (!key && !local)
 		throw new Error("handoff API key is required for non-local endpoints");
-	return { url, model, key };
+	// Optional OpenAI-style reasoning_effort, e.g. "none" to stop a local
+	// thinking model from reasoning at length before it answers.
+	const reasoningEffort = env.TOOLKIT_HANDOFF_REASONING_EFFORT || undefined;
+	if (reasoningEffort && !/^[a-z]+$/.test(reasoningEffort))
+		throw new Error(
+			"TOOLKIT_HANDOFF_REASONING_EFFORT must be a single lowercase word",
+		);
+	return { url, model, key, ...(reasoningEffort ? { reasoningEffort } : {}) };
 }
 export async function main(
 	args = process.argv.slice(2),
@@ -95,6 +106,8 @@ export async function main(
 		endpoint.key,
 		endpoint.model,
 		prompt,
+		1,
+		{ reasoningEffort: endpoint.reasoningEffort },
 	);
 	writeFileSync(resolve(directory, "response.md"), text);
 	for (const file of task.editable) validateEditable(root, file);
