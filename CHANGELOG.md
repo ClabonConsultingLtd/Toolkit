@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.6.0 - 2026-09-25
+## 0.7.0 - 2026-09-26
+
+- #86: docs(agent-workflow): guidance for running handoff on a small local model
 
 - #78: orchestrate-tickets: worker prompt, spec selection and reporting refinements
 
