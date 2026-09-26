@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.7.0 - 2026-09-26
+## 0.7.1 - 2026-09-26
+
+- #92: fix(agent-workflow): report plan-gated branch protection clearly
 
 - #86: docs(agent-workflow): guidance for running handoff on a small local model
 
