@@ -1,7 +1,9 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { applyEdits, parseBlocks, prepareEdits } from "./blocks.mjs";
-import { parseTask, validateEditable } from "./task-file.mjs";
+import { readRepositoryHandoffConfig, withinAllowedHours } from "./handoff-config.mjs";
+import { parseTask, validatePath } from "./task-file.mjs";
 export async function requestEdit(
 	fetcher,
 	url,
@@ -38,15 +40,19 @@ export async function requestEdit(
 	throw last;
 }
 export function promptFor(task, root) {
-	const files = [...task.editable]
-		.map((f) => {
-			validateEditable(root, f);
-			return `FILE: ${f}\n${readFileSync(resolve(root, f), "utf8")}`;
-		})
-		.join("\n\n");
+	const section = (paths, label) =>
+		[...paths]
+			.map((f) => {
+				validatePath(root, f);
+				return `FILE: ${f}\n${readFileSync(resolve(root, f), "utf8")}`;
+			})
+			.join("\n\n");
 	// Name a real editable file: small models copy the example header verbatim.
 	const example = [...task.editable][0] ?? "relative/file";
-	return `${task.instruction}\n\nReturn only blocks:\n@@ ${example} @@\n<<<<<<< SEARCH\nexact text\n=======\nreplacement\n>>>>>>> REPLACE\n\n${files}`;
+	const context = task.context?.size
+		? `\n\nCONTEXT (read-only — do not edit these files):\n\n${section(task.context, "Context")}`
+		: "";
+	return `${task.instruction}\n\nReturn only blocks:\n@@ ${example} @@\n<<<<<<< SEARCH\nexact text\n=======\nreplacement\n>>>>>>> REPLACE\n\n${section(task.editable, "Editable")}${context}`;
 }
 export function handoffEndpoint(env) {
 	const generic =
@@ -79,6 +85,26 @@ export function handoffEndpoint(env) {
 		);
 	return { url, model, key, ...(reasoningEffort ? { reasoningEffort } : {}) };
 }
+function runGates(root, directory, gates, files) {
+	const sections = gates.map((gate) => {
+		let output, code;
+		try {
+			output = execFileSync(process.execPath, [resolve(root, gate), ...files], {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			code = 0;
+		} catch (error) {
+			output = `${error.stdout ?? ""}${error.stderr ?? ""}`;
+			code = error.status ?? 1;
+		}
+		return `## ${gate}\nExit: ${code}\n\n\`\`\`\n${output.trim()}\n\`\`\`\n`;
+	});
+	writeFileSync(
+		resolve(directory, "result.md"),
+		`# Post-apply gate report\n\nThis report is information, not acceptance: it does not replace reading the diff.\n\n${sections.join("\n")}`,
+	);
+}
 export async function main(
 	args = process.argv.slice(2),
 	env = process.env,
@@ -93,24 +119,50 @@ export async function main(
 		prompt = promptFor(task, root);
 	writeFileSync(
 		resolve(directory, "request.json"),
-		JSON.stringify({ editable: [...task.editable], prompt }, null, 2),
+		JSON.stringify(
+			{ editable: [...task.editable], context: [...task.context], prompt },
+			null,
+			2,
+		),
 	);
 	if (flags.includes("--dry-run")) return prompt;
+	const config = readRepositoryHandoffConfig(root);
+	if (
+		config?.allowedHours &&
+		env.TOOLKIT_HANDOFF_ALLOW_OFFHOURS !== "on" &&
+		!withinAllowedHours(config.allowedHours)
+	)
+		throw new Error(
+			`handoff is outside its configured hours (UTC ${config.allowedHours.start}-${config.allowedHours.end} on ${config.allowedHours.days.join(", ")}); set TOOLKIT_HANDOFF_ALLOW_OFFHOURS=on to override`,
+		);
 	if (env.TOOLKIT_HANDOFF_ENABLED !== "on")
 		throw new Error("TOOLKIT_HANDOFF_ENABLED must be on");
 	const endpoint = handoffEndpoint(env);
-	const text = await requestEdit(
-		fetcher,
-		endpoint.url,
-		endpoint.key,
-		endpoint.model,
-		prompt,
-		1,
-		{ reasoningEffort: endpoint.reasoningEffort },
-	);
+	const request = (p) =>
+		requestEdit(fetcher, endpoint.url, endpoint.key, endpoint.model, p, 1, {
+			reasoningEffort: endpoint.reasoningEffort,
+		});
+	for (const file of task.editable) validatePath(root, file);
+	let text = await request(prompt);
+	let blocks, edits;
+	try {
+		blocks = parseBlocks(text, task.editable);
+		edits = prepareEdits(root, blocks);
+	} catch (error) {
+		// Small models fix a SEARCH mismatch or malformed block once they see
+		// the applier's own error; a second failure goes back to the agent.
+		text = await request(
+			`${prompt}\n\nYour previous response could not be applied: ${error.message}\n\nPrevious response:\n${text}\n\nReturn corrected SEARCH/REPLACE blocks only.`,
+		);
+		blocks = parseBlocks(text, task.editable);
+		edits = prepareEdits(root, blocks);
+	}
 	writeFileSync(resolve(directory, "response.md"), text);
-	for (const file of task.editable) validateEditable(root, file);
-	applyEdits(prepareEdits(root, parseBlocks(text, task.editable)));
+	applyEdits(edits);
+	if (config?.gates?.length)
+		runGates(root, directory, config.gates, [
+			...new Set(blocks.map((b) => b.file)),
+		]);
 	return "Applied bounded handoff edits. Review the diff.";
 }
 if (import.meta.url === `file://${process.argv[1].replaceAll("\\", "/")}`)
