@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.8.0 - 2026-09-26
+## 0.8.1 - 2026-09-27
+
+- #97: fix(agent-workflow): warn scheduled controllers off loop-only wakeup tools
 
 - #95: feat(agent-workflow): opt-in comment review for self-authored controller merges
 
