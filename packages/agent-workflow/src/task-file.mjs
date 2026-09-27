@@ -6,9 +6,10 @@ function inside(root, path) {
 	return r !== "" && !r.startsWith(`..${sep}`) && r !== ".." && !isAbsolute(r);
 }
 function fileList(text, label) {
-	const section = new RegExp(`^${label}:\\s*\\r?\\n((?:\\s*-\\s+.+\\r?\\n?)+)`, "m").exec(
-		text,
-	)?.[1];
+	const section = new RegExp(
+		`^${label}:\\s*\\r?\\n((?:\\s*-\\s+.+\\r?\\n?)+)`,
+		"m",
+	).exec(text)?.[1];
 	return [...(section ?? "").matchAll(/^\s*-\s+(.+?)\s*$/gm)].map((x) => x[1]);
 }
 

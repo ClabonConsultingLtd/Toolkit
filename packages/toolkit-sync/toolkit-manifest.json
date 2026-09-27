@@ -1,9 +1,3 @@
 {
-	"include": [
-		"README.md",
-		"package.json",
-		"src/**",
-		"claude/**",
-		"codex/**"
-	]
+	"include": ["README.md", "package.json", "src/**", "claude/**", "codex/**"]
 }

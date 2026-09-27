@@ -58,7 +58,10 @@ test("canonical prompt names absolute paths and required instructions determinis
 	assert.match(prompt, /does not authorize `full-access` for Codex workers/);
 	assert.match(prompt, /merge-ready/);
 	assert.match(prompt, /self-paced dynamic loop/);
-	assert.match(prompt, /automatic completion notification within the same turn/);
+	assert.match(
+		prompt,
+		/automatic completion notification within the same turn/,
+	);
 	assert.doesNotMatch(prompt, /Repository additions/);
 	assert.doesNotMatch(prompt, /\d{4}-\d{2}-\d{2}/);
 	writeFileSync(
