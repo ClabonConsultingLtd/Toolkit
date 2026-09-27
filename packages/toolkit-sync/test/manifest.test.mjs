@@ -47,3 +47,28 @@ test("parseManifest accepts a well-formed manifest", () => {
 	const manifest = parseManifest('{"include":["README.md"]}');
 	assert.deepEqual(manifest.include, ["README.md"]);
 });
+
+test("toolkit-sync's own manifest is valid and matches its real, vendorable files", async () => {
+	const { readFileSync, readdirSync, statSync } = await import("node:fs");
+	const { join, relative } = await import("node:path");
+	const root = new URL("..", import.meta.url).pathname;
+	const manifest = parseManifest(
+		readFileSync(join(root, "toolkit-manifest.json"), "utf8"),
+	);
+	const walk = (dir) =>
+		readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+			const full = join(dir, entry.name);
+			return entry.isDirectory() ? walk(full) : [relative(root, full)];
+		});
+	const matched = matchManifest(walk(root), manifest.include);
+	assert.ok(matched.includes("README.md"));
+	assert.ok(matched.includes("package.json"));
+	assert.ok(matched.includes("src/cli.mjs"));
+	assert.ok(matched.includes("claude/skills/toolkit-upgrade/SKILL.md"));
+	assert.ok(matched.includes("codex/skills/toolkit-upgrade/SKILL.md"));
+	assert.ok(
+		matched.every((path) => !path.startsWith("test/")),
+		"manifest must not vendor this package's own tests",
+	);
+	assert.ok(statSync(join(root, "src", "cli.mjs")).isFile());
+});
