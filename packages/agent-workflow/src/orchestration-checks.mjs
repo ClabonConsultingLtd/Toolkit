@@ -35,6 +35,29 @@ export function requirePassingChecks(rollup, requiredChecks = []) {
 		);
 }
 
+// A check that only runs once a PR leaves draft is legitimately missing or
+// reports "skipped" while it is still a draft; only a check that has actually
+// completed with a failing outcome should block marking review done. Ignore
+// a check that is merely missing or still pending, unlike requirePassingChecks.
+export function requireNoReportedFailures(rollup) {
+	if (!Array.isArray(rollup)) throw new Error("PR checks are unavailable");
+	const failed = rollup
+		.filter((check) => {
+			if (check.status !== undefined)
+				return (
+					check.status === "COMPLETED" &&
+					!["SUCCESS", "NEUTRAL", "SKIPPED"].includes(check.conclusion)
+				);
+			return (
+				check.state !== undefined &&
+				!["SUCCESS", "PENDING"].includes(check.state)
+			);
+		})
+		.map((check) => checkName(check) ?? "unnamed check");
+	if (failed.length)
+		throw new Error(`reported check failures: ${failed.join(", ")}`);
+}
+
 // Classify GitHub's mergeable/mergeStateStatus pair. GitHub reports BEHIND only
 // when the base branch requires up-to-date heads, so it blocks merging too.
 export function mergeState(pr) {

@@ -19,6 +19,7 @@ import {
 import {
 	mergeState,
 	requireMergeable,
+	requireNoReportedFailures,
 	requirePassingChecks,
 } from "./orchestration-checks.mjs";
 import {
@@ -215,27 +216,33 @@ export function execute(command, path, input = {}, options = {}) {
 				if (pr.state !== "OPEN" || pr.headRefOid !== reviewedHead)
 					throw new Error("review must match current open PR head");
 				requireMergeable(pr);
-				const policy = readIntake(path);
-				if (
-					policy &&
-					policy.repository.toLowerCase() !== state.repository.toLowerCase()
-				)
-					throw new Error("intake policy belongs to another repository");
-				const repositoryConfig = readRepositoryIntakeConfig(state.cwd);
-				if (
-					repositoryConfig &&
-					repositoryConfig.repository.toLowerCase() !==
-						state.repository.toLowerCase()
-				)
-					throw new Error(
-						"repository intake config belongs to another repository",
-					);
-				let required =
-					repositoryConfig?.requiredChecks ?? policy?.requiredChecks;
-				if (command === "merge-ready") {
+				if (command === "ready") {
+					// requiredChecks and the local verification gate are enforced at
+					// merge-ready instead: a check that only runs once the PR leaves
+					// draft is legitimately missing or "skipped" here.
+					requireNoReportedFailures(pr.statusCheckRollup ?? []);
+					output = changeTicket(state, input.number, command, input);
+				} else {
 					if (t.status !== "awaiting_merge")
 						throw new Error("ticket is not awaiting merge");
 					if (pr.isDraft) throw new Error("PR is still a draft");
+					const policy = readIntake(path);
+					if (
+						policy &&
+						policy.repository.toLowerCase() !== state.repository.toLowerCase()
+					)
+						throw new Error("intake policy belongs to another repository");
+					const repositoryConfig = readRepositoryIntakeConfig(state.cwd);
+					if (
+						repositoryConfig &&
+						repositoryConfig.repository.toLowerCase() !==
+							state.repository.toLowerCase()
+					)
+						throw new Error(
+							"repository intake config belongs to another repository",
+						);
+					let required =
+						repositoryConfig?.requiredChecks ?? policy?.requiredChecks;
 					if (required === undefined) {
 						try {
 							required = api.requiredStatusChecks(state.baseBranch);
@@ -247,40 +254,37 @@ export function execute(command, path, input = {}, options = {}) {
 							);
 						}
 					}
-				}
-				requirePassingChecks(pr.statusCheckRollup ?? [], required);
-				if (repositoryConfig?.localVerificationCommand) {
-					const checkout = realpathSync(state.cwd);
-					const gate = realpathSync(
-						resolve(checkout, repositoryConfig.localVerificationCommand),
-					);
-					if (!gate.startsWith(`${checkout}${sep}`))
-						throw new Error("local verification gate escapes the checkout");
-					try {
-						execFileSync(
-							process.execPath,
-							[gate, String(pr.number), pr.headRefOid],
-							{
-								cwd: state.cwd,
-								encoding: "utf8",
-								timeout: 30_000,
-							},
+					requirePassingChecks(pr.statusCheckRollup ?? [], required);
+					if (repositoryConfig?.localVerificationCommand) {
+						const checkout = realpathSync(state.cwd);
+						const gate = realpathSync(
+							resolve(checkout, repositoryConfig.localVerificationCommand),
 						);
-					} catch (error) {
-						throw new Error(
-							`local verification gate refused PR #${pr.number} at ${pr.headRefOid}: ${(error.stderr || error.message).trim()}`,
-						);
+						if (!gate.startsWith(`${checkout}${sep}`))
+							throw new Error("local verification gate escapes the checkout");
+						try {
+							execFileSync(
+								process.execPath,
+								[gate, String(pr.number), pr.headRefOid],
+								{
+									cwd: state.cwd,
+									encoding: "utf8",
+									timeout: 30_000,
+								},
+							);
+						} catch (error) {
+							throw new Error(
+								`local verification gate refused PR #${pr.number} at ${pr.headRefOid}: ${(error.stderr || error.message).trim()}`,
+							);
+						}
 					}
+					output = {
+						mergeReady: true,
+						pr: pr.number,
+						head: pr.headRefOid,
+						requiredChecks: required,
+					};
 				}
-				output =
-					command === "ready"
-						? changeTicket(state, input.number, command, input)
-						: {
-								mergeReady: true,
-								pr: pr.number,
-								head: pr.headRefOid,
-								requiredChecks: required,
-							};
 			} else {
 				const t = state.tickets[String(input.number).replace(/^#/, "")];
 				if (

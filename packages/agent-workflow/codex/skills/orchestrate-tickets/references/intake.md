@@ -35,9 +35,13 @@ without protected branches; `merge-ready` then reports that retrying will not he
 and every controller merge stays blocked until the list is set. `status` and
 `configure` return a `warnings` entry while it is missing. The local
 verification command receives the PR number and current head SHA and must exit
-zero only for a complete trusted pass. It runs at `ready` and `merge-ready`, so
-a stale result blocks both. Failure or timeout blocks the controller. An empty list explicitly
-requires none, while every reported pending or failing check still blocks it. Do not
+zero only for a complete trusted pass. It runs at `merge-ready` only, immediately
+before a controller merge, not at `ready`: a check or the local command that can
+only pass once the PR leaves draft must not deadlock review completion. A stale
+or failing result blocks the merge. Failure or timeout blocks the controller. An
+empty list explicitly requires none, while every reported pending or failing
+required check still blocks the merge. `ready` still rejects a check that has
+already reported a failure. Do not
 put pause state, schedule IDs, paths, or tick history in this file. Run
 `node <skill>/scripts/intake.mjs configure CHECKOUT` to initialize the local
 runtime policy from it. Existing repositories without the tracked file can keep

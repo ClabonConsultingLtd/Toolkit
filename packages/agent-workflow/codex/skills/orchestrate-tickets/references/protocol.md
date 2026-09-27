@@ -23,8 +23,8 @@ Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as 
 | review | number, evidence | Record completed worker output; begin Codex review. |
 | fix | number, reason | Increment fix count and reserve worker; third request blocks without launching. |
 | update-base | number, reason | Return a reviewing or awaiting_merge ticket to its worker to update from base; clears reviewedHead and never changes the fix count. |
-| ready | number, evidence, reviewedHead | Verify open PR, merge state and check results; record awaiting_merge. |
-| merge-ready | number | Recheck the reviewed PR head, draft state, merge state, and required checks before an authorized controller merge; returns the head SHA to match during merge. |
+| ready | number, evidence, reviewedHead | Verify open PR, merge state and reported check failures (not missing/incomplete `requiredChecks`, which may only run once the PR leaves draft); record awaiting_merge. |
+| merge-ready | number | Recheck the reviewed PR head, draft state, merge state, `requiredChecks`, and the local verification gate before an authorized controller merge; returns the head SHA to match during merge. |
 | block | number, reason; workerStopped:true only with evidence of stop; blockKind:"provider-limit" with resetAt for a provider usage limit | Human blocker, or provider-limit block that keeps the schedule running until reset; uncertain/running workers still consume a slot. A provider-limit block cannot replace another block. |
 | resume | number, evidence; resetFixCycles:true if explicitly authorized | Recover human blocker; cannot bypass an uncertain launch. Evidence may be omitted only for a provider-limit block whose resetAt has passed (and, for a Claude worker, whose shared cooldown has ended). |
 | schedule | scheduleId | Persist scheduler identity; refuses replacement. |
@@ -58,3 +58,5 @@ Partial completion writes are retry-safe: sync verifies PR merge and current lab
 Automatic selection details and invocation examples: [selection.md](selection.md). All batches for a checkout must use the canonical state directory so overlap detection sees them. Initialization is serialized by `.selection.lock`, which records its owner's host and PID. The helper reclaims it automatically once that owner has exited (same host) or after 30 minutes; do not remove it by hand. Preview is read-only and not a reservation: `init-next` rechecks eligibility.
 
 When an intake policy exists, reserve/resume/fix/update-base operations also enforce its repository-wide active-ticket limit under the shared selection lock. A capacity rejection is temporary: retain the queued/blocked state and wait; do not create another batch or agent to bypass it. See [intake.md](intake.md) for the recurring controller protocol.
+
+A ticket blocked before this fix because `ready` demanded a `requiredChecks` entry that only runs once the PR leaves draft (a `systemic: ...` reason naming a missing or skipped required check) is not automatically recovered: `resume` it explicitly once reconciled, since `ready` no longer requires that check to be present.
