@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
 const packageFiles = [
@@ -26,32 +27,6 @@ export function bump(version, kind) {
 	if (kind === "minor") return `${major}.${minor + 1}.0`;
 	if (kind === "patch") return `${major}.${minor}.${patch + 1}`;
 	throw new Error(`invalid release bump: ${kind}`);
-}
-
-export function pendingBump(base, candidate) {
-	if (base === candidate) return null;
-	const [baseMajor, baseMinor, basePatch] = parseVersion(base);
-	const [candidateMajor, candidateMinor, candidatePatch] =
-		parseVersion(candidate);
-	if (candidateMajor > baseMajor) return "major";
-	if (candidateMajor === baseMajor && candidateMinor > baseMinor)
-		return "minor";
-	if (
-		candidateMajor === baseMajor &&
-		candidateMinor === baseMinor &&
-		candidatePatch > basePatch
-	)
-		return "patch";
-	throw new Error(`${candidate} is not newer than ${base}`);
-}
-
-export function nextVersion(base, candidate, requested) {
-	const rank = { patch: 1, minor: 2, major: 3 };
-	const pending = pendingBump(base, candidate);
-	return bump(
-		base,
-		!pending || rank[requested] > rank[pending] ? requested : pending,
-	);
 }
 
 function replaceExactlyOnce(text, pattern, replacement, file) {
@@ -103,54 +78,113 @@ export function updateVersions(root, version) {
 	}
 }
 
-export function updateChangelog(
-	root,
-	version,
-	previousVersion,
-	prNumber,
-	title,
-	date,
-) {
-	const file = `${root}/CHANGELOG.md`;
-	const text = readFileSync(file, "utf8");
-	const entry = `- #${prNumber}: ${title}`;
-	if (text.includes(entry)) return;
-	const escapedPrevious = previousVersion.replace(/\./g, "\\.");
-	const previousHeading = new RegExp(`^## ${escapedPrevious} - .*$`, "m");
-	if (previousVersion !== version && previousHeading.test(text)) {
-		writeFileSync(
-			file,
-			text.replace(previousHeading, `## ${version} - ${date}\n\n${entry}`),
-		);
-		return;
-	}
-	const heading = new RegExp(`^## ${version.replace(/\./g, "\\.")} - .*$`, "m");
-	const match = heading.exec(text);
-	if (!match) throw new Error(`CHANGELOG.md has no ${version} release entry`);
-	const index = match.index + match[0].length;
-	writeFileSync(
-		file,
-		`${text.slice(0, index)}\n\n${entry}${text.slice(index)}`,
+const bumps = ["patch", "minor", "major"];
+
+export function releaseBump(labels) {
+	const names = labels.map((label) => label.name ?? label);
+	return bumps.findLast((kind) => names.includes(`release:${kind}`)) ?? null;
+}
+
+export function candidateBump(candidate) {
+	return candidate.reduce(
+		(kind, pr) =>
+			bumps.indexOf(pr.bump) > bumps.indexOf(kind) ? pr.bump : kind,
+		null,
 	);
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-	const [base, requested, prNumber, title] = process.argv.slice(2);
-	if (!base || !requested || !prNumber || !title)
-		throw new Error(
-			"usage: release-version.mjs BASE_VERSION BUMP PR_NUMBER PR_TITLE",
-		);
-	const root = process.cwd();
-	const previous = releaseVersion(root);
-	const version = nextVersion(base, previous, requested);
+export function releasedPullRequests(changelog) {
+	return new Set(
+		[...changelog.matchAll(/^- #(\d+):/gm)].map((match) => Number(match[1])),
+	);
+}
+
+// Every labelled PR waiting for a release, newest first. A PR waits when its
+// merge commit is on main after the last tag and the changelog does not list
+// it yet, so a run that was cancelled or skipped loses nothing.
+export function releaseCandidate(pullRequests, unreleasedCommits, changelog) {
+	const unreleased = new Set(unreleasedCommits);
+	const released = releasedPullRequests(changelog);
+	return pullRequests
+		.map((pr) => ({ ...pr, bump: releaseBump(pr.labels) }))
+		.filter(
+			(pr) =>
+				pr.bump &&
+				unreleased.has(pr.mergeCommit?.oid) &&
+				!released.has(pr.number),
+		)
+		.sort((a, b) => b.mergedAt.localeCompare(a.mergedAt) || b.number - a.number)
+		.map(({ number, title, bump }) => ({ number, title, bump }));
+}
+
+export function addReleaseSection(changelog, version, date, candidate) {
+	if (
+		new RegExp(`^## ${version.replace(/\./g, "\\.")} - `, "m").test(changelog)
+	)
+		throw new Error(`CHANGELOG.md already has a ${version} section`);
+	const entries = candidate.map((pr) => `- #${pr.number}: ${pr.title}`);
+	const section = `## ${version} - ${date}\n\n${entries.join("\n")}\n`;
+	const next = /^## /m.exec(changelog);
+	if (!next) return `${changelog.trimEnd()}\n\n${section}`;
+	return `${changelog.slice(0, next.index)}${section}\n${changelog.slice(next.index)}`;
+}
+
+// Rebuilds the release candidate on top of main. Returns the candidate version,
+// or null when no labelled PR is waiting.
+export function prepareRelease(root, pullRequests, unreleasedCommits, date) {
+	const file = `${root}/CHANGELOG.md`;
+	const changelog = readFileSync(file, "utf8");
+	const candidate = releaseCandidate(
+		pullRequests,
+		unreleasedCommits,
+		changelog,
+	);
+	if (candidate.length === 0) return null;
+	const version = bump(releaseVersion(root), candidateBump(candidate));
 	updateVersions(root, version);
-	updateChangelog(
-		root,
-		version,
-		previous,
-		prNumber,
-		title,
+	writeFileSync(file, addReleaseSection(changelog, version, date, candidate));
+	return version;
+}
+
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+	const run = (command, ...args) =>
+		execFileSync(command, args, { encoding: "utf8" }).trim();
+	const tag = run(
+		"git",
+		"describe",
+		"--tags",
+		"--abbrev=0",
+		"--match",
+		"v[0-9]*",
+	);
+	// A day of slack keeps the search a superset; the commit range is exact.
+	const since = new Date(
+		Date.parse(run("git", "log", "-1", "--format=%cI", tag)) - 86_400_000,
+	)
+		.toISOString()
+		.replace(/\.\d+Z$/, "Z");
+	const pullRequests = JSON.parse(
+		run(
+			"gh",
+			"pr",
+			"list",
+			"--base",
+			"main",
+			"--state",
+			"merged",
+			"--search",
+			`merged:>=${since}`,
+			"--limit",
+			"1000",
+			"--json",
+			"number,title,labels,mergeCommit,mergedAt",
+		),
+	);
+	const version = prepareRelease(
+		process.cwd(),
+		pullRequests,
+		run("git", "rev-list", `${tag}..HEAD`).split("\n"),
 		new Date().toISOString().slice(0, 10),
 	);
-	process.stdout.write(`${version}\n`);
+	if (version) process.stdout.write(`${version}\n`);
 }
