@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1 - 2026-09-27
+
+- #121: fix(agent-workflow): keep controller background work in the turn
+
 ## 0.11.0 - 2026-09-27
 
 - #118: feat(agent-workflow): add Claude entrypoints for ticket orchestration skills
