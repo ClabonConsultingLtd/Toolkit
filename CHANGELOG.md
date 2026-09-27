@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0 - 2026-09-27
+
+- #110: Fix run-as-script check, allowedHours arrays, and handoff --env-file
+
 ## 0.9.1 - 2026-09-27
 
 - #107: fix(release): rebuild the release candidate from every labelled PR
