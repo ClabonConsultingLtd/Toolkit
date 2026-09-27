@@ -6,10 +6,13 @@
 4. Add exactly one release label to a product PR before merging it into `main`:
    `release:patch`, `release:minor`, or `release:major`. Unlabelled changes do
    not create a release candidate.
-5. After the merge, GitHub Actions creates or updates one `release/next` pull
-   request. It updates all distributable package versions and Python lockfiles in
-   lockstep, and records the merged PR number and title in `CHANGELOG.md`. If
-   several labelled PRs merge first, it keeps the greatest requested bump.
+5. After every merge into `main`, GitHub Actions rebuilds one `release/next`
+   pull request from `main`. The candidate lists every labelled PR merged since
+   the last `vX.Y.Z` tag that `CHANGELOG.md` does not already record, newest
+   first, and takes the greatest requested bump. It updates all distributable
+   package versions and Python lockfiles in lockstep. Because each run rebuilds
+   the whole candidate, a cancelled or skipped run loses nothing: the next run
+   picks the PR up, and rerunning adds no duplicate entries.
 6. Review and merge that generated release PR. GitHub Actions then creates the
    immutable `vX.Y.Z` tag on its merge commit and refuses to move an existing tag.
    This repo-wide tag is the reference a consuming repo pins with
@@ -17,13 +20,13 @@
    package's README).
 7. Publish only packages whose tests and documentation describe their current behavior.
 
-If `Prepare release` fails while rebasing an existing `release/next` candidate,
-review the failed run and confirm the candidate branch and pull request are still
-open. Once the workflow fix is on `main`, use a newly merged PR with exactly one
-release label to trigger preparation again. Do not rerun the old workflow run:
+If `Prepare release` fails, fix the cause on `main`. The next merge into `main`
+rebuilds the candidate from scratch. Do not rerun the old workflow run:
 GitHub reruns it with the original event's commit, ref, and workflow version.
-Review the updated candidate diff and changelog before merging the release PR;
-do not hand-edit package versions to recover it. See GitHub's
+The candidate is regenerated on every run, so edits pushed to `release/next` by
+hand are discarded. Review the updated candidate diff and changelog before
+merging the release PR; do not hand-edit package versions to recover it. See
+GitHub's
 [rerun documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
 
 No release should include runtime artifacts, credentials, generated images, models, provider transcripts, or local state.

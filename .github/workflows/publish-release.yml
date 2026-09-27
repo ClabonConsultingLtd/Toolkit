@@ -7,8 +7,10 @@ on:
 permissions:
   contents: write
 
+# Only the release PR's own merge may join the group: GitHub cancels the older
+# pending run when another joins, and skipped runs would displace a real one.
 concurrency:
-  group: toolkit-release
+  group: ${{ github.event.pull_request.merged && github.event.pull_request.head.ref == 'release/next' && 'toolkit-publish-release' || format('toolkit-publish-release-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -21,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
       - id: version
         name: Validate the lockstep release version
