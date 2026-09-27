@@ -106,15 +106,20 @@ pnpm ticket-batch ticket-batch.json --dry-run
 
 Normal execution launches one ticket, waits for its command to exit, re-reads its status, and proceeds only when it equals `completeStatus` (default: `done`). It writes a resumable `.toolkit/ticket-batch-state.json` beside the manifest by default. The batch stops at the first launch failure or unchanged status; `--continue-on-failure` and `--max N` are explicit opt-ins.
 
-## Codex orchestration with Paseo
+## Ticket orchestration with Paseo
 
-The `codex/skills/orchestrate-tickets` integration coordinates an explicit batch of
-GitHub issues using Claude workers and Codex review. It retains the existing
-Markdown and GitHub command launchers. Prerequisites are Node 24+, authenticated
-`gh`, a persistent Toolkit checkout, and Paseo MCP connected to Codex with both
-Codex and Claude available.
+The `orchestrate-tickets` skill coordinates an explicit batch of GitHub issues
+using this controller's own review and Claude or Codex workers. It retains the
+existing Markdown and GitHub command launchers. Prerequisites are Node 24+,
+authenticated `gh`, a persistent Toolkit checkout, and Paseo MCP connected to
+the controller's own provider (Claude or Codex) with both Codex and Claude
+available for worker dispatch.
 
-Install the skill by symlinking it from your persistent Toolkit checkout:
+The `claude/skills/orchestrate-tickets` and `codex/skills/orchestrate-tickets`
+directories are kept byte-identical (a test enforces this), so which one you
+install only decides which provider runs the controller itself; per-ticket
+worker dispatch is unaffected either way. Install the matching directory by
+symlinking it from your persistent Toolkit checkout — for Codex:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
@@ -122,12 +127,32 @@ ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/orchestrate-tickets
   "${CODEX_HOME:-$HOME/.codex}/skills/orchestrate-tickets"
 ```
 
+or for Claude Code, symlinked into the consuming project (`.claude/skills` is
+project-scoped, unlike `${CODEX_HOME:-$HOME/.codex}/skills`):
+
+```bash
+mkdir -p .claude/skills
+ln -s /absolute/Toolkit/packages/agent-workflow/claude/skills/orchestrate-tickets \
+  .claude/skills/orchestrate-tickets
+```
+
 Keep that checkout in place: the skill's helper imports the package's source.
-Restart your Codex session to discover a newly installed skill, or explicitly
-provide its absolute SKILL.md path to an existing session.
+Restart your Claude Code or Codex session to discover a newly installed skill,
+or explicitly provide its absolute SKILL.md path to an existing session.
+
+To make the recurring intake schedule itself run under a Claude controller
+instead of the historical Codex default, set `controllerProvider` (and
+optionally `controllerThinkingOptionId`) in `toolkit-intake.json` — see
+[Repository intake settings](#repository-intake-settings). `schedule-prompt`
+then names the matching skill tree's absolute paths automatically. A one-off
+batch's own half-hourly schedule instead reuses whichever provider the
+initiating session is already running under; see
+[Scheduled continuation](codex/skills/orchestrate-tickets/SKILL.md#scheduled-continuation).
 
 To update after a Toolkit release, resolve the installed skill symlink and update
-the checkout it actually points into to the release tag (with a clean checkout):
+the checkout it actually points into to the release tag (with a clean checkout);
+the same recipe applies to a `.claude/skills/orchestrate-tickets` install by
+substituting that path for the Codex one shown here:
 
 ```bash
 node -p 'require("node:fs").realpathSync(process.argv[1])' \
@@ -144,9 +169,9 @@ consuming repo that vendors this package should also update its pin to the same
 tag with `node cli.mjs pin agent-workflow vX.Y.Z`, then run
 `node cli.mjs sync agent-workflow` from its installed `toolkit-sync` copy (see
 `packages/toolkit-sync/README.md`). A vendored update does not update a separate
-global skill symlink. Restart the Codex session or regenerate the schedule prompt
-(see [Schedule prompt](#schedule-prompt)) so it resolves the updated skill and
-helper paths.
+global skill symlink. Restart the controller's session or regenerate the
+schedule prompt (see [Schedule prompt](#schedule-prompt)) so it resolves the
+updated skill and helper paths.
 
 ### Repository intake settings
 
@@ -179,6 +204,15 @@ explicit authorization for scheduled approval and merging. `codexWorkerFullAcces
 true` authorizes the controller to launch Codex workers in `full-access` when the
 Codex sandbox preflight fails; without it, those reservations are blocked with
 the sandbox error recorded as the reason.
+
+`controllerProvider` (`"claude/<model>"` or `"codex/<model>"`, default
+`"codex/gpt-6-sol"`) and `controllerThinkingOptionId` (default `"medium"`) name
+the provider/model that should run the recurring intake schedule itself, not
+any worker's provider — worker dispatch is unaffected and continues to pick
+Claude or Codex per ticket from the catalogs passed to `reserve`. `schedule-prompt`
+reads `controllerProvider` to decide which installed skill tree (`claude/` or
+`codex/`) its generated paths point at; create the actual Paseo schedule with a
+matching `--provider`/`--thinking` pair.
 
 `selfAuthoredMerge: "comment-review"` is for setups where the controller and
 its workers share one GitHub account. GitHub never lets an account approve a
@@ -226,18 +260,21 @@ Use $orchestrate-tickets to resume batch exports in /absolute/project.
 ```
 
 Alternatively supply a manifest shaped like `examples/orchestration-batch.json`.
-The skill fills checkout, base branch and initiating Codex model from the live
-session. State lives at `.toolkit/orchestration/<batch-id>.json` in the stable
-consuming checkout; keep this directory ignored. Run `pnpm orchestrate` from this
-package, or `node src/orchestration-cli.mjs`, for the helper protocol documented in
-the skill's `references/protocol.md`. Commands use JSON request files or stdin;
-Paseo tool calls remain the Codex skill's responsibility.
+The skill fills checkout, base branch and the initiating session's own model
+(recorded as `codexModel` for batch audit metadata, regardless of which
+provider that session actually runs) from the live session. State lives at
+`.toolkit/orchestration/<batch-id>.json` in the stable consuming checkout; keep
+this directory ignored. Run `pnpm orchestrate` from this package, or
+`node src/orchestration-cli.mjs`, for the helper protocol documented in the
+skill's `references/protocol.md`. Commands use JSON request files or stdin;
+Paseo tool calls remain the calling skill's responsibility.
 
 Defaults: three isolated Claude worktrees, Auto permission mode, two review/fix
-cycles per ticket, and Codex reconciliation every 30 minutes from 08:00 through
-19:30 UTC. New Paseo schedules for orchestration, intake, triage, and reporting
-use `codex/gpt-6-sol` with medium reasoning. Existing schedules retain their
-settings until explicitly changed. An authorized scheduled intake controller may
+cycles per ticket, and controller reconciliation every 30 minutes from 08:00
+through 19:30 UTC. New Paseo schedules for orchestration, intake, triage, and
+reporting default to `codex/gpt-6-sol` with medium reasoning unless configured
+otherwise (see `controllerProvider` above for the intake schedule). Existing
+schedules retain their settings until explicitly changed. An authorized scheduled intake controller may
 approve and merge an exact linked, independently reviewed PR when GitHub permits
 its approval and all required checks and reviews pass. Independent batch
 schedules and Claude workers do not approve or merge. Only a verified merged PR lets
@@ -260,18 +297,28 @@ consuming repository explicitly authorizes it and GitHub permits it.
 ## Triage-only sweeps with Paseo
 
 `orchestrate-tickets` only ever acts on issues already labeled `ready-for-agent`.
-`codex/skills/triage-tickets` is the lighter, independent counterpart that sweeps
+`triage-tickets` is the lighter, independent counterpart that sweeps
 unlabeled, `needs-triage`, and stale-`needs-info` issues into that state to begin
 with, applying the interactive mattpocock `triage` skill's judgment. It runs on
 its own schedule (default `*/30 8-19 * * *` UTC), against the same persistent
 checkout, and never opens a Paseo worktree or launches an implementation agent —
 that boundary stays `orchestrate-tickets`'s job once an issue reaches
-`ready-for-agent`. Install it the same way:
+`ready-for-agent`. `claude/skills/triage-tickets` and `codex/skills/triage-tickets`
+are kept byte-identical; install the matching directory the same way as
+`orchestrate-tickets`:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
 ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/triage-tickets \
   "${CODEX_HOME:-$HOME/.codex}/skills/triage-tickets"
+```
+
+or for Claude Code:
+
+```bash
+mkdir -p .claude/skills
+ln -s /absolute/Toolkit/packages/agent-workflow/claude/skills/triage-tickets \
+  .claude/skills/triage-tickets
 ```
 
 It reads the label vocabulary from the consuming repo's own
@@ -295,7 +342,7 @@ grills and never launches implementation.
 `orchestrate-tickets` writes rich state — fix-cycle counts, blocked reasons,
 now a per-transition `updatedAt` timestamp — but nothing previously
 summarized it for a human between the real-time blocker surfacing that
-happens mid-run. `codex/skills/report-tickets` is a separate, read-only
+happens mid-run. `report-tickets` is a separate, read-only
 skill that turns that state, plus Paseo's `get_agent_activity`/`list_agents`,
 into a periodic digest: tickets completed/in-flight/blocked-on-you since the
 last digest, fix cycles nearing the two-cycle cap, token/turn cost per
@@ -305,12 +352,22 @@ threshold (default 24h). It also lists merged tickets whose worktrees and
 agents can be archived; archiving is left to the user. It never mutates `orchestrate-tickets`'s batch
 state, creates a worktree, or launches a worker, and it runs on its own
 schedule (default `*/30 8-19 * * *` UTC), independent of both
-`orchestrate-tickets` and `triage-tickets`. Install it the same way:
+`orchestrate-tickets` and `triage-tickets`. `claude/skills/report-tickets` and
+`codex/skills/report-tickets` are kept byte-identical; install the matching
+directory the same way:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
 ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/report-tickets \
   "${CODEX_HOME:-$HOME/.codex}/skills/report-tickets"
+```
+
+or for Claude Code:
+
+```bash
+mkdir -p .claude/skills
+ln -s /absolute/Toolkit/packages/agent-workflow/claude/skills/report-tickets \
+  .claude/skills/report-tickets
 ```
 
 Run `pnpm report-tickets /absolute/checkout` from this package, or
