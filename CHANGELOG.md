@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.8.1 - 2026-09-27
+## 0.9.0 - 2026-09-27
+
+- #101: feat(agent-workflow): overlay convention and handoff CLI parity
 
 - #97: fix(agent-workflow): warn scheduled controllers off loop-only wakeup tools
 
