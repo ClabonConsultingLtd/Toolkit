@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1 - 2026-09-27
+
+- #113: Get pnpm lint and typecheck passing on main, run them in CI, split the changelog
+
 ## 0.10.0 - 2026-09-27
 
 - #110: Fix run-as-script check, allowedHours arrays, and handoff --env-file
