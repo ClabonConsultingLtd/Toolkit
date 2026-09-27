@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.8.0 - 2026-09-26
+## 0.9.0 - 2026-09-27
+
+- #101: feat(agent-workflow): overlay convention and handoff CLI parity
+
+- #97: fix(agent-workflow): warn scheduled controllers off loop-only wakeup tools
 
 - #95: feat(agent-workflow): opt-in comment review for self-authored controller merges
 
