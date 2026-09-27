@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
+	DEFAULT_CONTROLLER_PROVIDER,
+	DEFAULT_CONTROLLER_THINKING_OPTION_ID,
+	normalizeControllerProvider,
 	normalizeExcludeTickets,
 	normalizeRequiredChecks,
 	normalizeSpecLabels,
@@ -113,6 +116,16 @@ function configuredPolicy(anchor, cwd, policy, input) {
 		count: input.count,
 		cron: input.cron ?? policy?.cron ?? "*/30 8-19 * * *",
 		timezone: input.timezone ?? policy?.timezone ?? "UTC",
+		// The controller's own scheduled runtime, not a worker's provider: this
+		// keeps the shared intake schedule on whichever provider is configured
+		// to run it, defaulting to the historical Codex runtime when unset.
+		controllerProvider: input.controllerProvider
+			? normalizeControllerProvider(input.controllerProvider)
+			: (policy?.controllerProvider ?? DEFAULT_CONTROLLER_PROVIDER),
+		controllerThinkingOptionId:
+			input.controllerThinkingOptionId ??
+			policy?.controllerThinkingOptionId ??
+			DEFAULT_CONTROLLER_THINKING_OPTION_ID,
 		excludeTickets: normalizeExcludeTickets(
 			input.excludeTickets ?? policy?.excludeTickets ?? [],
 		),

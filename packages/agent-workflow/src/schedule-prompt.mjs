@@ -1,18 +1,33 @@
 import { join, resolve } from "node:path";
-import { readRepositoryIntakeConfig } from "./intake-config.mjs";
+import {
+	DEFAULT_CONTROLLER_PROVIDER,
+	readRepositoryIntakeConfig,
+} from "./intake-config.mjs";
 import { intakePath, readIntake } from "./ticket-intake.mjs";
 
-const skillDirectory = resolve(
-	import.meta.dirname,
-	"..",
-	"codex",
-	"skills",
-	"orchestrate-tickets",
-);
+// Which installed skill tree (claude/ or codex/) the generated prompt should
+// point at: whichever provider is configured to run this controller itself,
+// not the provider any individual worker gets dispatched to. The two skill
+// trees are kept byte-identical, so this only changes which absolute paths
+// the prompt names.
+export function controllerProviderName(controllerProvider) {
+	const name = String(controllerProvider ?? DEFAULT_CONTROLLER_PROVIDER).split(
+		"/",
+	)[0];
+	return name === "claude" ? "claude" : "codex";
+}
 
-export function schedulePaths(checkout) {
+export function schedulePaths(checkout, settings) {
 	const cwd = resolve(checkout),
 		stateDirectory = join(cwd, ".toolkit", "orchestration");
+	const resolvedSettings = settings ?? promptSettings(cwd);
+	const skillDirectory = resolve(
+		import.meta.dirname,
+		"..",
+		controllerProviderName(resolvedSettings.controllerProvider),
+		"skills",
+		"orchestrate-tickets",
+	);
 	return {
 		checkout: cwd,
 		skill: join(skillDirectory, "SKILL.md"),
@@ -40,8 +55,9 @@ function promptSettings(cwd) {
 // Canonical prompt for the shared intake schedule. Keep it free of timestamps,
 // counts and other runtime values so a live prompt can be compared exactly.
 export function schedulePrompt(checkout) {
-	const paths = schedulePaths(checkout);
-	const settings = promptSettings(paths.checkout);
+	const cwd = resolve(checkout);
+	const settings = promptSettings(cwd);
+	const paths = schedulePaths(cwd, settings);
 	const helper = `node ${paths.intakeHelper}`;
 	const workerMode = settings.codexWorkerFullAccess
 		? "This schedule authorizes `full-access` for Codex workers only when that preflight fails; record the sandbox error and the fallback in the run report."

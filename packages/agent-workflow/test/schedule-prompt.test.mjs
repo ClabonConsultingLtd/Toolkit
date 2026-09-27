@@ -130,10 +130,55 @@ test("new config fields are validated", (t) => {
 		["codexWorkerFullAccess", "yes"],
 		["selfAuthoredMerge", true],
 		["selfAuthoredMerge", "approve"],
+		["controllerProvider", ""],
+		["controllerProvider", "gpt-6-sol"],
+		["controllerProvider", "openai/gpt-6-sol"],
+		["controllerProvider", 3],
+		["controllerThinkingOptionId", ""],
+		["controllerThinkingOptionId", 3],
 	]) {
 		const cwd = checkout(t, { ...base, [field]: value });
 		assert.throws(() => readRepositoryIntakeConfig(cwd), new RegExp(field));
 	}
+});
+
+test("a claude controllerProvider points the schedule prompt at the claude skill tree", (t) => {
+	const cwd = checkout(t);
+	const codexPrompt = schedulePrompt(cwd);
+	const codexPaths = schedulePaths(cwd);
+	assert.match(
+		codexPaths.skill,
+		/\/codex\/skills\/orchestrate-tickets\/SKILL\.md$/,
+	);
+
+	writeFileSync(
+		join(cwd, "toolkit-intake.json"),
+		JSON.stringify({
+			...base,
+			controllerProvider: "claude/opus",
+			controllerThinkingOptionId: "high",
+		}),
+	);
+	const claudePrompt = schedulePrompt(cwd);
+	const claudePaths = schedulePaths(cwd);
+	assert.match(
+		claudePaths.skill,
+		/\/claude\/skills\/orchestrate-tickets\/SKILL\.md$/,
+	);
+	for (const path of Object.values(claudePaths)) {
+		assert.ok(path.startsWith("/"), path);
+		assert.ok(claudePrompt.includes(path), path);
+	}
+	// The prompt text itself stays provider-neutral; only the named paths change.
+	assert.equal(claudePrompt.replace(/\/claude\//g, "/codex/"), codexPrompt);
+});
+
+test("controllerProvider persists across reconfiguration and defaults when unset", (t) => {
+	const cwd = checkout(t, null);
+	const { version, ...request } = base;
+	const configured = intakeCommand("configure", cwd, request);
+	assert.equal(configured.controllerProvider, "codex/gpt-6-sol");
+	assert.equal(configured.controllerThinkingOptionId, "medium");
 });
 
 test("the example config validates", (t) => {
