@@ -2,6 +2,10 @@
 
 ## 0.9.0 - 2026-09-27
 
+- #103: feat(toolkit-sync): add its own toolkit-manifest.json
+
+- #102: feat(image-to-3d): document TRELLIS traps, close two CLI gaps
+
 - #101: feat(agent-workflow): overlay convention and handoff CLI parity
 
 - #97: fix(agent-workflow): warn scheduled controllers off loop-only wakeup tools
