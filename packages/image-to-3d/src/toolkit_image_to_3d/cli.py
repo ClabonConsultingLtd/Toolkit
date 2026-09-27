@@ -38,6 +38,40 @@ def quota_error(error: str | None) -> bool:
     return "zerogpu quota" in text or "quota exhausted" in text or "rate limit" in text
 
 
+def read_env_file(path: Path) -> dict[str, str]:
+    """Parse simple KEY=VALUE lines from a .env file; never logged or printed."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key:
+            values[key] = value
+    return values
+
+
+def mesh_sanity(path: Path) -> tuple[int | None, bool | None]:
+    """Triangle count and watertight/manifold flag; None when trimesh isn't installed."""
+    try:
+        import trimesh
+    except ImportError:
+        return None, None
+    try:
+        mesh = trimesh.load(path, force="mesh")
+        return int(len(mesh.faces)), bool(mesh.is_watertight)
+    except Exception:
+        return None, None
+
+
 def resolve_queue_path(value: str, source_root: Path) -> Path:
     """Resolve a queue path and reject relative traversal outside source_root."""
     candidate = Path(value)
@@ -184,6 +218,15 @@ def parser() -> argparse.ArgumentParser:
         default="HF_TOKEN",
         help="environment variable containing the service token",
     )
+    result.add_argument(
+        "--env-file",
+        type=Path,
+        default=None,
+        help=(
+            "path to a .env file providing --token-env's variable when it is not "
+            "already set in the environment (default: .env in the current directory)"
+        ),
+    )
     result.add_argument("--space", default=DEFAULT_SPACE, help="Gradio Space name")
     result.add_argument("--resolution", default=DEFAULT_RESOLUTION)
     result.add_argument(
@@ -221,8 +264,12 @@ def main() -> None:
         raise SystemExit(str(exc)) from exc
 
     token = os.environ.get(args.token_env)
+    if not token:
+        env_path = args.env_file or Path.cwd() / ".env"
+        if env_path.exists():
+            token = read_env_file(env_path).get(args.token_env)
     if not args.dry_run and not token:
-        raise SystemExit(f"{args.token_env} is not set; set it or use --dry-run")
+        raise SystemExit(f"{args.token_env} is not set; set it, add it to a .env file, or use --dry-run")
 
     results: list[dict[str, Any]] = []
     for identifier, reference, model in records:
@@ -250,6 +297,9 @@ def main() -> None:
                 retry_delay=args.retry_delay,
             )
             status = "converted" if ok else "failed"
+        triangles = watertight = None
+        if status in ("converted", "skipped"):
+            triangles, watertight = mesh_sanity(model)
         result = {
             "id": identifier,
             "reference": str(reference),
@@ -258,6 +308,8 @@ def main() -> None:
             "size": size,
             "attempts": attempts,
             "error": error,
+            "triangles": triangles,
+            "watertight": watertight,
         }
         results.append(result)
         print(
