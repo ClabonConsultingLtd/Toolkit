@@ -32,5 +32,10 @@ Useful controls:
 - `--results results.json` chooses the per-run report destination.
 - `--ledger ledger.json` maintains a cumulative record keyed by queue ID.
 - `--space`, `--token-env`, `--resolution`, `--decimation-target`, `--texture-size`, `--retries`, and `--retry-delay` configure the service run.
+- `--env-file` reads `--token-env`'s variable from a `.env` file (`.env` in the current directory by default) when it isn't already set in the environment. The value is never logged or printed.
+
+## Mesh sanity in the report
+
+Install the optional `mesh` extra (`pip install toolkit-image-to-3d[mesh]`, or add `trimesh` to the environment) to populate `triangles` and `watertight` in the per-run report for every converted or already-existing output. Without it, both fields report `null` rather than failing the run — a converted output with `"watertight": false` still needs a repair or remesh stage before it's usable for rigging or physics; the report only says the service call succeeded.
 
 Per-run JSON reports and an optional cumulative ledger make resumed runs auditable without prescribing any environment categories, scheduling system, storage service, or directory layout.
