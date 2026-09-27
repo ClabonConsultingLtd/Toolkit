@@ -157,9 +157,10 @@ required check names, an optional `localVerificationCommand`, ticket numbers
 that must always be excluded, and optional `specLabels` naming labels that mark
 spec/umbrella issues selection must skip (issues with sub-issues are always skipped). The command is a relative `.mjs` path inside the
 stable checkout; it receives the PR number and current head SHA and must exit
-zero only for a complete local pass. The merge helper runs it at `ready` and
-`merge-ready`, so missing or stale evidence blocks both operations. Keep this
-file separate from the ignored
+zero only for a complete local pass. The merge helper runs it, and enforces
+`requiredChecks`, at `merge-ready` only, immediately before a controller merge;
+`ready` does not run either, so missing or stale evidence blocks the merge, not
+review completion. Keep this file separate from the ignored
 `.toolkit/orchestration/.intake/policy.json`, which holds the schedule ID,
 last observed pause state, and tick history. The live Paseo schedule determines
 whether intake is paused.

@@ -20,6 +20,7 @@ import {
 	reconcile,
 	renew,
 } from "../src/orchestration.mjs";
+import { requireNoReportedFailures } from "../src/orchestration-checks.mjs";
 import { execute } from "../src/orchestration-cli.mjs";
 import {
 	fallbackDependencies,
@@ -594,7 +595,9 @@ test("CLI does not complete open PR; rejects failing checks and invalidates chan
 	);
 	execute("link-pr", path, { token, number: 7, pr: 17 }, options);
 	execute("review", path, { token, number: 7, evidence: "tests" }, options);
-	pr.statusCheckRollup = [{ status: "IN_PROGRESS" }];
+	pr.statusCheckRollup = [
+		{ name: "ci", status: "COMPLETED", conclusion: "FAILURE" },
+	];
 	assert.throws(
 		() =>
 			execute(
@@ -603,9 +606,11 @@ test("CLI does not complete open PR; rejects failing checks and invalidates chan
 				{ token, number: 7, evidence: "diff", reviewedHead: "abc" },
 				options,
 			),
-		/pending/,
+		/reported check failures: ci/,
 	);
-	pr.statusCheckRollup = [];
+	// A check that is merely still running (not yet a reported failure) does
+	// not block ready.
+	pr.statusCheckRollup = [{ status: "IN_PROGRESS" }];
 	execute(
 		"ready",
 		path,
@@ -621,7 +626,7 @@ test("CLI does not complete open PR; rejects failing checks and invalidates chan
 	execute("sync", path, { token }, options);
 	assert.match(execute("status", path).tickets[7].reason, /without merge/);
 });
-test("required checks gate ready and controller merge", (t) => {
+test("ready tolerates a required check that has not reported yet; controller merge still requires it", (t) => {
 	const { path, token } = fixture(t);
 	const pr = pull();
 	const options = {
@@ -661,23 +666,25 @@ test("required checks gate ready and controller merge", (t) => {
 			options,
 		);
 	const pass = (name) => ({ name, status: "COMPLETED", conclusion: "SUCCESS" });
-	pr.statusCheckRollup = [pass("ci")];
-	assert.throws(ready, /missing required checks: smoke/);
-	pr.statusCheckRollup = [pass("ci"), { name: "smoke", status: "IN_PROGRESS" }];
-	assert.throws(ready, /pending or unsuccessful checks: smoke/);
+	// A required check that only runs once the PR leaves draft is still
+	// missing here; ready must not deadlock on it.
 	pr.statusCheckRollup = [
 		pass("ci"),
 		{ name: "smoke", status: "COMPLETED", conclusion: "FAILURE" },
 	];
-	assert.throws(ready, /unsuccessful checks: smoke/);
+	assert.throws(ready, /reported check failures: smoke/);
 	pr.statusCheckRollup = [
 		pass("ci"),
-		{ context: "smoke", state: "SUCCESS" },
 		{ name: "extra", status: "COMPLETED", conclusion: "FAILURE" },
 	];
-	assert.throws(ready, /unsuccessful checks: extra/);
-	pr.statusCheckRollup = [pass("ci"), { context: "smoke", state: "SUCCESS" }];
+	assert.throws(ready, /reported check failures: extra/);
+	pr.statusCheckRollup = [pass("ci")];
 	ready();
+	assert.throws(
+		() => execute("merge-ready", path, { token, number: 7 }, options),
+		/missing required checks: smoke/,
+	);
+	pr.statusCheckRollup = [pass("ci"), { context: "smoke", state: "SUCCESS" }];
 	assert.equal(
 		execute("merge-ready", path, { token, number: 7 }, options).mergeReady,
 		true,
@@ -697,7 +704,7 @@ test("required checks gate ready and controller merge", (t) => {
 		/missing required checks: smoke/,
 	);
 });
-test("repository local gate rejects missing, failing, and stale evidence at ready and merge", (t) => {
+test("repository local gate and requiredChecks apply at controller merge, not ready", (t) => {
 	const dir = mkdtempSync(join(tmpdir(), "local-gate-"));
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
 	const path = join(dir, "state.json");
@@ -721,12 +728,11 @@ test("repository local gate rejects missing, failing, and stale evidence at read
 	execute("init", path, { ...manifest(), cwd: dir });
 	const { token } = execute("acquire", path);
 	const pr = pull();
+	// The draft-only checks have not run yet, and no evidence file exists for
+	// the local gate; ready must not deadlock on either.
 	pr.statusCheckRollup = [
-		"ci",
-		"local/full",
-		"local/smoke",
-		"local/visual",
-	].map((name) => ({ name, status: "COMPLETED", conclusion: "SUCCESS" }));
+		{ name: "ci", status: "COMPLETED", conclusion: "SUCCESS" },
+	];
 	const options = { github: () => ({ snapshot, pr: () => pr }) };
 	execute("reserve", path, { token, number: 7, models }, options);
 	execute(
@@ -737,36 +743,35 @@ test("repository local gate rejects missing, failing, and stale evidence at read
 	);
 	execute("link-pr", path, { token, number: 7, pr: 17 }, options);
 	execute("review", path, { token, number: 7, evidence: "review" }, options);
-	const ready = () =>
-		execute(
-			"ready",
-			path,
-			{ token, number: 7, evidence: "review", reviewedHead: "abc" },
-			options,
-		);
-	assert.throws(ready, /local verification gate refused/);
+	execute(
+		"ready",
+		path,
+		{ token, number: 7, evidence: "review", reviewedHead: "abc" },
+		options,
+	);
+	const mergeReady = () =>
+		execute("merge-ready", path, { token, number: 7 }, options);
+	assert.throws(mergeReady, /missing required checks/);
+	pr.statusCheckRollup = [
+		"ci",
+		"local/full",
+		"local/smoke",
+		"local/visual",
+	].map((name) => ({ name, status: "COMPLETED", conclusion: "SUCCESS" }));
+	assert.throws(mergeReady, /local verification gate refused/);
 	writeFileSync(evidence, "wrong");
-	assert.throws(ready, /local verification gate refused/);
+	assert.throws(mergeReady, /local verification gate refused/);
 	writeFileSync(evidence, "abc");
 	pr.statusCheckRollup[1].conclusion = "SKIPPED";
-	assert.throws(ready, /unsuccessful checks: local\/full/);
+	assert.throws(mergeReady, /unsuccessful checks: local\/full/);
 	pr.statusCheckRollup[1].conclusion = "SUCCESS";
-	ready();
+	assert.equal(mergeReady().mergeReady, true);
 	writeFileSync(evidence, "wrong");
-	assert.throws(
-		() => execute("merge-ready", path, { token, number: 7 }, options),
-		/local verification gate refused/,
-	);
+	assert.throws(mergeReady, /local verification gate refused/);
 	writeFileSync(evidence, "abc");
-	assert.equal(
-		execute("merge-ready", path, { token, number: 7 }, options).mergeReady,
-		true,
-	);
+	assert.equal(mergeReady().mergeReady, true);
 	pr.headRefOid = "def";
-	assert.throws(
-		() => execute("merge-ready", path, { token, number: 7 }, options),
-		/review must match current open PR head/,
-	);
+	assert.throws(mergeReady, /review must match current open PR head/);
 });
 test("controller merge fails closed without configured or readable required checks", (t) => {
 	const { path, token } = fixture(t);
@@ -987,4 +992,79 @@ test("merge state gates ready and merge-ready; base updates keep fix cycles", (t
 	ready();
 	assert.equal(mergeReady().mergeReady, true);
 	assert.equal(execute("status", path).tickets[7].fixCycles, 2);
+});
+
+test("requireNoReportedFailures ignores missing and pending checks, blocks only reported failures", () => {
+	assert.throws(
+		() => requireNoReportedFailures(null),
+		/PR checks are unavailable/,
+	);
+	assert.doesNotThrow(() => requireNoReportedFailures([]));
+	assert.doesNotThrow(() =>
+		requireNoReportedFailures([
+			{ name: "ci", status: "COMPLETED", conclusion: "SUCCESS" },
+			{ name: "lint", status: "COMPLETED", conclusion: "NEUTRAL" },
+			// A check gated to run only once a PR leaves draft reports "skipped"
+			// while it is still a draft; that must not block ready.
+			{ name: "e2e", status: "COMPLETED", conclusion: "SKIPPED" },
+			// Still running, not yet a reported failure.
+			{ name: "slow", status: "IN_PROGRESS" },
+			{ name: "queued", status: "QUEUED" },
+			// A commit-status check pending is likewise not a reported failure.
+			{ context: "legacy", state: "PENDING" },
+			{ context: "legacy-ok", state: "SUCCESS" },
+		]),
+	);
+	assert.throws(
+		() =>
+			requireNoReportedFailures([
+				{ name: "ci", status: "COMPLETED", conclusion: "FAILURE" },
+			]),
+		/reported check failures: ci/,
+	);
+	assert.throws(
+		() => requireNoReportedFailures([{ context: "legacy", state: "FAILURE" }]),
+		/reported check failures: legacy/,
+	);
+});
+
+test("ready succeeds on a draft PR with checks skipped for draft; merge-ready still refuses the draft", (t) => {
+	const { path, token } = fixture(t);
+	const pr = pull();
+	pr.isDraft = true;
+	// A check guarded by `if: !draft` reports "skipped" while the PR is a
+	// draft; ready must not deadlock on it (issue: a required check that can
+	// only run once a PR leaves draft should not block review completion).
+	pr.statusCheckRollup = [
+		{ name: "ci", status: "COMPLETED", conclusion: "SUCCESS" },
+		{ name: "e2e", status: "COMPLETED", conclusion: "SKIPPED" },
+	];
+	const options = {
+		github: () => ({ snapshot, pr: () => pr, requiredStatusChecks: () => [] }),
+	};
+	execute("reserve", path, { token, number: 7, models }, options);
+	execute(
+		"attach",
+		path,
+		{ token, number: 7, workspaceId: "w", agentId: "a" },
+		options,
+	);
+	execute("link-pr", path, { token, number: 7, pr: 17 }, options);
+	execute("review", path, { token, number: 7, evidence: "tests" }, options);
+	execute(
+		"ready",
+		path,
+		{ token, number: 7, evidence: "diff", reviewedHead: "abc" },
+		options,
+	);
+	assert.equal(execute("status", path).tickets[7].status, "awaiting_merge");
+	assert.throws(
+		() => execute("merge-ready", path, { token, number: 7 }, options),
+		/PR is still a draft/,
+	);
+	pr.isDraft = false;
+	assert.equal(
+		execute("merge-ready", path, { token, number: 7 }, options).mergeReady,
+		true,
+	);
 });
