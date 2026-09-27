@@ -1,9 +1,36 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { applyEdits, parseBlocks, prepareEdits } from "./blocks.mjs";
-import { readRepositoryHandoffConfig, withinAllowedHours } from "./handoff-config.mjs";
+import {
+	describeAllowedHours,
+	readRepositoryHandoffConfig,
+	withinAllowedHours,
+} from "./handoff-config.mjs";
 import { parseTask, validatePath } from "./task-file.mjs";
+
+// Simple KEY=VALUE lines, matching image-to-3d's --env-file; values are
+// never logged, printed, or written into any output file.
+export function parseEnvFile(text) {
+	const values = {};
+	for (const rawLine of text.split(/\r?\n/)) {
+		const line = rawLine.trim();
+		if (!line || line.startsWith("#")) continue;
+		const separator = line.indexOf("=");
+		if (separator === -1) continue;
+		const key = line.slice(0, separator).trim();
+		let value = line.slice(separator + 1).trim();
+		if (
+			value.length >= 2 &&
+			(value[0] === '"' || value[0] === "'") &&
+			value.at(-1) === value[0]
+		)
+			value = value.slice(1, -1);
+		if (key) values[key] = value;
+	}
+	return values;
+}
 export async function requestEdit(
 	fetcher,
 	url,
@@ -40,7 +67,7 @@ export async function requestEdit(
 	throw last;
 }
 export function promptFor(task, root) {
-	const section = (paths, label) =>
+	const section = (paths, _label) =>
 		[...paths]
 			.map((f) => {
 				validatePath(root, f);
@@ -112,9 +139,26 @@ export async function main(
 ) {
 	const [taskDir, ...flags] = args;
 	if (!taskDir)
-		throw new Error("usage: node handoff.mjs TASK_DIRECTORY [--dry-run]");
-	const root = resolve(env.TOOLKIT_ROOT ?? process.cwd()),
-		directory = resolve(taskDir),
+		throw new Error(
+			"usage: node handoff.mjs TASK_DIRECTORY [--dry-run] [--env-file PATH]",
+		);
+	const root = resolve(env.TOOLKIT_ROOT ?? process.cwd());
+	const envFileIndex = flags.indexOf("--env-file");
+	if (envFileIndex !== -1 && !flags[envFileIndex + 1])
+		throw new Error("--env-file requires a PATH");
+	let fileEnv = {};
+	if (envFileIndex !== -1) {
+		const envFilePath = resolve(flags[envFileIndex + 1]);
+		if (!existsSync(envFilePath))
+			throw new Error(`--env-file not found: ${envFilePath}`);
+		fileEnv = parseEnvFile(readFileSync(envFilePath, "utf8"));
+	} else {
+		const defaultEnvFile = resolve(root, ".env");
+		if (existsSync(defaultEnvFile))
+			fileEnv = parseEnvFile(readFileSync(defaultEnvFile, "utf8"));
+	}
+	env = { ...fileEnv, ...env };
+	const directory = resolve(taskDir),
 		task = parseTask(readFileSync(resolve(directory, "task.md"), "utf8"), root),
 		prompt = promptFor(task, root);
 	writeFileSync(
@@ -133,7 +177,7 @@ export async function main(
 		!withinAllowedHours(config.allowedHours)
 	)
 		throw new Error(
-			`handoff is outside its configured hours (UTC ${config.allowedHours.start}-${config.allowedHours.end} on ${config.allowedHours.days.join(", ")}); set TOOLKIT_HANDOFF_ALLOW_OFFHOURS=on to override`,
+			`handoff is outside its configured hours (${describeAllowedHours(config.allowedHours)}); set TOOLKIT_HANDOFF_ALLOW_OFFHOURS=on to override`,
 		);
 	if (env.TOOLKIT_HANDOFF_ENABLED !== "on")
 		throw new Error("TOOLKIT_HANDOFF_ENABLED must be on");
@@ -165,7 +209,10 @@ export async function main(
 		]);
 	return "Applied bounded handoff edits. Review the diff.";
 }
-if (import.meta.url === `file://${process.argv[1].replaceAll("\\", "/")}`)
+if (
+	process.argv[1] &&
+	import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+)
 	main()
 		.then(console.log)
 		.catch((error) => {

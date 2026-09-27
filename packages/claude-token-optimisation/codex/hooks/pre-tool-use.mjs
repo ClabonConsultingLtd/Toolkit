@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { commandKind } from "../../hooks/command-summary.mjs";
 
 function shellQuote(value) {
@@ -27,7 +28,10 @@ export function rewrite(input) {
 	};
 }
 
-if (import.meta.url === `file://${process.argv[1]?.replaceAll("\\", "/")}`) {
+if (
+	process.argv[1] &&
+	import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+) {
 	const chunks = [];
 	for await (const chunk of process.stdin) chunks.push(chunk);
 	try {

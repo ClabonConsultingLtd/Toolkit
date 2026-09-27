@@ -45,7 +45,7 @@ Example initialization manifest:
 }
 ```
 
-Use the same shape whether the user supplies a manifest or explicit issue numbers. Do not store tokens in issue comments or tracked files. State and temporary request files belong under the ignored .toolkit directory. Add that ignore entry in a consuming repo if absent.
+Use the same shape whether the user supplies a manifest or explicit issue numbers. Do not store tokens in issue comments or tracked files. State and temporary request files belong under `.toolkit`. Ignore it with `.toolkit/*` plus `!.toolkit/overlays/`, not a bare `.toolkit/` entry: a bare directory ignore also hides `.toolkit/overlays/`, which a consuming repo needs to keep committed (see `packages/toolkit-sync`'s README for the overlay convention), and a `.gitignore` directory pattern can't be negated for its children once the directory itself is ignored. Add that ignore entry in a consuming repo if absent.
 
 ## Recovery
 

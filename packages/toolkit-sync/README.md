@@ -163,6 +163,12 @@ local copy of a vendored skill then shrinks to just this overlay file plus
 whatever project config the skill itself reads (see, for example,
 `bounded-handoff`'s `SKILL.md` in `packages/agent-workflow`).
 
+Overlays are meant to be committed, so ignore `.toolkit` with `.toolkit/*`
+plus `!.toolkit/overlays/`, not a bare `.toolkit/` entry: a plain directory
+ignore also hides everything below it, including the overlays a repo needs
+to keep, and a `.gitignore` directory pattern can't be negated for its
+children once the directory itself is ignored.
+
 ## Non-goals
 
 - No npm/pnpm registry publishing — this is the file-pin mechanism only.

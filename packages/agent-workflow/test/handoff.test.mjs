@@ -9,7 +9,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { handoffEndpoint, main, promptFor, requestEdit } from "../src/handoff.mjs";
+import {
+	handoffEndpoint,
+	main,
+	promptFor,
+	requestEdit,
+} from "../src/handoff.mjs";
 
 function taskDirectory(root, taskMd) {
 	const directory = mkdtempSync(join(root, "task-"));
@@ -222,14 +227,21 @@ test("retries once with the applier's feedback before giving up", async () => {
 			calls === 1
 				? "not a block at all"
 				: "@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE";
-		return { ok: true, json: async () => ({ choices: [{ message: { content } }] }) };
+		return {
+			ok: true,
+			json: async () => ({ choices: [{ message: { content } }] }),
+		};
 	};
-	const result = await main([directory], {
-		TOOLKIT_ROOT: root,
-		TOOLKIT_HANDOFF_ENABLED: "on",
-		TOOLKIT_HANDOFF_API_URL: "http://localhost:1/x",
-		TOOLKIT_HANDOFF_MODEL: "m",
-	}, fetcher);
+	const result = await main(
+		[directory],
+		{
+			TOOLKIT_ROOT: root,
+			TOOLKIT_HANDOFF_ENABLED: "on",
+			TOOLKIT_HANDOFF_API_URL: "http://localhost:1/x",
+			TOOLKIT_HANDOFF_MODEL: "m",
+		},
+		fetcher,
+	);
 	assert.equal(calls, 2);
 	assert.equal(readFileSync(join(root, "a.ts"), "utf8"), "after\n");
 	assert.match(result, /Applied/);
@@ -320,11 +332,143 @@ test("refuses to run outside its configured hours unless overridden", async () =
 	const fetcher = fetcherReturning(
 		"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
 	);
-	await assert.rejects(main([directory], env, fetcher), /outside its configured hours/);
+	await assert.rejects(
+		main([directory], env, fetcher),
+		/outside its configured hours/,
+	);
 	const result = await main(
 		[directory],
 		{ ...env, TOOLKIT_HANDOFF_ALLOW_OFFHOURS: "on" },
 		fetcher,
 	);
 	assert.match(result, /Applied/);
+});
+
+test("loads unset variables from the default .env file in TOOLKIT_ROOT", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	writeFileSync(
+		join(root, ".env"),
+		'TOOLKIT_HANDOFF_ENABLED=on\nTOOLKIT_HANDOFF_API_URL=http://localhost:1/x\nTOOLKIT_HANDOFF_MODEL="m"\n',
+	);
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const fetcher = fetcherReturning(
+		"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
+	);
+	const result = await main([directory], { TOOLKIT_ROOT: root }, fetcher);
+	assert.match(result, /Applied/);
+});
+
+test("an already-set variable is not overridden by .env", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	writeFileSync(join(root, ".env"), "TOOLKIT_HANDOFF_MODEL=from-file\n");
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	let seenModel;
+	const fetcher = async (_, options) => {
+		seenModel = JSON.parse(options.body).model;
+		return {
+			ok: true,
+			json: async () => ({
+				choices: [
+					{
+						message: {
+							content:
+								"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
+						},
+					},
+				],
+			}),
+		};
+	};
+	await main(
+		[directory],
+		{
+			TOOLKIT_ROOT: root,
+			TOOLKIT_HANDOFF_ENABLED: "on",
+			TOOLKIT_HANDOFF_API_URL: "http://localhost:1/x",
+			TOOLKIT_HANDOFF_MODEL: "from-env",
+		},
+		fetcher,
+	);
+	assert.equal(seenModel, "from-env");
+});
+
+test("a missing default .env file is not an error", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const prompt = await main([directory, "--dry-run"], { TOOLKIT_ROOT: root });
+	assert.match(prompt, /Replace before/);
+});
+
+test("--env-file selects another file, and a missing one is an error", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	const envFile = join(root, "custom.env");
+	writeFileSync(
+		envFile,
+		"TOOLKIT_HANDOFF_ENABLED=on\nTOOLKIT_HANDOFF_API_URL=http://localhost:1/x\nTOOLKIT_HANDOFF_MODEL=m\n",
+	);
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const fetcher = fetcherReturning(
+		"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
+	);
+	const result = await main(
+		[directory, "--env-file", envFile],
+		{ TOOLKIT_ROOT: root },
+		fetcher,
+	);
+	assert.match(result, /Applied/);
+	await assert.rejects(
+		main(
+			[directory, "--env-file", join(root, "missing.env")],
+			{ TOOLKIT_ROOT: root },
+			fetcher,
+		),
+		/--env-file not found/,
+	);
+});
+
+test(".env values never appear in request.json, response.md, or the gate report", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	mkdirSync(join(root, "scripts"));
+	writeFileSync(
+		join(root, "scripts", "gate.mjs"),
+		"console.log(JSON.stringify(process.env)); process.exitCode = 0;\n",
+	);
+	writeFileSync(
+		join(root, "toolkit-handoff.json"),
+		JSON.stringify({ version: 1, gates: ["scripts/gate.mjs"] }),
+	);
+	writeFileSync(
+		join(root, ".env"),
+		"TOOLKIT_HANDOFF_ENABLED=on\nTOOLKIT_HANDOFF_API_URL=http://localhost:1/x\nTOOLKIT_HANDOFF_MODEL=m\nSUPER_SECRET_TOKEN=do-not-leak\n",
+	);
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const fetcher = fetcherReturning(
+		"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
+	);
+	await main([directory], { TOOLKIT_ROOT: root }, fetcher);
+	const request = readFileSync(join(directory, "request.json"), "utf8");
+	const response = readFileSync(join(directory, "response.md"), "utf8");
+	const report = readFileSync(join(directory, "result.md"), "utf8");
+	for (const output of [request, response, report])
+		assert.doesNotMatch(output, /do-not-leak/);
 });
