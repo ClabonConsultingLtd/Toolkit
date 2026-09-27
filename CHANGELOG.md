@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0 - 2026-09-27
+
+- #118: feat(agent-workflow): add Claude entrypoints for ticket orchestration skills
+
 ## 0.10.2 - 2026-09-27
 
 - #114: fix(agent-workflow): stop ready from requiring checks that only run once a PR leaves draft
