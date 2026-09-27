@@ -9,7 +9,6 @@
 	},
 	"scripts": {
 		"install-assets": "node install.mjs",
-		"typecheck": "tsc --noEmit",
 		"test": "node --test"
 	},
 	"devDependencies": {

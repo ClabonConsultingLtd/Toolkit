@@ -702,21 +702,48 @@ test("repository local gate rejects missing, failing, and stale evidence at read
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
 	const path = join(dir, "state.json");
 	const evidence = join(dir, "evidence.txt");
-	writeFileSync(join(dir, "gate.mjs"), `import { existsSync, readFileSync } from "node:fs";\nconst expected = existsSync("evidence.txt") ? readFileSync("evidence.txt", "utf8").trim() : "";\nif (expected !== process.argv[3]) process.exit(1);\n`);
-	writeFileSync(join(dir, "toolkit-intake.json"), JSON.stringify({
-		version: 1, repository: "example/project", baseBranch: "main", codexModel: "test-codex", count: 1,
-		requiredChecks: ["ci", "local/full", "local/smoke", "local/visual"], localVerificationCommand: "gate.mjs",
-	}));
+	writeFileSync(
+		join(dir, "gate.mjs"),
+		`import { existsSync, readFileSync } from "node:fs";\nconst expected = existsSync("evidence.txt") ? readFileSync("evidence.txt", "utf8").trim() : "";\nif (expected !== process.argv[3]) process.exit(1);\n`,
+	);
+	writeFileSync(
+		join(dir, "toolkit-intake.json"),
+		JSON.stringify({
+			version: 1,
+			repository: "example/project",
+			baseBranch: "main",
+			codexModel: "test-codex",
+			count: 1,
+			requiredChecks: ["ci", "local/full", "local/smoke", "local/visual"],
+			localVerificationCommand: "gate.mjs",
+		}),
+	);
 	execute("init", path, { ...manifest(), cwd: dir });
 	const { token } = execute("acquire", path);
 	const pr = pull();
-	pr.statusCheckRollup = ["ci", "local/full", "local/smoke", "local/visual"].map((name) => ({ name, status: "COMPLETED", conclusion: "SUCCESS" }));
+	pr.statusCheckRollup = [
+		"ci",
+		"local/full",
+		"local/smoke",
+		"local/visual",
+	].map((name) => ({ name, status: "COMPLETED", conclusion: "SUCCESS" }));
 	const options = { github: () => ({ snapshot, pr: () => pr }) };
 	execute("reserve", path, { token, number: 7, models }, options);
-	execute("attach", path, { token, number: 7, workspaceId: "w", agentId: "a" }, options);
+	execute(
+		"attach",
+		path,
+		{ token, number: 7, workspaceId: "w", agentId: "a" },
+		options,
+	);
 	execute("link-pr", path, { token, number: 7, pr: 17 }, options);
 	execute("review", path, { token, number: 7, evidence: "review" }, options);
-	const ready = () => execute("ready", path, { token, number: 7, evidence: "review", reviewedHead: "abc" }, options);
+	const ready = () =>
+		execute(
+			"ready",
+			path,
+			{ token, number: 7, evidence: "review", reviewedHead: "abc" },
+			options,
+		);
 	assert.throws(ready, /local verification gate refused/);
 	writeFileSync(evidence, "wrong");
 	assert.throws(ready, /local verification gate refused/);
@@ -726,11 +753,20 @@ test("repository local gate rejects missing, failing, and stale evidence at read
 	pr.statusCheckRollup[1].conclusion = "SUCCESS";
 	ready();
 	writeFileSync(evidence, "wrong");
-	assert.throws(() => execute("merge-ready", path, { token, number: 7 }, options), /local verification gate refused/);
+	assert.throws(
+		() => execute("merge-ready", path, { token, number: 7 }, options),
+		/local verification gate refused/,
+	);
 	writeFileSync(evidence, "abc");
-	assert.equal(execute("merge-ready", path, { token, number: 7 }, options).mergeReady, true);
+	assert.equal(
+		execute("merge-ready", path, { token, number: 7 }, options).mergeReady,
+		true,
+	);
 	pr.headRefOid = "def";
-	assert.throws(() => execute("merge-ready", path, { token, number: 7 }, options), /review must match current open PR head/);
+	assert.throws(
+		() => execute("merge-ready", path, { token, number: 7 }, options),
+		/review must match current open PR head/,
+	);
 });
 test("controller merge fails closed without configured or readable required checks", (t) => {
 	const { path, token } = fixture(t);
@@ -767,9 +803,12 @@ test("controller merge fails closed without configured or readable required chec
 		snapshot,
 		pr: () => pr,
 		requiredStatusChecks: () => {
-			throw Object.assign(new Error("GitHub denied the branch protection API"), {
-				code: "BRANCH_PROTECTION_UNAVAILABLE",
-			});
+			throw Object.assign(
+				new Error("GitHub denied the branch protection API"),
+				{
+					code: "BRANCH_PROTECTION_UNAVAILABLE",
+				},
+			);
 		},
 	});
 	assert.throws(

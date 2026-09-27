@@ -18,11 +18,19 @@
 
 - #97: fix(agent-workflow): warn scheduled controllers off loop-only wakeup tools
 
+## 0.8.0 - 2026-09-26
+
 - #95: feat(agent-workflow): opt-in comment review for self-authored controller merges
+
+## 0.7.1 - 2026-09-26
 
 - #92: fix(agent-workflow): report plan-gated branch protection clearly
 
+## 0.7.0 - 2026-09-26
+
 - #86: docs(agent-workflow): guidance for running handoff on a small local model
+
+## 0.6.0 - 2026-09-25
 
 - #78: orchestrate-tickets: worker prompt, spec selection and reporting refinements
 
@@ -36,10 +44,16 @@
 
 - #75: Parse Claude weekly limits and auto-resume provider-limit blocks after reset
 
+## 0.5.2 - 2026-09-25
+
 - #66: Gate ticket merges on repository local verification
 - #67: Document local verification gate and prepare patch release
 
+## 0.5.1 - 2026-09-25
+
 - #64: fix: make Paseo schedule authoritative for intake pause
+
+## 0.5.0 - 2026-09-25
 
 - #61: Add Codex handoff and context skills with configurable model endpoints
 
