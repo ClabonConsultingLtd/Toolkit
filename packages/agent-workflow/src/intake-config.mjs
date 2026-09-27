@@ -15,7 +15,28 @@ const fields = new Set([
 	"localVerificationCommand",
 	"schedulePromptAppend",
 	"codexWorkerFullAccess",
+	"selfAuthoredMerge",
+	"controllerProvider",
+	"controllerThinkingOptionId",
 ]);
+
+// The controller's own scheduled runtime: which provider/model runs the
+// recurring intake schedule itself, independent of which provider a worker
+// gets dispatched to per ticket. Unset keeps today's Codex default so
+// existing repositories see no behavior change.
+export const DEFAULT_CONTROLLER_PROVIDER = "codex/gpt-6-sol";
+export const DEFAULT_CONTROLLER_THINKING_OPTION_ID = "medium";
+
+export function normalizeControllerProvider(value, source = "intake request") {
+	if (
+		typeof value !== "string" ||
+		!/^(claude|codex)\/[^/]+$/.test(value.trim())
+	)
+		throw new Error(
+			`${source}: controllerProvider must be "claude/<model>" or "codex/<model>"`,
+		);
+	return value.trim();
+}
 
 export function normalizeRequiredChecks(value, source = "intake request") {
 	if (
@@ -119,6 +140,28 @@ export function readRepositoryIntakeConfig(cwd) {
 	)
 		throw new Error(
 			"invalid toolkit-intake.json: codexWorkerFullAccess must be a boolean",
+		);
+	// Opt-in for single-account setups, where GitHub always refuses the
+	// controller's approval of a PR its own account opened.
+	if (
+		config.selfAuthoredMerge !== undefined &&
+		config.selfAuthoredMerge !== "comment-review"
+	)
+		throw new Error(
+			'invalid toolkit-intake.json: selfAuthoredMerge must be "comment-review"',
+		);
+	if (config.controllerProvider !== undefined)
+		normalizeControllerProvider(
+			config.controllerProvider,
+			"invalid toolkit-intake.json",
+		);
+	if (
+		config.controllerThinkingOptionId !== undefined &&
+		(typeof config.controllerThinkingOptionId !== "string" ||
+			!config.controllerThinkingOptionId.trim())
+	)
+		throw new Error(
+			"invalid toolkit-intake.json: controllerThinkingOptionId must be a nonempty string",
 		);
 	const excludeTickets = normalizeExcludeTickets(
 		config.excludeTickets ?? [],

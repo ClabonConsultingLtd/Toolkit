@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { changeTicket, newBatch } from "../src/orchestration.mjs";
 import {
 	batchDigest,
 	buildDigest,
@@ -16,8 +21,12 @@ import {
 	writeCursor,
 } from "../src/digest.mjs";
 import { fetchRecommendation, run } from "../src/digest-cli.mjs";
+import { changeTicket, newBatch } from "../src/orchestration.mjs";
 
-const runtime = { provider: "claude/claude-sonnet-5", thinkingOptionId: "medium" };
+const runtime = {
+	provider: "claude/claude-sonnet-5",
+	thinkingOptionId: "medium",
+};
 function fixtureState() {
 	const s = newBatch({
 		repository: "example/project",
@@ -35,7 +44,13 @@ function fixtureState() {
 	changeTicket(s, 7, "fix", { reason: "still flaky" }, 5_000);
 	changeTicket(s, 7, "review", { evidence: "tests" }, 6_000);
 	changeTicket(s, 7, "fix", { reason: "third strike" }, 7_000);
-	changeTicket(s, 8, "reserve", { ...runtime, thinkingOptionId: "high" }, 7_000);
+	changeTicket(
+		s,
+		8,
+		"reserve",
+		{ ...runtime, thinkingOptionId: "high" },
+		7_000,
+	);
 	changeTicket(s, 8, "attach", { workspaceId: "w8", agentId: "a8" }, 7_000);
 	return s;
 }
@@ -66,7 +81,9 @@ test("readCursor defaults when absent; round-trips through writeCursor", (t) => 
 	const path = join(dir, "cursor.json");
 	assert.deepEqual(readCursor(path), { lastDigestAt: null });
 	writeCursor(path, { lastDigestAt: "2026-09-20T00:00:00.000Z" });
-	assert.deepEqual(readCursor(path), { lastDigestAt: "2026-09-20T00:00:00.000Z" });
+	assert.deepEqual(readCursor(path), {
+		lastDigestAt: "2026-09-20T00:00:00.000Z",
+	});
 });
 test("ticketRecord flags fix-cycle cap, recommendation mismatch and stuck tickets", () => {
 	const ticket = {
@@ -230,13 +247,20 @@ test("digest-cli run reads batch files, merges injected activity/recommendations
 	const checkout = fixtureDir(t);
 	const orchestrationDir = join(checkout, ".toolkit", "orchestration");
 	mkdirSync(orchestrationDir, { recursive: true });
-	writeFileSync(join(orchestrationDir, "pilot.json"), JSON.stringify(fixtureState()));
+	writeFileSync(
+		join(orchestrationDir, "pilot.json"),
+		JSON.stringify(fixtureState()),
+	);
 	const recommendationCalls = [];
 	const result = run(
 		checkout,
-		{ now: 20_000, stuckHours: 24, activity: { a7: { tokenCost: 500, turnCost: 3 } } },
 		{
-			recommendationFor: (state, ticket) => {
+			now: 20_000,
+			stuckHours: 24,
+			activity: { a7: { tokenCost: 500, turnCost: 3 } },
+		},
+		{
+			recommendationFor: (_state, ticket) => {
 				recommendationCalls.push(ticket.number);
 				return ticket.number === "7"
 					? { model: "claude-sonnet-5", effort: "medium" }
@@ -244,7 +268,10 @@ test("digest-cli run reads batch files, merges injected activity/recommendations
 			},
 		},
 	);
-	assert.equal(result.batches[0].tickets.find((t) => t.number === "7").tokenCost, 500);
+	assert.equal(
+		result.batches[0].tickets.find((t) => t.number === "7").tokenCost,
+		500,
+	);
 	assert.ok(recommendationCalls.includes("7"));
 	assert.equal(
 		recommendationCalls.includes("9"),
@@ -253,7 +280,10 @@ test("digest-cli run reads batch files, merges injected activity/recommendations
 	);
 	assert.match(result.markdown, /# Ticket digest/);
 	const jsonOut = JSON.parse(
-		readFileSync(join(checkout, ".toolkit", "report-tickets", "digest.json"), "utf8"),
+		readFileSync(
+			join(checkout, ".toolkit", "report-tickets", "digest.json"),
+			"utf8",
+		),
 	);
 	assert.equal(jsonOut.batches[0].batchId, "pilot");
 	const mdOut = readFileSync(
@@ -261,7 +291,9 @@ test("digest-cli run reads batch files, merges injected activity/recommendations
 		"utf8",
 	);
 	assert.match(mdOut, /# Ticket digest/);
-	const cursor = readCursor(join(checkout, ".toolkit", "report-tickets", "cursor.json"));
+	const cursor = readCursor(
+		join(checkout, ".toolkit", "report-tickets", "cursor.json"),
+	);
 	assert.equal(cursor.lastDigestAt, result.generatedAt);
 });
 test("fetchRecommendation parses the issue body via the injected gh executor", () => {

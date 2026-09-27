@@ -21,7 +21,15 @@ function gh(args) {
 }
 export function fetchRecommendation(repository, number, exec = gh) {
 	const data = JSON.parse(
-		exec(["issue", "view", String(number), "--repo", repository, "--json", "body"]),
+		exec([
+			"issue",
+			"view",
+			String(number),
+			"--repo",
+			repository,
+			"--json",
+			"body",
+		]),
 	);
 	return recommendation(data.body);
 }
@@ -31,7 +39,10 @@ function cachedRecommendationFor(exec) {
 		const key = `${state.repository}#${ticket.number}`;
 		if (!cache.has(key)) {
 			try {
-				cache.set(key, fetchRecommendation(state.repository, ticket.number, exec));
+				cache.set(
+					key,
+					fetchRecommendation(state.repository, ticket.number, exec),
+				);
 			} catch {
 				cache.set(key, null);
 			}
@@ -56,10 +67,14 @@ export function run(checkoutDir, input = {}, options = {}) {
 		cursor,
 		stuckHours: input.stuckHours ?? 24,
 		activity: (agentId) => activity[agentId] ?? null,
-		recommendationFor: options.recommendationFor ?? cachedRecommendationFor(options.exec ?? gh),
+		recommendationFor:
+			options.recommendationFor ?? cachedRecommendationFor(options.exec ?? gh),
 	});
 	const markdown = renderMarkdown(digest);
-	writeFile(join(reportDir, "digest.json"), `${JSON.stringify(digest, null, 2)}\n`);
+	writeFile(
+		join(reportDir, "digest.json"),
+		`${JSON.stringify(digest, null, 2)}\n`,
+	);
 	writeFile(join(reportDir, "digest.md"), `${markdown}\n`);
 	writeCursorFn(cursorPath, { lastDigestAt: digest.generatedAt });
 	return { ...digest, markdown };

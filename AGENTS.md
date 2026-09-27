@@ -4,6 +4,8 @@
 
 Issues live as GitHub issues on `ClabonConsultingLtd/Toolkit`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
+This repository is public. When describing behaviour seen in another repository, call it "a consumer repository" and leave out its name, issue and PR numbers, paths, host names and infrastructure details. The same applies to commit messages and branch names.
+
 ### Triage labels
 
 Default canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), used as-is. See `docs/agents/triage-labels.md`.

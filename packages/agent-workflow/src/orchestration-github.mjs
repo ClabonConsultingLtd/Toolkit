@@ -212,10 +212,27 @@ export function github(repository, exec = gh) {
 		issue,
 		pr,
 		requiredStatusChecks(branch) {
-			const data = json([
-				"api",
-				`repos/${repository}/branches/${encodeURIComponent(branch)}/protection/required_status_checks`,
-			]);
+			let data;
+			try {
+				data = json([
+					"api",
+					`repos/${repository}/branches/${encodeURIComponent(branch)}/protection/required_status_checks`,
+				]);
+			} catch (error) {
+				// GitHub hides branch protection on private repositories without a paid plan; retrying cannot help.
+				if (
+					/HTTP 403|Upgrade to GitHub Pro/.test(
+						`${error.message} ${error.stderr ?? ""}`,
+					)
+				) {
+					const denied = new Error(
+						"GitHub denied the branch protection API (HTTP 403); private repositories on plans without protected branches, and tokens without access to protection settings, never get it",
+					);
+					denied.code = "BRANCH_PROTECTION_UNAVAILABLE";
+					throw denied;
+				}
+				throw error;
+			}
 			if (!Array.isArray(data.contexts) || !Array.isArray(data.checks))
 				throw new Error("required checks response is invalid");
 			return [

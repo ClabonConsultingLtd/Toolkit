@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
+	DEFAULT_CONTROLLER_PROVIDER,
+	DEFAULT_CONTROLLER_THINKING_OPTION_ID,
+	normalizeControllerProvider,
 	normalizeExcludeTickets,
 	normalizeRequiredChecks,
 	normalizeSpecLabels,
@@ -113,6 +116,16 @@ function configuredPolicy(anchor, cwd, policy, input) {
 		count: input.count,
 		cron: input.cron ?? policy?.cron ?? "*/30 8-19 * * *",
 		timezone: input.timezone ?? policy?.timezone ?? "UTC",
+		// The controller's own scheduled runtime, not a worker's provider: this
+		// keeps the shared intake schedule on whichever provider is configured
+		// to run it, defaulting to the historical Codex runtime when unset.
+		controllerProvider: input.controllerProvider
+			? normalizeControllerProvider(input.controllerProvider)
+			: (policy?.controllerProvider ?? DEFAULT_CONTROLLER_PROVIDER),
+		controllerThinkingOptionId:
+			input.controllerThinkingOptionId ??
+			policy?.controllerThinkingOptionId ??
+			DEFAULT_CONTROLLER_THINKING_OPTION_ID,
 		excludeTickets: normalizeExcludeTickets(
 			input.excludeTickets ?? policy?.excludeTickets ?? [],
 		),
@@ -157,6 +170,15 @@ function reconcileSchedule(policy, schedule, now) {
 	}
 	policy.paused = schedule.paused;
 }
+// Controller merges otherwise read branch protection, which GitHub hides on private repositories without a paid plan.
+const REQUIRED_CHECKS_WARNING =
+	"requiredChecks is not configured: controller merges fall back to the branch protection API, which GitHub denies for private repositories on plans without protected branches. List the checks in toolkit-intake.json.";
+function withRequiredChecksWarning(result, requiredChecks) {
+	return requiredChecks === undefined
+		? { ...result, warnings: [REQUIRED_CHECKS_WARNING] }
+		: result;
+}
+
 export function intakeCommand(command, checkout, input = {}, options = {}) {
 	const cwd = resolve(checkout),
 		anchor = join(cwd, ".toolkit", "orchestration", "intake-anchor.json");
@@ -165,11 +187,14 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 		const policy = readIntake(anchor);
 		const config = readRepositoryIntakeConfig(cwd);
 		return policy
-			? {
-					...policy,
-					activeHelper,
-					repositoryConfig: config ? "toolkit-intake.json" : null,
-				}
+			? withRequiredChecksWarning(
+					{
+						...policy,
+						activeHelper,
+						repositoryConfig: config ? "toolkit-intake.json" : null,
+					},
+					config?.requiredChecks ?? policy.requiredChecks,
+				)
 			: {
 					activeHelper,
 					configured: false,
@@ -191,7 +216,7 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				);
 			policy = configuredPolicy(anchor, cwd, policy, config ?? input);
 			atomicWrite(path, policy);
-			return policy;
+			return withRequiredChecksWarning(policy, policy.requiredChecks);
 		}
 		if (!policy) throw new Error("configure intake first");
 		if (command === "tick" && config) {

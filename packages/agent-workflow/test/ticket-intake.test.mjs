@@ -289,6 +289,7 @@ test("tracked repository config updates capacity and exclusions without resettin
 	assert.equal(synced.timezone, tracked.timezone);
 	assert.deepEqual(synced.excludeTickets, ["1"]);
 	assert.deepEqual(synced.requiredChecks, ["ci", "smoke"]);
+	assert.equal(synced.warnings, undefined);
 	assert.equal(synced.scheduleId, "s1");
 	assert.equal(synced.paused, true);
 	assert.equal(synced.pauseReason, "Paused in Paseo");
@@ -309,6 +310,10 @@ test("tracked repository config updates capacity and exclusions without resettin
 	assert.deepEqual(next.tickets, ["5"]);
 	assert.equal(intakeCommand("status", f.cwd).count, 3);
 	assert.equal(intakeCommand("status", f.cwd).requiredChecks, undefined);
+	assert.match(
+		intakeCommand("status", f.cwd).warnings[0],
+		/requiredChecks is not configured/,
+	);
 	assert.equal(
 		intakeCommand("status", f.cwd).repositoryConfig,
 		"toolkit-intake.json",
@@ -416,6 +421,10 @@ test("requiredChecks validates names, duplicates, and array type", (t) => {
 	}
 	rmSync(configPath);
 	assert.equal(intakeCommand("status", f.cwd).requiredChecks, undefined);
+	assert.match(
+		intakeCommand("status", f.cwd).warnings[0],
+		/requiredChecks is not configured/,
+	);
 });
 test("tracked specLabels are saved and skip umbrella issues at intake", (t) => {
 	const f = fixture(t);

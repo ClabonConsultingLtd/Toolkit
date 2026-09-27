@@ -1,18 +1,33 @@
 import { join, resolve } from "node:path";
-import { readRepositoryIntakeConfig } from "./intake-config.mjs";
+import {
+	DEFAULT_CONTROLLER_PROVIDER,
+	readRepositoryIntakeConfig,
+} from "./intake-config.mjs";
 import { intakePath, readIntake } from "./ticket-intake.mjs";
 
-const skillDirectory = resolve(
-	import.meta.dirname,
-	"..",
-	"codex",
-	"skills",
-	"orchestrate-tickets",
-);
+// Which installed skill tree (claude/ or codex/) the generated prompt should
+// point at: whichever provider is configured to run this controller itself,
+// not the provider any individual worker gets dispatched to. The two skill
+// trees are kept byte-identical, so this only changes which absolute paths
+// the prompt names.
+export function controllerProviderName(controllerProvider) {
+	const name = String(controllerProvider ?? DEFAULT_CONTROLLER_PROVIDER).split(
+		"/",
+	)[0];
+	return name === "claude" ? "claude" : "codex";
+}
 
-export function schedulePaths(checkout) {
+export function schedulePaths(checkout, settings) {
 	const cwd = resolve(checkout),
 		stateDirectory = join(cwd, ".toolkit", "orchestration");
+	const resolvedSettings = settings ?? promptSettings(cwd);
+	const skillDirectory = resolve(
+		import.meta.dirname,
+		"..",
+		controllerProviderName(resolvedSettings.controllerProvider),
+		"skills",
+		"orchestrate-tickets",
+	);
 	return {
 		checkout: cwd,
 		skill: join(skillDirectory, "SKILL.md"),
@@ -40,12 +55,17 @@ function promptSettings(cwd) {
 // Canonical prompt for the shared intake schedule. Keep it free of timestamps,
 // counts and other runtime values so a live prompt can be compared exactly.
 export function schedulePrompt(checkout) {
-	const paths = schedulePaths(checkout);
-	const settings = promptSettings(paths.checkout);
+	const cwd = resolve(checkout);
+	const settings = promptSettings(cwd);
+	const paths = schedulePaths(cwd, settings);
 	const helper = `node ${paths.intakeHelper}`;
 	const workerMode = settings.codexWorkerFullAccess
 		? "This schedule authorizes `full-access` for Codex workers only when that preflight fails; record the sandbox error and the fallback in the run report."
 		: "This schedule does not authorize `full-access` for Codex workers: when that preflight fails, block the Codex reservation with the recorded sandbox error instead of launching or changing its mode.";
+	const selfAuthored =
+		settings.selfAuthoredMerge === "comment-review"
+			? " When GitHub refuses the approval only because the controller's account opened the PR, post the independent review as a PR comment naming the reviewed head SHA instead, then merge; never use `--admin` or otherwise bypass branch protection, so a merge GitHub rejects stays awaiting a human."
+			: "";
 	const lines = [
 		`Run the ticket intake controller for ${settings.repository} (schedule \`ticket-intake:${settings.repository}\`).`,
 		"",
@@ -67,8 +87,9 @@ export function schedulePrompt(checkout) {
 		"6. Check `claude-cooldown`, pass the raw Paseo model catalogs, then re-fetch the schedule and pass `schedule: {id, name, paused}` to `tick`. Process admitted batches with the orchestration workflow; `managedByIntake` batches get no per-batch schedule, and this shared schedule is not paused when a batch completes.",
 		`7. Before launching a Codex worker in \`auto-review\`, run the sandbox preflight from the skill (for example \`codex sandbox true\`). Errors such as \`bwrap: No permissions to create a new namespace\` mean the sandbox is unavailable. ${workerMode}`,
 		"8. Workers implement only their ticket and open draft PRs. They never merge, close issues, change labels or batch state, create schedules or launch other workers. Preserve each worker's selected mode; never widen permissions or batch scope beyond this prompt.",
-		"9. Approve or merge only where this prompt explicitly authorizes it, and only after `merge-ready` returns `mergeReady: true` for the exact linked PR head. Otherwise leave PRs awaiting a human merge.",
+		`9. Approve or merge only where this prompt explicitly authorizes it, and only after \`merge-ready\` returns \`mergeReady: true\` for the exact linked PR head.${selfAuthored} Otherwise leave PRs awaiting a human merge.`,
 		"10. Keep this schedule running when capacity is full or nothing qualifies. Pause it only on explicit user request or a systemic error that prevents safe reconciliation, recording the reason. Report the run type, new selections, active count, PR links, blockers, prompt drift, and the live schedule state and next run.",
+		"11. Never call a tool meant only for an interactive session's self-paced dynamic loop (one that ends the current turn to schedule a future resumption) while waiting on background subagents or worker notifications in this scheduled run. Ending the turn early can make this run look finished and be archived mid-task, stopping any still-running background subagents before they report. Wait for the automatic completion notification within the same turn instead.",
 	];
 	const append = settings.schedulePromptAppend;
 	if (append)

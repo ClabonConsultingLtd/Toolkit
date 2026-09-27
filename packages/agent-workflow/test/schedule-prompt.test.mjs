@@ -57,6 +57,11 @@ test("canonical prompt names absolute paths and required instructions determinis
 	assert.match(prompt, /codex sandbox true/);
 	assert.match(prompt, /does not authorize `full-access` for Codex workers/);
 	assert.match(prompt, /merge-ready/);
+	assert.match(prompt, /self-paced dynamic loop/);
+	assert.match(
+		prompt,
+		/automatic completion notification within the same turn/,
+	);
 	assert.doesNotMatch(prompt, /Repository additions/);
 	assert.doesNotMatch(prompt, /\d{4}-\d{2}-\d{2}/);
 	writeFileSync(
@@ -92,6 +97,30 @@ test("config authorizes worker full-access and appends repository instructions",
 	);
 });
 
+test("selfAuthoredMerge adds the comment-review rule only when set", (t) => {
+	const cwd = checkout(t, base);
+	const plain = schedulePrompt(cwd);
+	assert.doesNotMatch(plain, /PR comment naming the reviewed head SHA/);
+	writeFileSync(
+		join(cwd, "toolkit-intake.json"),
+		JSON.stringify({ ...base, selfAuthoredMerge: "comment-review" }),
+	);
+	const opted = schedulePrompt(cwd);
+	assert.match(
+		opted,
+		/refuses the approval only because the controller's account opened the PR, post the independent review as a PR comment naming the reviewed head SHA/,
+	);
+	assert.match(opted, /never use `--admin`/);
+	assert.equal(
+		opted.replace(
+			/ When GitHub refuses the approval[^\n]*? stays awaiting a human\./,
+			"",
+		),
+		plain,
+		"only step 9 changes",
+	);
+});
+
 test("new config fields are validated", (t) => {
 	for (const [field, value] of [
 		["schedulePromptAppend", ""],
@@ -99,10 +128,57 @@ test("new config fields are validated", (t) => {
 		["schedulePromptAppend", ["ok", " "]],
 		["schedulePromptAppend", 3],
 		["codexWorkerFullAccess", "yes"],
+		["selfAuthoredMerge", true],
+		["selfAuthoredMerge", "approve"],
+		["controllerProvider", ""],
+		["controllerProvider", "gpt-6-sol"],
+		["controllerProvider", "openai/gpt-6-sol"],
+		["controllerProvider", 3],
+		["controllerThinkingOptionId", ""],
+		["controllerThinkingOptionId", 3],
 	]) {
 		const cwd = checkout(t, { ...base, [field]: value });
 		assert.throws(() => readRepositoryIntakeConfig(cwd), new RegExp(field));
 	}
+});
+
+test("a claude controllerProvider points the schedule prompt at the claude skill tree", (t) => {
+	const cwd = checkout(t);
+	const codexPrompt = schedulePrompt(cwd);
+	const codexPaths = schedulePaths(cwd);
+	assert.match(
+		codexPaths.skill,
+		/\/codex\/skills\/orchestrate-tickets\/SKILL\.md$/,
+	);
+
+	writeFileSync(
+		join(cwd, "toolkit-intake.json"),
+		JSON.stringify({
+			...base,
+			controllerProvider: "claude/opus",
+			controllerThinkingOptionId: "high",
+		}),
+	);
+	const claudePrompt = schedulePrompt(cwd);
+	const claudePaths = schedulePaths(cwd);
+	assert.match(
+		claudePaths.skill,
+		/\/claude\/skills\/orchestrate-tickets\/SKILL\.md$/,
+	);
+	for (const path of Object.values(claudePaths)) {
+		assert.ok(path.startsWith("/"), path);
+		assert.ok(claudePrompt.includes(path), path);
+	}
+	// The prompt text itself stays provider-neutral; only the named paths change.
+	assert.equal(claudePrompt.replace(/\/claude\//g, "/codex/"), codexPrompt);
+});
+
+test("controllerProvider persists across reconfiguration and defaults when unset", (t) => {
+	const cwd = checkout(t, null);
+	const { version, ...request } = base;
+	const configured = intakeCommand("configure", cwd, request);
+	assert.equal(configured.controllerProvider, "codex/gpt-6-sol");
+	assert.equal(configured.controllerThinkingOptionId, "medium");
 });
 
 test("the example config validates", (t) => {

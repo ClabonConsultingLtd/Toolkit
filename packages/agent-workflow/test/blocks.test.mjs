@@ -48,3 +48,51 @@ test("replacement text is inserted literally", () => {
 		`before\n${replacement}\nafter\n`,
 	);
 });
+test("a response with an incomplete block is rejected, not partially applied", () => {
+	// Seen from a local model: the second block lost its ======= separator.
+	// Applying only the first block would leave a half-done edit.
+	const text = [
+		"@@ a.ts @@",
+		"<<<<<<< SEARCH",
+		"  retries: number;",
+		"=======",
+		"  retries: number;",
+		"  verbose: boolean;",
+		">>>>>>> REPLACE",
+		"@@ a.ts @@",
+		"<<<<<<< SEARCH",
+		"    retries: MAX_RETRIES,",
+		"+    verbose: false,",
+		">>>>>>> REPLACE",
+	].join("\n");
+	assert.throws(
+		() => parseBlocks(text, new Set(["a.ts"])),
+		/incomplete SEARCH\/REPLACE block/,
+	);
+});
+test("a stray block terminator rejects the response", () => {
+	// Real local-model output: a duplicated, lowercase terminator after the
+	// first block. The blocks themselves parse, but the response is malformed
+	// and its second edit was wrong, so none of it should be applied.
+	const text = [
+		"@@ a.ts @@",
+		"<<<<<<< SEARCH",
+		"  retries: number;",
+		"=======",
+		"  retries: number;",
+		"  verbose?: boolean;",
+		">>>>>>> REPLACE",
+		">>>>>>> replace",
+		"@@ a.ts @@",
+		"<<<<<<< SEARCH",
+		"export function f() {",
+		"=======",
+		"export function f() {",
+		"  return 1;",
+		">>>>>>> REPLACE",
+	].join("\n");
+	assert.throws(
+		() => parseBlocks(text, new Set(["a.ts"])),
+		/incomplete SEARCH\/REPLACE block/,
+	);
+});

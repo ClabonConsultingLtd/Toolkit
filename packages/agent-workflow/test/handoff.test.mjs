@@ -1,9 +1,35 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { handoffEndpoint, promptFor, requestEdit } from "../src/handoff.mjs";
+import {
+	handoffEndpoint,
+	main,
+	promptFor,
+	requestEdit,
+} from "../src/handoff.mjs";
+
+function taskDirectory(root, taskMd) {
+	const directory = mkdtempSync(join(root, "task-"));
+	writeFileSync(join(directory, "task.md"), taskMd);
+	return directory;
+}
+function fetcherReturning(...contents) {
+	let call = 0;
+	return async () => ({
+		ok: true,
+		json: async () => ({
+			choices: [{ message: { content: contents[call++] ?? contents.at(-1) } }],
+		}),
+	});
+}
 
 test("provider helper retries then returns content", async () => {
 	let calls = 0;
@@ -118,4 +144,331 @@ test("bounded-handoff skills are self-contained when copied into a skills direct
 	assert.doesNotMatch(claude, /\]\(\.\.?\//);
 	assert.match(claude, /Editable:/);
 	assert.equal(skill("codex"), claude);
+});
+
+test("prompt example names a real editable file, not a placeholder", () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-"));
+	writeFileSync(join(root, "a.ts"), "x\n");
+	const prompt = promptFor(
+		{ instruction: "Do it.", editable: new Set(["a.ts"]) },
+		root,
+	);
+	// Small models copy the example header verbatim, so it must be valid.
+	assert.match(prompt, /Return only blocks:\n@@ a\.ts @@\n/);
+	assert.doesNotMatch(prompt, /relative\/file/);
+});
+test("optional reasoning effort is sent only when configured", async () => {
+	const bodies = [];
+	const fetcher = async (_, options) => {
+		bodies.push(JSON.parse(options.body));
+		return {
+			ok: true,
+			json: async () => ({ choices: [{ message: { content: "edit" } }] }),
+		};
+	};
+	const base = {
+		TOOLKIT_HANDOFF_API_URL: "http://localhost:11434/v1/chat/completions",
+		TOOLKIT_HANDOFF_MODEL: "gemma4",
+	};
+	const plain = handoffEndpoint(base);
+	const none = handoffEndpoint({
+		...base,
+		TOOLKIT_HANDOFF_REASONING_EFFORT: "none",
+	});
+	for (const e of [plain, none])
+		await requestEdit(fetcher, e.url, e.key, e.model, "p", 1, {
+			reasoningEffort: e.reasoningEffort,
+		});
+	assert.equal("reasoning_effort" in bodies[0], false);
+	assert.equal(bodies[1].reasoning_effort, "none");
+	assert.throws(
+		() =>
+			handoffEndpoint({
+				...base,
+				TOOLKIT_HANDOFF_REASONING_EFFORT: "none; rm -rf",
+			}),
+		/TOOLKIT_HANDOFF_REASONING_EFFORT/,
+	);
+});
+
+test("prompt includes read-only context files and the model cannot edit them", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	writeFileSync(join(root, "template.ts"), "template\n");
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\nContext:\n- template.ts\n\n## Instruction\nFollow the template.",
+	);
+	const prompt = await main([directory, "--dry-run"], { TOOLKIT_ROOT: root });
+	assert.match(prompt, /CONTEXT \(read-only/);
+	assert.match(prompt, /FILE: template\.ts\ntemplate/);
+	const { parseBlocks } = await import("../src/blocks.mjs");
+	assert.throws(
+		() =>
+			parseBlocks(
+				"@@ template.ts @@\n<<<<<<< SEARCH\ntemplate\n=======\nchanged\n>>>>>>> REPLACE",
+				new Set(["a.ts"]),
+			),
+		/undeclared file/,
+	);
+});
+
+test("retries once with the applier's feedback before giving up", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	let calls = 0;
+	const fetcher = async () => {
+		calls++;
+		const content =
+			calls === 1
+				? "not a block at all"
+				: "@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE";
+		return {
+			ok: true,
+			json: async () => ({ choices: [{ message: { content } }] }),
+		};
+	};
+	const result = await main(
+		[directory],
+		{
+			TOOLKIT_ROOT: root,
+			TOOLKIT_HANDOFF_ENABLED: "on",
+			TOOLKIT_HANDOFF_API_URL: "http://localhost:1/x",
+			TOOLKIT_HANDOFF_MODEL: "m",
+		},
+		fetcher,
+	);
+	assert.equal(calls, 2);
+	assert.equal(readFileSync(join(root, "a.ts"), "utf8"), "after\n");
+	assert.match(result, /Applied/);
+});
+
+test("a second malformed response still fails after the retry", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const fetcher = fetcherReturning("nope", "still nope");
+	await assert.rejects(
+		main(
+			[directory],
+			{
+				TOOLKIT_ROOT: root,
+				TOOLKIT_HANDOFF_ENABLED: "on",
+				TOOLKIT_HANDOFF_API_URL: "http://localhost:1/x",
+				TOOLKIT_HANDOFF_MODEL: "m",
+			},
+			fetcher,
+		),
+		/No file-qualified SEARCH\/REPLACE blocks/,
+	);
+});
+
+test("post-apply gates run and their output lands in result.md, not as an apply failure", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	mkdirSync(join(root, "scripts"));
+	writeFileSync(
+		join(root, "scripts", "gate.mjs"),
+		"console.log('checked', ...process.argv.slice(2)); process.exitCode = 1;\n",
+	);
+	writeFileSync(
+		join(root, "toolkit-handoff.json"),
+		JSON.stringify({ version: 1, gates: ["scripts/gate.mjs"] }),
+	);
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const fetcher = fetcherReturning(
+		"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
+	);
+	const result = await main(
+		[directory],
+		{
+			TOOLKIT_ROOT: root,
+			TOOLKIT_HANDOFF_ENABLED: "on",
+			TOOLKIT_HANDOFF_API_URL: "http://localhost:1/x",
+			TOOLKIT_HANDOFF_MODEL: "m",
+		},
+		fetcher,
+	);
+	assert.match(result, /Applied/);
+	const report = readFileSync(join(directory, "result.md"), "utf8");
+	assert.match(report, /information, not acceptance/);
+	assert.match(report, /checked a\.ts/);
+	assert.match(report, /Exit: 1/);
+});
+
+test("refuses to run outside its configured hours unless overridden", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	const allDays = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+	const today = allDays[new Date().getUTCDay()];
+	const otherDay = allDays.find((day) => day !== today);
+	writeFileSync(
+		join(root, "toolkit-handoff.json"),
+		JSON.stringify({
+			version: 1,
+			allowedHours: { days: [otherDay], start: "00:00", end: "23:59" },
+		}),
+	);
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const env = {
+		TOOLKIT_ROOT: root,
+		TOOLKIT_HANDOFF_ENABLED: "on",
+		TOOLKIT_HANDOFF_API_URL: "http://localhost:1/x",
+		TOOLKIT_HANDOFF_MODEL: "m",
+	};
+	const fetcher = fetcherReturning(
+		"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
+	);
+	await assert.rejects(
+		main([directory], env, fetcher),
+		/outside its configured hours/,
+	);
+	const result = await main(
+		[directory],
+		{ ...env, TOOLKIT_HANDOFF_ALLOW_OFFHOURS: "on" },
+		fetcher,
+	);
+	assert.match(result, /Applied/);
+});
+
+test("loads unset variables from the default .env file in TOOLKIT_ROOT", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	writeFileSync(
+		join(root, ".env"),
+		'TOOLKIT_HANDOFF_ENABLED=on\nTOOLKIT_HANDOFF_API_URL=http://localhost:1/x\nTOOLKIT_HANDOFF_MODEL="m"\n',
+	);
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const fetcher = fetcherReturning(
+		"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
+	);
+	const result = await main([directory], { TOOLKIT_ROOT: root }, fetcher);
+	assert.match(result, /Applied/);
+});
+
+test("an already-set variable is not overridden by .env", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	writeFileSync(join(root, ".env"), "TOOLKIT_HANDOFF_MODEL=from-file\n");
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	let seenModel;
+	const fetcher = async (_, options) => {
+		seenModel = JSON.parse(options.body).model;
+		return {
+			ok: true,
+			json: async () => ({
+				choices: [
+					{
+						message: {
+							content:
+								"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
+						},
+					},
+				],
+			}),
+		};
+	};
+	await main(
+		[directory],
+		{
+			TOOLKIT_ROOT: root,
+			TOOLKIT_HANDOFF_ENABLED: "on",
+			TOOLKIT_HANDOFF_API_URL: "http://localhost:1/x",
+			TOOLKIT_HANDOFF_MODEL: "from-env",
+		},
+		fetcher,
+	);
+	assert.equal(seenModel, "from-env");
+});
+
+test("a missing default .env file is not an error", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const prompt = await main([directory, "--dry-run"], { TOOLKIT_ROOT: root });
+	assert.match(prompt, /Replace before/);
+});
+
+test("--env-file selects another file, and a missing one is an error", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	const envFile = join(root, "custom.env");
+	writeFileSync(
+		envFile,
+		"TOOLKIT_HANDOFF_ENABLED=on\nTOOLKIT_HANDOFF_API_URL=http://localhost:1/x\nTOOLKIT_HANDOFF_MODEL=m\n",
+	);
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const fetcher = fetcherReturning(
+		"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
+	);
+	const result = await main(
+		[directory, "--env-file", envFile],
+		{ TOOLKIT_ROOT: root },
+		fetcher,
+	);
+	assert.match(result, /Applied/);
+	await assert.rejects(
+		main(
+			[directory, "--env-file", join(root, "missing.env")],
+			{ TOOLKIT_ROOT: root },
+			fetcher,
+		),
+		/--env-file not found/,
+	);
+});
+
+test(".env values never appear in request.json, response.md, or the gate report", async () => {
+	const root = mkdtempSync(join(tmpdir(), "handoff-root-"));
+	writeFileSync(join(root, "a.ts"), "before\n");
+	mkdirSync(join(root, "scripts"));
+	writeFileSync(
+		join(root, "scripts", "gate.mjs"),
+		"console.log(JSON.stringify(process.env)); process.exitCode = 0;\n",
+	);
+	writeFileSync(
+		join(root, "toolkit-handoff.json"),
+		JSON.stringify({ version: 1, gates: ["scripts/gate.mjs"] }),
+	);
+	writeFileSync(
+		join(root, ".env"),
+		"TOOLKIT_HANDOFF_ENABLED=on\nTOOLKIT_HANDOFF_API_URL=http://localhost:1/x\nTOOLKIT_HANDOFF_MODEL=m\nSUPER_SECRET_TOKEN=do-not-leak\n",
+	);
+	const directory = taskDirectory(
+		root,
+		"Editable:\n- a.ts\n\n## Instruction\nReplace before with after.",
+	);
+	const fetcher = fetcherReturning(
+		"@@ a.ts @@\n<<<<<<< SEARCH\nbefore\n=======\nafter\n>>>>>>> REPLACE",
+	);
+	await main([directory], { TOOLKIT_ROOT: root }, fetcher);
+	const request = readFileSync(join(directory, "request.json"), "utf8");
+	const response = readFileSync(join(directory, "response.md"), "utf8");
+	const report = readFileSync(join(directory, "result.md"), "utf8");
+	for (const output of [request, response, report])
+		assert.doesNotMatch(output, /do-not-leak/);
 });

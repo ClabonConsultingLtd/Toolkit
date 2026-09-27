@@ -6,9 +6,24 @@ Provider-aware developer automation with project-defined policy. `pnpm handoff <
 
 The `claude/skills/bounded-handoff` and `codex/skills/bounded-handoff` entrypoints carry the same self-contained procedure, so either directory works when copied or symlinked into a skills directory (for Claude, `.claude/skills/bounded-handoff`). Keep the two files identical; a test enforces this. Install the appropriate skill directory from a persistent Toolkit checkout; for Codex, symlink `codex/skills/bounded-handoff` into `${CODEX_HOME:-$HOME/.codex}/skills/bounded-handoff`. The skill guides delegation and review; `handoff` performs the same bounded edit regardless of the calling agent.
 
-`handoff` accepts OpenAI-compatible chat-completions endpoints. Set `TOOLKIT_HANDOFF_API_URL` to the complete `/chat/completions` URL and `TOOLKIT_HANDOFF_MODEL` to the server's model ID. Set `TOOLKIT_HANDOFF_API_KEY` for a remote endpoint. For a local server on `localhost`, `127.0.0.1`, or `[::1]`, the key may be omitted. For example, Ollama can use `http://localhost:11434/v1/chat/completions` with a locally installed model such as `qwen2.5-coder:1.5b`. The request carries only the model and messages, so set decoding options on the server: temperature 0 (SEARCH text must be copied exactly), and a context window (`num_ctx` in an Ollama Modelfile) larger than the instruction plus every editable file. Ollama truncates an over-long prompt from the start, which removes the instruction without an error. The existing `DEEPSEEK_API_URL`, `DEEPSEEK_MODEL`, and `DEEPSEEK_API_KEY` variables remain supported when no generic handoff setting is used. Preview first, then set `TOOLKIT_HANDOFF_ENABLED=on` to execute. Credentials stay in environment variables.
+`handoff` accepts OpenAI-compatible chat-completions endpoints. Set `TOOLKIT_HANDOFF_API_URL` to the complete `/chat/completions` URL and `TOOLKIT_HANDOFF_MODEL` to the server's model ID. Set `TOOLKIT_HANDOFF_API_KEY` for a remote endpoint. For a local server on `localhost`, `127.0.0.1`, or `[::1]`, the key may be omitted. For example, Ollama can use `http://localhost:11434/v1/chat/completions` with a locally installed model such as `qwen2.5-coder:1.5b`. The request carries only the model and messages, so set decoding options on the server: temperature 0 (SEARCH text must be copied exactly), and a context window (`num_ctx` in an Ollama Modelfile) larger than the instruction plus every editable file. Ollama truncates an over-long prompt from the start, which removes the instruction without an error. For a thinking model, set `TOOLKIT_HANDOFF_REASONING_EFFORT` (for example `none`) to send the OpenAI-style `reasoning_effort` field; without it, small local thinking models can reason for minutes before answering on CPU. It is sent only when set, so other providers are unaffected. The existing `DEEPSEEK_API_URL`, `DEEPSEEK_MODEL`, and `DEEPSEEK_API_KEY` variables remain supported when no generic handoff setting is used. Preview first, then set `TOOLKIT_HANDOFF_ENABLED=on` to execute. Credentials stay in environment variables.
 
-Only the chat-completions response shape is supported; services using a different API need a request/response adapter. The model must return the file-qualified SEARCH/REPLACE format, and the CLI validates every edit before applying it. Declared editable paths must resolve within the project and cannot be symlinks.
+Only the chat-completions response shape is supported; services using a different API need a request/response adapter. The model must return the file-qualified SEARCH/REPLACE format, and the CLI validates every edit before applying it: a response containing an incomplete block is rejected whole rather than partially applied. Declared editable paths must resolve within the project and cannot be symlinks. `task.md` may also declare a `Context:` file list alongside `Editable:`: those files are included in the prompt as read-only reference material — a template to follow, for example — and any attempt to edit one is rejected as an undeclared file. A path cannot appear in both lists. A response that fails to parse or apply is retried once automatically, with the applier's own error appended to the prompt; a second failure returns the task to the calling agent instead of retrying further.
+
+`handoff <task-directory>` fills in any variable that isn't already set in the environment from a `.env` file, the same way `image-to-3d`'s `--env-file` does: values already in the environment always win, and a loaded value is never logged, printed, or written into `request.json`, `response.md`, or the gate report. By default it reads `.env` in `TOOLKIT_ROOT` (or the current directory when `TOOLKIT_ROOT` is unset); a missing default file is not an error. `--env-file PATH` reads a different file instead; a missing `--env-file` is an error.
+
+An optional `toolkit-handoff.json` at the project root (`TOOLKIT_ROOT`, defaulting to the working directory) sets `gates`, a list of relative `.mjs` scripts run after a successful apply with the touched files as arguments, and `allowedHours`, a UTC weekday-and-time window outside which the CLI refuses to run unless `TOOLKIT_HANDOFF_ALLOW_OFFHOURS=on` is set. `allowedHours` is either a single window (`{"days": ["mon", ...], "start": "HH:MM", "end": "HH:MM"}`) or a non-empty array of such windows; the current time is allowed if it falls inside any of them. `end` may be `"24:00"` for the end of the day; `start` stays `"00:00"`-`"23:59"`, and each window needs `start` before `end`. The out-of-hours error lists every configured window. Gate output (exit code and combined stdout/stderr per script) is written to `result.md` in the task directory; it is informational only and never blocks the apply that already succeeded.
+
+### Running handoff against a small local model
+
+Findings from benchmarking 1.5B–7B local models (CPU-only, Ollama) against this format:
+
+- **Pin decoding on the server.** The request carries only the model and messages, so set temperature 0 and a context window larger than the instruction plus every editable file (for Ollama, `PARAMETER temperature 0` and `num_ctx` in a Modelfile). Ollama truncates an over-long prompt from the start, which drops the instruction without an error. A `num_predict` cap stops a runaway answer from hanging the CLI.
+- **Turn thinking off.** Recent small models (for example Qwen3.5 and Gemma 4) reason before answering by default, which can take minutes on CPU. Set `TOOLKIT_HANDOFF_REASONING_EFFORT=none`. Some of these models can't have thinking disabled in a Modelfile.
+- **Give the format an example.** A server-side system prompt plus one example exchange (for Ollama, `SYSTEM` and `MESSAGE` in the Modelfile) keeps small models on the SEARCH/REPLACE format. Telling them to replace the whole file when it's short (under about 60 lines) was the largest single improvement.
+- **Newer generations beat bigger old ones.** 2026 models of about 4B parameters outscored a 2024 7B coding model.
+- **One region per handoff.** Single-region edits were reliable. Multi-site edits (rename plus call site, add a field plus its default) sometimes came back well-formed but wrong, and were applied. The CLI rejects malformed or incomplete blocks, but only a diff review catches a clean wrong edit.
+- **Treat small benchmarks as rough.** Outputs can differ between inference servers even at temperature 0.
 
 ## Ticket workflow compatibility
 
@@ -91,15 +106,20 @@ pnpm ticket-batch ticket-batch.json --dry-run
 
 Normal execution launches one ticket, waits for its command to exit, re-reads its status, and proceeds only when it equals `completeStatus` (default: `done`). It writes a resumable `.toolkit/ticket-batch-state.json` beside the manifest by default. The batch stops at the first launch failure or unchanged status; `--continue-on-failure` and `--max N` are explicit opt-ins.
 
-## Codex orchestration with Paseo
+## Ticket orchestration with Paseo
 
-The `codex/skills/orchestrate-tickets` integration coordinates an explicit batch of
-GitHub issues using Claude workers and Codex review. It retains the existing
-Markdown and GitHub command launchers. Prerequisites are Node 24+, authenticated
-`gh`, a persistent Toolkit checkout, and Paseo MCP connected to Codex with both
-Codex and Claude available.
+The `orchestrate-tickets` skill coordinates an explicit batch of GitHub issues
+using this controller's own review and Claude or Codex workers. It retains the
+existing Markdown and GitHub command launchers. Prerequisites are Node 24+,
+authenticated `gh`, a persistent Toolkit checkout, and Paseo MCP connected to
+the controller's own provider (Claude or Codex) with both Codex and Claude
+available for worker dispatch.
 
-Install the skill by symlinking it from your persistent Toolkit checkout:
+The `claude/skills/orchestrate-tickets` and `codex/skills/orchestrate-tickets`
+directories are kept byte-identical (a test enforces this), so which one you
+install only decides which provider runs the controller itself; per-ticket
+worker dispatch is unaffected either way. Install the matching directory by
+symlinking it from your persistent Toolkit checkout — for Codex:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
@@ -107,12 +127,32 @@ ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/orchestrate-tickets
   "${CODEX_HOME:-$HOME/.codex}/skills/orchestrate-tickets"
 ```
 
+or for Claude Code, symlinked into the consuming project (`.claude/skills` is
+project-scoped, unlike `${CODEX_HOME:-$HOME/.codex}/skills`):
+
+```bash
+mkdir -p .claude/skills
+ln -s /absolute/Toolkit/packages/agent-workflow/claude/skills/orchestrate-tickets \
+  .claude/skills/orchestrate-tickets
+```
+
 Keep that checkout in place: the skill's helper imports the package's source.
-Restart your Codex session to discover a newly installed skill, or explicitly
-provide its absolute SKILL.md path to an existing session.
+Restart your Claude Code or Codex session to discover a newly installed skill,
+or explicitly provide its absolute SKILL.md path to an existing session.
+
+To make the recurring intake schedule itself run under a Claude controller
+instead of the historical Codex default, set `controllerProvider` (and
+optionally `controllerThinkingOptionId`) in `toolkit-intake.json` — see
+[Repository intake settings](#repository-intake-settings). `schedule-prompt`
+then names the matching skill tree's absolute paths automatically. A one-off
+batch's own half-hourly schedule instead reuses whichever provider the
+initiating session is already running under; see
+[Scheduled continuation](codex/skills/orchestrate-tickets/SKILL.md#scheduled-continuation).
 
 To update after a Toolkit release, resolve the installed skill symlink and update
-the checkout it actually points into to the release tag (with a clean checkout):
+the checkout it actually points into to the release tag (with a clean checkout);
+the same recipe applies to a `.claude/skills/orchestrate-tickets` install by
+substituting that path for the Codex one shown here:
 
 ```bash
 node -p 'require("node:fs").realpathSync(process.argv[1])' \
@@ -129,9 +169,9 @@ consuming repo that vendors this package should also update its pin to the same
 tag with `node cli.mjs pin agent-workflow vX.Y.Z`, then run
 `node cli.mjs sync agent-workflow` from its installed `toolkit-sync` copy (see
 `packages/toolkit-sync/README.md`). A vendored update does not update a separate
-global skill symlink. Restart the Codex session or regenerate the schedule prompt
-(see [Schedule prompt](#schedule-prompt)) so it resolves the updated skill and
-helper paths.
+global skill symlink. Restart the controller's session or regenerate the
+schedule prompt (see [Schedule prompt](#schedule-prompt)) so it resolves the
+updated skill and helper paths.
 
 ### Repository intake settings
 
@@ -142,9 +182,10 @@ required check names, an optional `localVerificationCommand`, ticket numbers
 that must always be excluded, and optional `specLabels` naming labels that mark
 spec/umbrella issues selection must skip (issues with sub-issues are always skipped). The command is a relative `.mjs` path inside the
 stable checkout; it receives the PR number and current head SHA and must exit
-zero only for a complete local pass. The merge helper runs it at `ready` and
-`merge-ready`, so missing or stale evidence blocks both operations. Keep this
-file separate from the ignored
+zero only for a complete local pass. The merge helper runs it, and enforces
+`requiredChecks`, at `merge-ready` only, immediately before a controller merge;
+`ready` does not run either, so missing or stale evidence blocks the merge, not
+review completion. Keep this file separate from the ignored
 `.toolkit/orchestration/.intake/policy.json`, which holds the schedule ID,
 last observed pause state, and tick history. The live Paseo schedule determines
 whether intake is paused.
@@ -163,6 +204,25 @@ explicit authorization for scheduled approval and merging. `codexWorkerFullAcces
 true` authorizes the controller to launch Codex workers in `full-access` when the
 Codex sandbox preflight fails; without it, those reservations are blocked with
 the sandbox error recorded as the reason.
+
+`controllerProvider` (`"claude/<model>"` or `"codex/<model>"`, default
+`"codex/gpt-6-sol"`) and `controllerThinkingOptionId` (default `"medium"`) name
+the provider/model that should run the recurring intake schedule itself, not
+any worker's provider — worker dispatch is unaffected and continues to pick
+Claude or Codex per ticket from the catalogs passed to `reserve`. `schedule-prompt`
+reads `controllerProvider` to decide which installed skill tree (`claude/` or
+`codex/`) its generated paths point at; create the actual Paseo schedule with a
+matching `--provider`/`--thinking` pair.
+
+`selfAuthoredMerge: "comment-review"` is for setups where the controller and
+its workers share one GitHub account. GitHub never lets an account approve a
+PR it opened, so without this setting every controller-authorized merge waits
+for a human. With it, when GitHub refuses the approval for that reason alone,
+the controller posts its independent review as a PR comment naming the
+reviewed head SHA and merges after `merge-ready`. It never uses `--admin`, so
+branch protection or a ruleset that requires a reviewer still blocks the merge.
+Scheduled merging still needs the explicit authorization in
+`schedulePromptAppend`.
 
 ### Schedule prompt
 
@@ -200,18 +260,21 @@ Use $orchestrate-tickets to resume batch exports in /absolute/project.
 ```
 
 Alternatively supply a manifest shaped like `examples/orchestration-batch.json`.
-The skill fills checkout, base branch and initiating Codex model from the live
-session. State lives at `.toolkit/orchestration/<batch-id>.json` in the stable
-consuming checkout; keep this directory ignored. Run `pnpm orchestrate` from this
-package, or `node src/orchestration-cli.mjs`, for the helper protocol documented in
-the skill's `references/protocol.md`. Commands use JSON request files or stdin;
-Paseo tool calls remain the Codex skill's responsibility.
+The skill fills checkout, base branch and the initiating session's own model
+(recorded as `codexModel` for batch audit metadata, regardless of which
+provider that session actually runs) from the live session. State lives at
+`.toolkit/orchestration/<batch-id>.json` in the stable consuming checkout; keep
+this directory ignored. Run `pnpm orchestrate` from this package, or
+`node src/orchestration-cli.mjs`, for the helper protocol documented in the
+skill's `references/protocol.md`. Commands use JSON request files or stdin;
+Paseo tool calls remain the calling skill's responsibility.
 
 Defaults: three isolated Claude worktrees, Auto permission mode, two review/fix
-cycles per ticket, and Codex reconciliation every 30 minutes from 08:00 through
-19:30 UTC. New Paseo schedules for orchestration, intake, triage, and reporting
-use `codex/gpt-6-sol` with medium reasoning. Existing schedules retain their
-settings until explicitly changed. An authorized scheduled intake controller may
+cycles per ticket, and controller reconciliation every 30 minutes from 08:00
+through 19:30 UTC. New Paseo schedules for orchestration, intake, triage, and
+reporting default to `codex/gpt-6-sol` with medium reasoning unless configured
+otherwise (see `controllerProvider` above for the intake schedule). Existing
+schedules retain their settings until explicitly changed. An authorized scheduled intake controller may
 approve and merge an exact linked, independently reviewed PR when GitHub permits
 its approval and all required checks and reviews pass. Independent batch
 schedules and Claude workers do not approve or merge. Only a verified merged PR lets
@@ -234,18 +297,28 @@ consuming repository explicitly authorizes it and GitHub permits it.
 ## Triage-only sweeps with Paseo
 
 `orchestrate-tickets` only ever acts on issues already labeled `ready-for-agent`.
-`codex/skills/triage-tickets` is the lighter, independent counterpart that sweeps
+`triage-tickets` is the lighter, independent counterpart that sweeps
 unlabeled, `needs-triage`, and stale-`needs-info` issues into that state to begin
 with, applying the interactive mattpocock `triage` skill's judgment. It runs on
 its own schedule (default `*/30 8-19 * * *` UTC), against the same persistent
 checkout, and never opens a Paseo worktree or launches an implementation agent —
 that boundary stays `orchestrate-tickets`'s job once an issue reaches
-`ready-for-agent`. Install it the same way:
+`ready-for-agent`. `claude/skills/triage-tickets` and `codex/skills/triage-tickets`
+are kept byte-identical; install the matching directory the same way as
+`orchestrate-tickets`:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
 ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/triage-tickets \
   "${CODEX_HOME:-$HOME/.codex}/skills/triage-tickets"
+```
+
+or for Claude Code:
+
+```bash
+mkdir -p .claude/skills
+ln -s /absolute/Toolkit/packages/agent-workflow/claude/skills/triage-tickets \
+  .claude/skills/triage-tickets
 ```
 
 It reads the label vocabulary from the consuming repo's own
@@ -269,7 +342,7 @@ grills and never launches implementation.
 `orchestrate-tickets` writes rich state — fix-cycle counts, blocked reasons,
 now a per-transition `updatedAt` timestamp — but nothing previously
 summarized it for a human between the real-time blocker surfacing that
-happens mid-run. `codex/skills/report-tickets` is a separate, read-only
+happens mid-run. `report-tickets` is a separate, read-only
 skill that turns that state, plus Paseo's `get_agent_activity`/`list_agents`,
 into a periodic digest: tickets completed/in-flight/blocked-on-you since the
 last digest, fix cycles nearing the two-cycle cap, token/turn cost per
@@ -279,12 +352,22 @@ threshold (default 24h). It also lists merged tickets whose worktrees and
 agents can be archived; archiving is left to the user. It never mutates `orchestrate-tickets`'s batch
 state, creates a worktree, or launches a worker, and it runs on its own
 schedule (default `*/30 8-19 * * *` UTC), independent of both
-`orchestrate-tickets` and `triage-tickets`. Install it the same way:
+`orchestrate-tickets` and `triage-tickets`. `claude/skills/report-tickets` and
+`codex/skills/report-tickets` are kept byte-identical; install the matching
+directory the same way:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
 ln -s /absolute/Toolkit/packages/agent-workflow/codex/skills/report-tickets \
   "${CODEX_HOME:-$HOME/.codex}/skills/report-tickets"
+```
+
+or for Claude Code:
+
+```bash
+mkdir -p .claude/skills
+ln -s /absolute/Toolkit/packages/agent-workflow/claude/skills/report-tickets \
+  .claude/skills/report-tickets
 ```
 
 Run `pnpm report-tickets /absolute/checkout` from this package, or
