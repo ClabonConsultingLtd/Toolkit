@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.2 - 2026-09-27
+
+- #114: fix(agent-workflow): stop ready from requiring checks that only run once a PR leaves draft
+
 ## 0.10.1 - 2026-09-27
 
 - #113: Get pnpm lint and typecheck passing on main, run them in CI, split the changelog
