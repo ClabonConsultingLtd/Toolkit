@@ -62,6 +62,12 @@ test("canonical prompt names absolute paths and required instructions determinis
 		prompt,
 		/automatic completion notification within the same turn/,
 	);
+	assert.match(
+		prompt,
+		/subagent, review, verification, test run or timer in the foreground/,
+	);
+	assert.match(prompt, /never end the turn while any of them is in progress/);
+	assert.match(prompt, /Never wait for a lease held by another run to expire/);
 	assert.doesNotMatch(prompt, /Repository additions/);
 	assert.doesNotMatch(prompt, /\d{4}-\d{2}-\d{2}/);
 	writeFileSync(
