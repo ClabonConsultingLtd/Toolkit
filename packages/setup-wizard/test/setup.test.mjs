@@ -101,11 +101,12 @@ test("sets up a repository for both trackers and is idempotent", async () => {
 	assert.deepEqual(Object.keys(pins).sort(), [
 		"agent-workflow",
 		"claude-token-optimisation",
+		"toolkit-sync",
 	]);
 	assert.equal(pins["agent-workflow"].dest, "tools/agent-workflow");
-	assert.ok(existsSync(join(target, "tools/toolkit-sync/cli.mjs")));
+	assert.equal(pins["toolkit-sync"].dest, "tools/toolkit-sync");
 	assert.equal(
-		readFileSync(join(target, "tools/toolkit-sync/cli.mjs"), "utf8"),
+		readFileSync(join(target, "tools/toolkit-sync/src/cli.mjs"), "utf8"),
 		readFileSync(join(repoRoot, "packages/toolkit-sync/src/cli.mjs"), "utf8"),
 	);
 	assert.ok(
@@ -128,9 +129,9 @@ test("sets up a repository for both trackers and is idempotent", async () => {
 		readFileSync(join(target, "AGENTS.md"), "utf8"),
 		/^# App\n\n## Context use\n/,
 	);
-	assert.match(
+	assert.equal(
 		readFileSync(join(target, ".gitignore"), "utf8"),
-		/^\.toolkit\/$/m,
+		".toolkit/*\n!.toolkit/overlays/\n",
 	);
 	assert.match(
 		readFileSync(join(target, ".gitattributes"), "utf8"),
@@ -239,6 +240,47 @@ test("local tracker omits GitHub configuration and warns about CLAUDE.md", async
 	);
 	assert.ok(
 		io.warnings.some((message) => message.includes("CLAUDE.md exists")),
+	);
+});
+
+test("replaces a bare .toolkit/ ignore so overlays can be committed", async () => {
+	const toolkit = fixtureToolkit();
+	const target = consumer();
+	writeFileSync(
+		join(target, ".gitignore"),
+		"node_modules/\n.toolkit/\ndist/\n",
+	);
+	await runSetup(
+		{
+			target,
+			toolkitRoot: toolkit,
+			repo: toolkit,
+			tag: TAG,
+			tracker: "local",
+			yes: true,
+			skills: false,
+			branch: false,
+		},
+		quietIo(),
+	);
+	assert.equal(
+		readFileSync(join(target, ".gitignore"), "utf8"),
+		"node_modules/\ndist/\n.toolkit/*\n!.toolkit/overlays/\n",
+	);
+	mkdirSync(join(target, ".toolkit/overlays"), { recursive: true });
+	writeFileSync(join(target, ".toolkit/overlays/toolkit-upgrade.md"), "rule\n");
+	const ignored = spawnSync(
+		"git",
+		["check-ignore", "-q", ".toolkit/overlays/toolkit-upgrade.md"],
+		{ cwd: target },
+	);
+	assert.equal(ignored.status, 1, "overlay is not ignored");
+	assert.equal(
+		spawnSync("git", ["check-ignore", "-q", ".toolkit/toolkit-sync-cache"], {
+			cwd: target,
+		}).status,
+		0,
+		"runtime state is ignored",
 	);
 });
 

@@ -2,15 +2,15 @@
 
 This guide sets up a repository on a fresh Windows machine to use three Toolkit packages with Claude Code:
 
-- **`toolkit-sync`** vendors the other packages at a pinned release and upgrades them later.
+- **`toolkit-sync`** vendors the other packages, and itself, at a pinned release and upgrades them later.
 - **`claude-token-optimisation`** keeps broad file reads and routine command output out of Claude's context.
 - **`agent-workflow`** runs implementation tickets through Claude, one at a time or as an ordered batch.
 
 It then walks through the complete feature workflow using Matt Pocock's skills: `/grill-with-docs` → `/to-spec` → `/to-tickets` → implementation. Both issue trackers are covered: **GitHub issues** and **local Markdown files in `.scratch/`**.
 
-Out of scope: Codex, Paseo (`orchestrate-tickets`, `triage-tickets`, `report-tickets`), the bounded model handoff, and the image packages.
+Out of scope: Codex; the Paseo-scheduled skills (`orchestrate-tickets`, `triage-tickets`, `report-tickets`), which now have Claude entrypoints but still run on Paseo schedules; the bounded model handoff; and the image packages.
 
-Commands run in **Git Bash** unless a step says **PowerShell**. Agent instructions live in `AGENTS.md`, not `CLAUDE.md`: Claude Code reads `AGENTS.md` when a repository has no `CLAUDE.md`, and other coding agents read the same file, so one set of instructions serves them all. The guide needs a Toolkit release newer than `v0.6.0`: earlier releases don't include the setup wizard or the Windows fix for `ticket-batch`.
+Commands run in **Git Bash** unless a step says **PowerShell**. Agent instructions live in `AGENTS.md`, not `CLAUDE.md`: Claude Code reads `AGENTS.md` when a repository has no `CLAUDE.md`, and other coding agents read the same file, so one set of instructions serves them all. The guide needs a Toolkit release that includes `packages/setup-wizard`, which provides the launcher template and the wizard. Earlier releases also lack pieces the steps rely on: `v0.9.0` added the manifest that lets `toolkit-sync` pin itself, and `v0.10.0` fixed `ticket-batch` on Windows.
 
 > **Prefer automation?** The [setup wizard](../../packages/setup-wizard/README.md) does most of sections 1 to 7 for you: a PowerShell script installs the prerequisites and clones Toolkit, then one `node` command sets up the repository. The manual steps below explain what it does and are the reference when you want to change something.
 
@@ -177,11 +177,13 @@ For an existing project, clone it into `/c/src` and `cd` into it. Either way, do
 git switch -c chore/toolkit-setup
 ```
 
-Ignore Toolkit's runtime state (sync cache, hook logs, batch state):
+Ignore Toolkit's runtime state (sync cache, hook logs, batch state), except `.toolkit/overlays/`, which holds project rules you commit (see [4.3](#43-project-rules-for-vendored-skills-overlays)):
 
 ```bash
-echo '.toolkit/' >> .gitignore
+printf '%s\n' '.toolkit/*' '!.toolkit/overlays/' >> .gitignore
 ```
+
+Use exactly these two lines. A plain `.toolkit/` would also hide the overlays, and Git can't un-ignore files inside a directory that is itself ignored. If `.gitignore` already has a `.toolkit/` line, remove it.
 
 Tell Git never to convert line endings in vendored files, so collaborators with different Git settings don't see false local edits:
 
@@ -193,46 +195,40 @@ All remaining commands run from the repository root.
 
 ## 4. Vendor packages with toolkit-sync
 
-### 4.1 Copy toolkit-sync in
+### 4.1 Pin and sync the packages
 
-`toolkit-sync` has no install step. Copy its five source files from the Toolkit tag:
-
-```bash
-mkdir -p tools/toolkit-sync
-for f in cli git manifest package-sync pin-file; do
-  git -C /c/src/Toolkit show "$TAG:packages/toolkit-sync/src/$f.mjs" > tools/toolkit-sync/$f.mjs
-done
-node tools/toolkit-sync/cli.mjs --help
-```
-
-### 4.2 Pin and sync the packages
-
-Record each package, its release tag, and where it's vendored:
+`toolkit-sync` vendors itself like any other package, so run it once from your Toolkit clone to record each package, its release tag, and where it's vendored:
 
 ```bash
-node tools/toolkit-sync/cli.mjs pin agent-workflow "$TAG" --dest tools/agent-workflow
-node tools/toolkit-sync/cli.mjs pin claude-token-optimisation "$TAG" --dest tools/claude-token-optimisation
+TS=/c/src/Toolkit/packages/toolkit-sync/src/cli.mjs
+node "$TS" pin toolkit-sync "$TAG" --dest tools/toolkit-sync
+node "$TS" pin agent-workflow "$TAG" --dest tools/agent-workflow
+node "$TS" pin claude-token-optimisation "$TAG" --dest tools/claude-token-optimisation
 ```
 
-This writes `toolkit-pins.json`. Nothing is copied yet. Copy the files:
+This writes `toolkit-pins.json`. Nothing is copied yet. Copy the files, then check them with the repository's own vendored copy:
 
 ```bash
-node tools/toolkit-sync/cli.mjs sync
-node tools/toolkit-sync/cli.mjs check
+node "$TS" sync
+node tools/toolkit-sync/src/cli.mjs check
 ```
 
-`check` should report both packages as up to date with your tag. It exits non-zero if a vendored file differs from the pinned release. Run it in CI if you want to catch accidental edits.
+`check` should report all three packages as up to date with your tag. It exits non-zero if a vendored file differs from the pinned release. Run it in CI if you want to catch accidental edits. From now on, use `node tools/toolkit-sync/src/cli.mjs`; you don't need the clone's copy again.
 
-Don't edit files under `tools/` directly: the next `sync` refuses to overwrite them and you have to resolve it by hand. Make changes upstream in Toolkit and sync the release.
+Don't edit files under `tools/` directly: the next `sync` refuses to overwrite them and you have to resolve it by hand. Make changes upstream in Toolkit and sync the release, or put project-specific rules in an overlay ([4.3](#43-project-rules-for-vendored-skills-overlays)).
 
-### 4.3 Install the toolkit-upgrade skill
+### 4.2 Install the toolkit-upgrade skill
 
-This skill teaches Claude the upgrade procedure in [section 10](#10-upgrading-toolkit). Copy it rather than symlinking it, since Windows symlinks need Developer Mode:
+This skill teaches Claude the upgrade procedure in [section 10](#10-upgrading-toolkit). It's vendored with `toolkit-sync`; copy it where Claude looks for skills. Copy rather than symlink, since Windows symlinks need Developer Mode:
 
 ```bash
 mkdir -p .claude/skills
-cp -r /c/src/Toolkit/packages/toolkit-sync/claude/skills/toolkit-upgrade .claude/skills/
+cp -r tools/toolkit-sync/claude/skills/toolkit-upgrade .claude/skills/
 ```
+
+### 4.3 Project rules for vendored skills: overlays
+
+A vendored skill is overwritten on every `sync`, so you can't add your own rules to it by editing it. Instead, write them to `.toolkit/overlays/<skill-name>.md`, for example `.toolkit/overlays/toolkit-upgrade.md`. An agent following a Toolkit skill reads that file first, and its rules win where the two conflict. `sync` never touches `.toolkit/`, and the ignore rules from section 3 keep overlays visible to Git, so commit them.
 
 ## 5. Install token optimisation
 
@@ -332,36 +328,35 @@ The ticket runner doesn't write tickets. Matt Pocock's [skills](https://github.c
 
 ### 6.1 Add the skills
 
+Install them as a Claude Code plugin from the official marketplace, at project scope:
+
 ```bash
-npx skills@latest add mattpocock/skills
+claude plugin install mattpocock-skills --scope project
 ```
 
-When prompted:
+Project scope records the plugin in `.claude/settings.json` (`"enabledPlugins": { "mattpocock-skills@claude-plugins-official": true }`), so anyone who clones the repository gets the same skills. The plugin updates itself when a new version ships. Restart any running `claude` session so it picks up the skills.
 
-- Choose **Claude Code** as the agent.
-- Choose **project** scope, so the skills are committed with the repository.
-- Choose **copy** rather than symlink if asked (Windows symlinks need Developer Mode).
-- Select at least `setup-matt-pocock-skills`, `grill-with-docs`, `to-spec`, `to-tickets`, and `triage`. Installing all the engineering skills is fine too; `grill-with-docs` uses the domain-modelling skill if it's installed.
+Plugin skills are named after the plugin: Claude Code lists them as `/mattpocock-skills:grill-with-docs`, `/mattpocock-skills:to-spec`, and so on. The rest of this guide gives the full names in commands and the short ones (`/grill-with-docs`) in prose.
 
-Restart any running `claude` session so it picks up the new skills.
+If you'd rather keep editable copies in the repository, run `npx skills@latest add mattpocock/skills` instead. Choose Claude Code, project scope, and copy rather than symlink, and select at least `setup-matt-pocock-skills`, `grill-with-docs`, `to-spec`, `to-tickets` and `triage`. The skills are then called `/grill-with-docs` and so on, and `npx skills update` updates them. Use one method or the other: installing both gives you every skill twice.
 
 ### 6.2 Configure them for this repository
 
 Start `claude` and run:
 
 ```text
-/setup-matt-pocock-skills
+/mattpocock-skills:setup-matt-pocock-skills
 ```
 
-It asks where to put its instructions: choose **`AGENTS.md`**. It then asks three things and writes the answers to `docs/agents/`:
+It explores the repository, then confirms its choices one section at a time before writing anything:
 
-| Question | GitHub track | Local track |
+| Section | GitHub track | Local track |
 | --- | --- | --- |
-| Issue tracker | GitHub (`docs/agents/issue-tracker.md` uses `gh`) | Local Markdown (tickets under `.scratch/`) |
-| Triage labels | Accept the defaults: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` | Same defaults. In local tickets they are values of the `**Status:**` line |
-| Domain docs | Single-context (`CONTEXT.md` at the root) for most apps; multi-context (`CONTEXT-MAP.md`) for a monorepo | Same |
+| Issue tracker | GitHub. It proposes this when the remote is on GitHub. | Local Markdown: tickets under `.scratch/<feature>/` |
+| Triage labels | Keep the defaults: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` | Same defaults. In local tickets they are values of the `**Status:**` line |
+| Domain docs | Chosen without asking: one `CONTEXT.md` plus `docs/adr/` at the root. It offers a multi-context `CONTEXT-MAP.md` only for a monorepo. | Same |
 
-It adds an `## Agent skills` section to `AGENTS.md` pointing at those files. Check that it didn't create a `CLAUDE.md`; if it did, move the section into `AGENTS.md` and delete `CLAUDE.md`.
+It shows a draft of each file before writing it. It writes `docs/agents/issue-tracker.md`, `triage-labels.md` and `domain.md`, and adds an `## Agent skills` section to `AGENTS.md`. Because `AGENTS.md` already exists from [5.3](#53-point-agentsmd-at-the-policy), it edits that file rather than asking. It never creates a `CLAUDE.md` alongside an existing `AGENTS.md`.
 
 Read the generated `docs/agents/issue-tracker.md`. It's the contract every skill follows. You can edit it, for example to require a verification section in every ticket.
 
@@ -481,7 +476,7 @@ Start each stage in a fresh `claude` session from the repository root. Stages ha
 ### 9.1 Grill the idea: `/grill-with-docs`
 
 ```text
-/grill-with-docs I want users to be able to export their reports as CSV
+/mattpocock-skills:grill-with-docs I want users to be able to export their reports as CSV
 ```
 
 Claude interviews you one question at a time until the design is unambiguous, checking your answers against the code and the domain docs. As terms and decisions are settled, it records them in `CONTEXT.md` (the glossary) and `docs/adr/` (architecture decisions), creating those files if needed. Answer precisely. If you don't know, say so and Claude will investigate or record an open question.
@@ -493,7 +488,7 @@ The grilling is done when Claude has no further questions. Review and commit the
 In the same session, or a new one that points at the grilled topic:
 
 ```text
-/to-spec
+/mattpocock-skills:to-spec
 ```
 
 Claude turns the agreed design into a spec: the problem, the solution, user stories, implementation decisions, testing approach, and what's out of scope.
@@ -506,13 +501,13 @@ Read the spec and ask for changes before moving on. Everything after this is der
 ### 9.3 Slice into tickets: `/to-tickets`
 
 ```text
-/to-tickets #40                            (GitHub)
-/to-tickets .scratch/csv-export/spec.md    (local)
+/mattpocock-skills:to-tickets #40                            (GitHub)
+/mattpocock-skills:to-tickets .scratch/csv-export/spec.md    (local)
 ```
 
 Claude breaks the spec into thin vertical slices. Each ticket delivers one testable piece end to end, with acceptance criteria and a **Blocked by** list. It shows you the proposed breakdown first, so you can merge, split or reorder tickets before they're created.
 
-**GitHub track.** Each ticket becomes an issue linked to the spec issue (as a sub-issue where GitHub supports it). Blockers are recorded as issue dependencies or a `Blocked by: #n` line.
+**GitHub track.** Each ticket becomes an issue linked to the spec issue (as a sub-issue where GitHub supports it), labelled `ready-for-agent`. Blockers are recorded as issue dependencies or a `Blocked by: #n` line.
 
 **Local track.** Each ticket becomes a numbered file:
 
@@ -532,7 +527,7 @@ Each file has a header like this:
 
 **What to build:** …
 
-**Blocked by:** —
+**Blocked by:** None (can start immediately)
 
 **Status:** ready-for-agent
 
@@ -540,12 +535,12 @@ Each file has a header like this:
 - [ ] acceptance criterion
 ```
 
-### 9.4 Mark tickets ready
+### 9.4 Review which tickets are ready
 
-The runner only launches tickets whose status is exactly `ready-for-agent`. Review each ticket and decide whether an agent can build it unattended.
+`/to-tickets` creates every ticket as `ready-for-agent`, because it slices work to be agent-sized. The runner launches exactly those tickets, so review them before you run anything unattended. Downgrade any ticket an agent shouldn't build on its own:
 
-- **GitHub**: `gh issue edit 41 --add-label ready-for-agent --remove-label needs-triage`, or run `/triage` and let Claude recommend a label for each issue.
-- **Local**: set the line to `**Status:** ready-for-agent`. Use `ready-for-human` for work you'll do yourself and `needs-info` for tickets that aren't clear yet.
+- **GitHub**: `gh issue edit 42 --remove-label ready-for-agent --add-label ready-for-human`, or `needs-info` if it isn't clear yet. `/mattpocock-skills:triage` can recommend a label for each issue.
+- **Local**: change the ticket's line to `**Status:** ready-for-human` or `**Status:** needs-info`.
 
 Commit the local ticket files so the history records what was agreed.
 
@@ -653,39 +648,34 @@ git -C /c/src/Toolkit switch --detach "$TAG"
 Then, in your repository, start `claude` and ask:
 
 ```text
-Use the toolkit-upgrade skill to upgrade agent-workflow and claude-token-optimisation to <the new tag>
+Use the toolkit-upgrade skill to upgrade toolkit-sync, agent-workflow and claude-token-optimisation to <the new tag>
 ```
 
 The skill branches, re-pins, checks for local edits, syncs, runs your checks, and opens a pull request.
 
-Alternatively, re-run the [setup wizard](../../packages/setup-wizard/README.md) on a new branch. It re-pins to the tag the clone has checked out, syncs, and refreshes the copied `toolkit-sync`, upgrade skill and hooks. It keeps your own files, and stops if `sync` finds local edits.
+Alternatively, re-run the [setup wizard](../../packages/setup-wizard/README.md) on a new branch. It re-pins all three packages to the tag the clone has checked out, syncs, and refreshes the upgrade skill and hooks. It keeps your own files, and stops if `sync` finds local edits.
 
 To do it by hand:
 
 ```bash
 git switch -c "toolkit/$TAG"
-node tools/toolkit-sync/cli.mjs pin agent-workflow "$TAG"
-node tools/toolkit-sync/cli.mjs pin claude-token-optimisation "$TAG"
-node tools/toolkit-sync/cli.mjs check    # review any local-edit / modified files first
-node tools/toolkit-sync/cli.mjs sync
+for pkg in toolkit-sync agent-workflow claude-token-optimisation; do
+  node tools/toolkit-sync/src/cli.mjs pin "$pkg" "$TAG"
+done
+node tools/toolkit-sync/src/cli.mjs check    # review any local-edit / modified files first
+node tools/toolkit-sync/src/cli.mjs sync
 node tools/claude-token-optimisation/install.mjs .    # refresh the copied hooks and policy
 rm .claude/settings.toolkit-token-optimisation.json
+cp -r tools/toolkit-sync/claude/skills/toolkit-upgrade .claude/skills/
 ```
 
-The installer leaves your `.claude/settings.json` alone, apart from migrating old-style hook entries. Also refresh the upgrade skill and `toolkit-sync` itself:
-
-```bash
-cp -r /c/src/Toolkit/packages/toolkit-sync/claude/skills/toolkit-upgrade .claude/skills/
-for f in cli git manifest package-sync pin-file; do
-  git -C /c/src/Toolkit show "$TAG:packages/toolkit-sync/src/$f.mjs" > tools/toolkit-sync/$f.mjs
-done
-```
+The installer leaves your `.claude/settings.json` alone, apart from migrating old-style hook entries. Your overlays in `.toolkit/overlays/` carry over unchanged.
 
 `scripts/claude-ticket.mjs` belongs to you, so upgrades don't touch it. Compare it with `/c/src/Toolkit/packages/setup-wizard/templates/claude-ticket.mjs` to pick up template improvements.
 
 Read the release's [CHANGELOG](../../CHANGELOG.md) entry for any other post-upgrade steps.
 
-To update Matt Pocock's skills, run `npx skills@latest add mattpocock/skills` again and review the diff under `.claude/skills/`.
+Matt Pocock's skills update themselves when installed as a plugin. If you installed copies with `npx skills`, run `npx skills update` and review the diff under `.claude/skills/`.
 
 ## 11. Troubleshooting
 
@@ -695,14 +685,14 @@ To update Matt Pocock's skills, run `npx skills@latest add mattpocock/skills` ag
 
 ```bash
 rm -rf tools && git checkout -- tools
-node tools/toolkit-sync/cli.mjs check
+node tools/toolkit-sync/src/cli.mjs check
 ```
 
-If `check` still reports differences and you haven't edited anything, `node tools/toolkit-sync/cli.mjs sync --force` rewrites the vendored files from the pinned release.
+If `check` still reports differences and you haven't edited anything, `node tools/toolkit-sync/src/cli.mjs sync --force` rewrites the vendored files from the pinned release.
 
 ### `implement-batch` prints nothing and exits 0
 
-The vendored `agent-workflow` is `v0.6.0` or earlier. On Windows, those releases' `ticket-batch.mjs` never recognises itself as the script being run. [Upgrade](#10-upgrading-toolkit) to a later release.
+The vendored `agent-workflow` is older than `v0.10.0`. On Windows, those releases' `ticket-batch.mjs` never recognises itself as the script being run. [Upgrade](#10-upgrading-toolkit).
 
 ### `ticket status must be ready-for-agent`
 

@@ -27,7 +27,7 @@ From the repository you want to set up:
 node /c/src/Toolkit/packages/setup-wizard/setup.mjs
 ```
 
-It asks which issue tracker you use, whether to create a `chore/toolkit-setup` branch, whether to create the GitHub labels, and whether to run Matt Pocock's skills installer. Pass options to answer in advance:
+It asks which issue tracker you use, whether to create a `chore/toolkit-setup` branch, whether to create the GitHub labels, and whether to install Matt Pocock's skills. Pass options to answer in advance:
 
 | Option | Effect |
 | --- | --- |
@@ -36,27 +36,28 @@ It asks which issue tracker you use, whether to create a `chore/toolkit-setup` b
 | `--tag vX.Y.Z` | Toolkit release to install (default: the tag the clone has checked out) |
 | `--dest-root DIR` | Where packages are vendored (default: `tools`) |
 | `--repo URL` | Toolkit repository `toolkit-sync` fetches from |
-| `--yes` | Accept every default without prompting (tracker `local`, skip the skills installer) |
+| `--yes` | Accept every default without prompting (tracker `local`; skills and labels installed) |
 | `--no-branch` | Stay on the current branch |
 | `--labels` / `--no-labels` | Create or skip the GitHub triage labels |
-| `--skills` / `--no-skills` | Run or skip `npx skills@latest add mattpocock/skills` |
+| `--skills` / `--no-skills` | Install or skip Matt Pocock's skills plugin |
 
 ## What it does
 
 1. Checks for Node.js 24+, Git, pnpm, Claude Code and (for GitHub) a signed-in `gh`. If a tool isn't on `PATH`, it says where the tool is normally installed; see [Checking PATH](../../docs/guides/claude-windows-setup.md#checking-path). Runs `git init` if the target isn't a repository, after asking.
-2. Adds `.toolkit/` to `.gitignore` and `tools/** -text` to `.gitattributes`.
-3. Copies `toolkit-sync` into `tools/toolkit-sync/`, pins and syncs `agent-workflow` and `claude-token-optimisation` into `tools/`, runs `check`, and copies the `toolkit-upgrade` skill into `.claude/skills/`.
-4. Runs the token-optimisation installer and merges its settings fragment into `.claude/settings.json`, along with `permissions.allow` rules for Git, your `test` script and, for GitHub, `gh issue`. It then deletes the fragment.
-5. Adds a `## Context use` section to `AGENTS.md`, and warns if a `CLAUDE.md` would stop Claude reading it.
-6. Writes `scripts/claude-ticket.mjs` (from [`templates/claude-ticket.mjs`](templates/claude-ticket.mjs)), `ticket-config.json` and/or `ticket-config.github.json`, and adds `implement-ticket`, `implement-issue` and `implement-batch` scripts to `package.json`, creating `package.json` if needed.
-7. Optionally creates the six labels the GitHub track uses, and runs Matt Pocock's skills installer.
+2. Adds `.toolkit/*` and `!.toolkit/overlays/` to `.gitignore`, replacing a bare `.toolkit/` line so committed [overlays](../toolkit-sync/README.md#project-specific-rules-for-a-vendored-skill) stay visible. Adds `tools/** -text` to `.gitattributes`.
+3. Pins and syncs `toolkit-sync`, `agent-workflow` and `claude-token-optimisation` into `tools/`, using the clone's `toolkit-sync` for the first sync and the vendored copy for `check`. Copies the `toolkit-upgrade` skill into `.claude/skills/`.
+4. Installs Matt Pocock's skills as a project-scope Claude Code plugin (`claude plugin install mattpocock-skills --scope project`), which adds an `enabledPlugins` entry to `.claude/settings.json`.
+5. Runs the token-optimisation installer and merges its settings fragment into `.claude/settings.json`, along with `permissions.allow` rules for Git, your `test` script and, for GitHub, `gh issue`. It then deletes the fragment.
+6. Adds a `## Context use` section to `AGENTS.md`, and warns if a `CLAUDE.md` would stop Claude reading it.
+7. Writes `scripts/claude-ticket.mjs` (from [`templates/claude-ticket.mjs`](templates/claude-ticket.mjs)), `ticket-config.json` and/or `ticket-config.github.json`, and adds `implement-ticket`, `implement-issue` and `implement-batch` scripts to `package.json`, creating `package.json` if needed.
+8. Optionally creates the six labels the GitHub track uses.
 
 The wizard is safe to run again. It keeps files you've changed and existing `package.json` scripts, and doesn't duplicate hooks, rules, sections or ignore lines. It reports what it kept.
 
 ## What it leaves to you
 
 - Adding your lint and build commands to `permissions.allow`, so unattended tickets can run them.
-- Running `/setup-matt-pocock-skills` in Claude Code and choosing **AGENTS.md** and your issue tracker.
+- Running `/mattpocock-skills:setup-matt-pocock-skills` in Claude Code. It edits the `AGENTS.md` the wizard created; choose your issue tracker and keep the default triage labels.
 - Reviewing and committing the changes.
 
 The guide's [feature workflow](../../docs/guides/claude-windows-setup.md#9-the-feature-workflow) takes it from there.

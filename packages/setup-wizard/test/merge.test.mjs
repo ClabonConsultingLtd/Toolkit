@@ -6,6 +6,7 @@ import {
 	formatJson,
 	mergeClaudeSettings,
 	mergeScripts,
+	removeLines,
 } from "../src/merge.mjs";
 
 test("ensureLines appends only missing lines and adds a final newline", () => {
@@ -121,4 +122,13 @@ test("notOnPath says what is missing and how to recover", async () => {
 	const message = notOnPath("claude", "Tickets need Claude Code.");
 	assert.match(message, /^claude is not on PATH\. Tickets need Claude Code\./);
 	assert.match(message, /open a new terminal and re-run the wizard\.$/);
+});
+
+test("removeLines drops exact lines only", () => {
+	assert.deepEqual(removeLines("a\n.toolkit/\nb\n", [".toolkit/"]), {
+		text: "a\nb\n",
+		changed: true,
+	});
+	assert.equal(removeLines(".toolkit/*\n", [".toolkit/"]).changed, false);
+	assert.equal(removeLines("a\r\n.toolkit/\r\n", [".toolkit/"]).text, "a\r\n");
 });

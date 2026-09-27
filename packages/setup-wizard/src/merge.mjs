@@ -10,6 +10,14 @@ export function ensureLines(text, lines) {
 	return { text: `${base}${missing.join("\n")}\n`, changed: true };
 }
 
+/** Remove lines that match any of `lines` exactly (ignoring surrounding space). */
+export function removeLines(text, lines) {
+	const drop = new Set(lines);
+	const kept = text.split(/(?<=\n)/).filter((line) => !drop.has(line.trim()));
+	const result = kept.join("");
+	return { text: result, changed: result !== text };
+}
+
 /** Append a Markdown section unless a heading with the same text exists. */
 export function ensureSection(text, heading, body) {
 	const title = heading.replace(/^#+\s*/, "").trim();

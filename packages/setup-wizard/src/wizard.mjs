@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+	cpSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
@@ -13,12 +14,19 @@ import {
 	formatJson,
 	mergeClaudeSettings,
 	mergeScripts,
+	removeLines,
 } from "./merge.mjs";
 
 export const TRACKERS = ["local", "github", "both"];
-const SYNC_FILES = ["cli", "git", "manifest", "package-sync", "pin-file"];
-const PACKAGES = ["agent-workflow", "claude-token-optimisation"];
-const UPGRADE_SKILL = "packages/toolkit-sync/claude/skills/toolkit-upgrade";
+const PACKAGES = [
+	"toolkit-sync",
+	"agent-workflow",
+	"claude-token-optimisation",
+];
+// Runtime state is ignored, but committed overlays under .toolkit/overlays/
+// must stay visible, so a bare ".toolkit/" directory ignore is replaced.
+const IGNORE_LINES = [".toolkit/*", "!.toolkit/overlays/"];
+const OLD_IGNORE_LINES = [".toolkit/", "/.toolkit/", ".toolkit", "/.toolkit"];
 const TEMPLATES = join(import.meta.dirname, "..", "templates");
 const WINDOWS = process.platform === "win32";
 
@@ -274,38 +282,31 @@ export async function runSetup(options, io) {
 
 	// Ignore rules
 	step("Updating .gitignore and .gitattributes");
-	for (const [file, lines] of [
-		[".gitignore", [".toolkit/"]],
-		[".gitattributes", [`${destRoot}/** -text`]],
-	]) {
-		const path = join(root, file);
-		const result = ensureLines(readText(path), lines);
-		if (result.changed) {
-			writeText(path, result.text);
-			summary.written.push(file);
-		}
+	const gitignorePath = join(root, ".gitignore");
+	const withoutOld = removeLines(readText(gitignorePath), OLD_IGNORE_LINES);
+	const gitignore = ensureLines(withoutOld.text, IGNORE_LINES);
+	if (withoutOld.changed || gitignore.changed) {
+		writeText(gitignorePath, gitignore.text);
+		summary.written.push(".gitignore");
+	}
+	if (withoutOld.changed)
+		io.log(
+			"Replaced the .toolkit/ ignore so .toolkit/overlays/ can be committed",
+		);
+	const gitattributesPath = join(root, ".gitattributes");
+	const gitattributes = ensureLines(readText(gitattributesPath), [
+		`${destRoot}/** -text`,
+	]);
+	if (gitattributes.changed) {
+		writeText(gitattributesPath, gitattributes.text);
+		summary.written.push(".gitattributes");
 	}
 
-	// toolkit-sync
-	step(
-		`Vendoring toolkit-sync, agent-workflow and claude-token-optimisation (${tag})`,
-	);
-	const syncDir = join(root, destRoot, "toolkit-sync");
-	for (const name of SYNC_FILES)
-		writeText(
-			join(syncDir, `${name}.mjs`),
-			git(
-				toolkitRoot,
-				["show", `${tag}:packages/toolkit-sync/src/${name}.mjs`],
-				{
-					raw: true,
-				},
-			),
-		);
-	summary.written.push(`${destRoot}/toolkit-sync/`);
-	const cli = join(syncDir, "cli.mjs");
+	// Vendored packages. The clone's toolkit-sync pins everything, itself
+	// included; the vendored copy then checks the result.
+	step(`Vendoring ${PACKAGES.join(", ")} (${tag})`);
 	const repoArgs = repo ? ["--repo", repo] : [];
-	const sync = (args) => {
+	const toolkitSync = (cli, args) => {
 		const result = run(process.execPath, [cli, ...args, ...repoArgs], {
 			cwd: root,
 			inherit: true,
@@ -313,34 +314,53 @@ export async function runSetup(options, io) {
 		if (!result.ok)
 			throw new Error(`toolkit-sync ${args[0]} failed; see the output above`);
 	};
+	const cloneCli = join(
+		toolkitRoot,
+		"packages",
+		"toolkit-sync",
+		"src",
+		"cli.mjs",
+	);
 	for (const name of PACKAGES)
-		sync(["pin", name, tag, "--dest", `${destRoot}/${name}`]);
-	sync(["sync"]);
-	sync(["check"]);
+		toolkitSync(cloneCli, ["pin", name, tag, "--dest", `${destRoot}/${name}`]);
+	toolkitSync(cloneCli, ["sync"]);
+	toolkitSync(join(root, destRoot, "toolkit-sync", "src", "cli.mjs"), [
+		"check",
+	]);
 	summary.written.push(
 		"toolkit-pins.json",
 		...PACKAGES.map((name) => `${destRoot}/${name}/`),
 	);
 
-	for (const file of git(toolkitRoot, [
-		"ls-tree",
-		"-r",
-		"--name-only",
-		tag,
-		"--",
-		UPGRADE_SKILL,
-	]).split("\n")) {
-		if (!file) continue;
-		writeText(
-			join(
-				root,
-				".claude/skills/toolkit-upgrade",
-				file.slice(UPGRADE_SKILL.length + 1),
-			),
-			git(toolkitRoot, ["show", `${tag}:${file}`], { raw: true }),
-		);
-	}
+	cpSync(
+		join(root, destRoot, "toolkit-sync", "claude", "skills", "toolkit-upgrade"),
+		join(root, ".claude", "skills", "toolkit-upgrade"),
+		{ recursive: true },
+	);
 	summary.written.push(".claude/skills/toolkit-upgrade/");
+
+	// Matt Pocock's skills, before the settings merge below so that merge
+	// keeps the plugin's enabledPlugins entry.
+	if (
+		options.skills === true ||
+		(options.skills !== false &&
+			(await io.confirm(
+				"Install Matt Pocock's skills as a project plugin (claude plugin install mattpocock-skills --scope project)?",
+				true,
+			)))
+	) {
+		step("Installing Matt Pocock's skills");
+		const skills = run(
+			"claude",
+			["plugin", "install", "mattpocock-skills", "--scope", "project"],
+			{ cwd: root, inherit: true, shell: true },
+		);
+		if (!skills.ok)
+			warn(
+				"The plugin install did not finish; run claude plugin install mattpocock-skills --scope project by hand.",
+			);
+		summary.skills = skills.ok;
+	}
 
 	// Token optimisation
 	step("Installing Claude token optimisation");
@@ -444,27 +464,6 @@ export async function runSetup(options, io) {
 		}
 	}
 
-	// Matt Pocock's skills
-	if (
-		options.skills === true ||
-		(options.skills !== false &&
-			!yes &&
-			(await io.confirm(
-				"Install Matt Pocock's skills now (npx skills@latest add mattpocock/skills)? Choose Claude Code, project scope and copy when asked.",
-				true,
-			)))
-	) {
-		step("Installing Matt Pocock's skills");
-		const skills = run("npx", ["skills@latest", "add", "mattpocock/skills"], {
-			cwd: root,
-			inherit: true,
-			shell: true,
-		});
-		if (!skills.ok)
-			warn("The skills installer did not finish; run it again by hand.");
-		summary.skills = skills.ok;
-	}
-
 	return { root, tag, tracker, ...summary };
 }
 
@@ -474,7 +473,7 @@ export function nextSteps(result) {
 	];
 	if (!result.skills)
 		steps.push(
-			"Install Matt Pocock's skills: npx skills@latest add mattpocock/skills (choose Claude Code, project scope and copy).",
+			"Install Matt Pocock's skills: claude plugin install mattpocock-skills --scope project.",
 		);
 	const tracker = {
 		local: "local Markdown",
@@ -482,7 +481,7 @@ export function nextSteps(result) {
 		both: "issue tracker you use most",
 	}[result.tracker];
 	steps.push(
-		`Start claude and run /setup-matt-pocock-skills. Choose AGENTS.md, and the ${tracker} tracker.`,
+		`Start claude and run /mattpocock-skills:setup-matt-pocock-skills. It edits AGENTS.md; choose the ${tracker} tracker and keep the default triage labels.`,
 		"Review the changes with git status and git diff, then commit them.",
 	);
 	return ["Next steps:", ...steps.map((text, i) => `${i + 1}. ${text}`)].join(
