@@ -73,6 +73,7 @@ export function schedulePrompt(checkout) {
 		"8. Workers implement only their ticket and open draft PRs. They never merge, close issues, change labels or batch state, create schedules or launch other workers. Preserve each worker's selected mode; never widen permissions or batch scope beyond this prompt.",
 		`9. Approve or merge only where this prompt explicitly authorizes it, and only after \`merge-ready\` returns \`mergeReady: true\` for the exact linked PR head.${selfAuthored} Otherwise leave PRs awaiting a human merge.`,
 		"10. Keep this schedule running when capacity is full or nothing qualifies. Pause it only on explicit user request or a systemic error that prevents safe reconciliation, recording the reason. Report the run type, new selections, active count, PR links, blockers, prompt drift, and the live schedule state and next run.",
+		"11. Never call a tool meant only for an interactive session's self-paced dynamic loop (one that ends the current turn to schedule a future resumption) while waiting on background subagents or worker notifications in this scheduled run. Ending the turn early can make this run look finished and be archived mid-task, stopping any still-running background subagents before they report. Wait for the automatic completion notification within the same turn instead.",
 	];
 	const append = settings.schedulePromptAppend;
 	if (append)
