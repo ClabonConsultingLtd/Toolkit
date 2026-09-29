@@ -13,6 +13,7 @@ Toolkit accepts focused changes that improve a package's reliability, portabilit
 
 ```bash
 pnpm lint
+ruff check --select S packages/image-generation packages/image-to-3d
 python -m unittest discover -s packages/image-generation/tests -v
 python -m unittest discover -s packages/image-to-3d/tests -v
 pnpm --dir packages/agent-workflow test
@@ -21,6 +22,19 @@ pnpm --dir packages/toolkit-sync test
 ```
 
 Use Black for Python and Biome for JavaScript, JSON, YAML, and Markdown. Do not commit generated images, model files, provider transcripts, credentials, `node_modules`, or local runtime state.
+
+## Security Gates
+
+Pull requests and pushes to `main` run Toolkit's own security Gates (secrets, dependencies, static analysis): see [`packages/security-gates/README.md`](packages/security-gates/README.md) for how they work, and how to fix or suppress a finding.
+
+Install the pre-commit hooks to catch secrets and Python security findings before they're committed:
+
+```bash
+pipx install pre-commit  # or: pip install pre-commit
+pre-commit install
+```
+
+Nothing enforces pre-commit locally; the Gates in CI still decide whether a change can merge.
 
 ## Pull requests
 

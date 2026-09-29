@@ -1,0 +1,34 @@
+# Caller workflow: Toolkit as a consumer of its own security Gates. Runs on
+# every pull request and every push to main, over the whole tree, so Toolkit
+# fixes or suppresses a finding before it reaches a release.
+#
+# This calls the reusable workflow by local path, not a pinned commit SHA, so
+# a change to the Gates is tested against Toolkit's own tree before it's
+# released. That's different from security-gates-self-test.yml, which only
+# runs when the Gates themselves change, and checks the Gates' own mechanics
+# (both architectures, planted-finding fixtures) rather than gating Toolkit's
+# code on every change.
+name: security-gates-caller
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "31 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-gates:
+    uses: ./.github/workflows/security-gates.yml
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    with:
+      runner: '"ubuntu-latest"'
+      severity: high
+      code-scanning: true

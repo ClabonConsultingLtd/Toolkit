@@ -14,7 +14,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 DEFAULT_SPACE = "microsoft/TRELLIS.2"
 DEFAULT_RESOLUTION = "1024"
@@ -94,8 +94,8 @@ def parse_record(item: Any, source_root: Path) -> tuple[str, Path, Path]:
         raise ValueError(
             "queue entry requires non-empty string id, reference and model fields"
         )
-    identifier = values["id"]
-    assert isinstance(identifier, str)
+    # The all(isinstance(..., str) ...) check above already guarantees this.
+    identifier = cast(str, values["id"])
     return (
         identifier,
         resolve_queue_path(values["reference"], source_root),

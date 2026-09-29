@@ -16,6 +16,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - name: Ruff security rules (S)
+        run: |
+          pip install ruff==0.16.9
+          ruff check --select S packages/image-generation packages/image-to-3d
       - run: node --test '.github/scripts/*.test.mjs'
       - run: node --test 'packages/agent-workflow/test/*.test.mjs'
       - run: node --test 'packages/claude-token-optimisation/test/*.test.mjs'
