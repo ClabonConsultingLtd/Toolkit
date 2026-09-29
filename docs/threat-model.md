@@ -56,7 +56,7 @@ The release flow is in [docs/release.md](release.md). [Prepare release](../.gith
 
 **Actors:** the consumer's maintainers, and agents following the `toolkit-upgrade` skill; the Toolkit remote, or another remote given with `--repo`; the network in between; and anyone who can publish a tag.
 
-toolkit-sync is described in its [README](../packages/toolkit-sync/README.md). Signing began with [#152](https://github.com/ClabonConsultingLtd/Toolkit/issues/152) and ADR 0002. As of 2026-09-29 the newest tag is v0.13.0, so every existing tag is a Legacy tag. v0.14.0 will be the first Signed release tag.
+toolkit-sync is described in its [README](../packages/toolkit-sync/README.md). Signing began with [#152](https://github.com/ClabonConsultingLtd/Toolkit/issues/152) and ADR 0002. v0.14.0 is the first Signed release tag. On 2026-09-29 it verified against the Trust anchor, and every earlier tag is a Legacy tag.
 
 | Threat | Current mitigation | Residual risk | Proposed follow-up |
 | --- | --- | --- | --- |
