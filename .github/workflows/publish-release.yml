@@ -1,25 +1,46 @@
 name: Publish release tag
 
+# A push to main, not the release PR's closed event, so the release
+# environment's main-only deployment rule applies to this run's ref. The
+# environment must never be widened to PR refs.
 on:
-  pull_request:
-    types: [closed]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
-# Only the release PR's own merge may join the group: GitHub cancels the older
-# pending run when another joins, and skipped runs would displace a real one.
-concurrency:
-  group: ${{ github.event.pull_request.merged && github.event.pull_request.head.ref == 'release/next' && 'toolkit-publish-release' || format('toolkit-publish-release-{0}', github.run_id) }}
-  cancel-in-progress: false
-
 jobs:
-  tag:
-    if: >-
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.ref == 'release/next'
+  detect:
     runs-on: ubuntu-latest
+    # pull-requests: read looks up the PR that the pushed commit merged.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      release: ${{ steps.merge.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: merge
+        name: Check whether this push merges the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/release-merge.mjs
+
+  # Only a release merge reaches this job, so every other push to main skips
+  # it and never enters the release environment or sees the signing key.
+  tag:
+    needs: detect
+    if: needs.detect.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    # Only release runs join the group, so a later push to main can't cancel a
+    # pending release.
+    concurrency:
+      group: toolkit-publish-release
+      cancel-in-progress: false
     # Elevated beyond the workflow-level default: pushing the tag and
     # publishing the GitHub Release need contents: write, and attesting build
     # provenance needs id-token: write and attestations: write.
@@ -30,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] persisted credentials are used below to push the release tag
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - id: version
         name: Validate the lockstep release version
@@ -43,21 +64,41 @@ jobs:
             for (const file of ["packages/claude-token-optimisation/package.json", "packages/toolkit-sync/package.json", "packages/image-generation/pyproject.toml", "packages/image-to-3d/pyproject.toml", "packages/image-generation/uv.lock", "packages/image-to-3d/uv.lock"]) if (!readFileSync(file, "utf8").includes(version)) throw new Error(`${file} does not contain ${version}`);
           '
           echo "value=$version" >> "$GITHUB_OUTPUT"
+      # The key is only written when the tag is new, to a 0600 file that the
+      # trap and the always-run step below both delete.
       - id: tag
-        name: Create the immutable tag
+        name: Sign the immutable tag
         env:
           VERSION: ${{ steps.version.outputs.value }}
+          RELEASE_TAG_SIGNING_KEY: ${{ secrets.RELEASE_TAG_SIGNING_KEY }}
         run: |
           tag="v$VERSION"
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             echo "$tag already exists; leaving it as is." >&2
+            echo "created=false" >> "$GITHUB_OUTPUT"
           else
+            key_file="$RUNNER_TEMP/release-tag-signing-key"
+            trap 'rm -f "$key_file"' EXIT
+            (umask 077 && printf '%s\n' "$RELEASE_TAG_SIGNING_KEY" > "$key_file")
+            chmod 600 "$key_file"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag --annotate "$tag" --message "Release $tag"
-            git push origin "$tag"
+            git -c gpg.format=ssh -c user.signingkey="$key_file" tag -s "$tag" --message "Release $tag"
+            echo "created=true" >> "$GITHUB_OUTPUT"
           fi
           echo "value=$tag" >> "$GITHUB_OUTPUT"
+      - name: Delete the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release-tag-signing-key"
+      - name: Verify the tag against the Trust anchor
+        env:
+          TAG: ${{ steps.tag.outputs.value }}
+        run: git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=packages/toolkit-sync/allowed_signers verify-tag "$TAG"
+      - name: Push the tag
+        if: steps.tag.outputs.created == 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.value }}
+        run: git push origin "refs/tags/$TAG"
       - name: Build the release archive and checksums
         env:
           TAG: ${{ steps.tag.outputs.value }}

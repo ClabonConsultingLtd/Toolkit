@@ -64,5 +64,5 @@ jobs:
           PR_NUMBER: ${{ steps.pending.outputs.number }}
           VERSION: ${{ steps.version.outputs.value }}
         run: |
-          body="Automated release candidate. Merging this PR creates immutable tag v$VERSION. It is rebuilt from main after every merge and lists each labelled PR merged since the last release."
+          body="Automated release candidate. Merging this PR creates the signed immutable tag v$VERSION. It is rebuilt from main after every merge and lists each labelled PR merged since the last release."
           if [[ -n "$PR_NUMBER" ]]; then gh pr edit "$PR_NUMBER" --title "Release v$VERSION" --body "$body"; else gh pr create --base main --head release/next --title "Release v$VERSION" --body "$body"; fi
