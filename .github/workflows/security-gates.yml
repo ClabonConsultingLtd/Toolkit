@@ -1,4 +1,4 @@
-# security-gates: the Core Gates a consumer repository runs from its Caller
+# security-gates: the Gates a consumer repository runs from its Caller
 # workflow, pinned to a Toolkit commit SHA. The inputs are a public interface:
 # an incompatible change to them is a release:major.
 #
@@ -10,8 +10,15 @@
 #   Static analysis  Opengrep with Toolkit's ruleset plus the repository's
 #                    .opengrep/ rules. Fails on ERROR findings.
 #
-# Suppressions live in each tool's own ignore file in the calling repository.
-# Each Gate fails when one has no reason, no expiry or a past expiry.
+# The opt-in image Gate runs when image-artifact or image-ref is set, as one
+# job per scanner:
+#   Image (trivy)    Trivy over the image's OS and application packages, with
+#                    the same `severity` rule as the dependency Gate.
+#   Image (dockle)   Dockle lints the image. Fails on FATAL, reports WARN.
+#
+# Suppressions live in each tool's own ignore file in the calling repository
+# (.trivyignore and .dockleignore for the image Gate). Each Gate fails when
+# one has no reason, no expiry or a past expiry.
 name: security-gates
 
 on:
@@ -26,8 +33,9 @@ on:
         default: '"ubuntu-latest"'
       severity:
         description: >-
-          Lowest vulnerability severity that fails the dependency Gate when a
-          fix is available: low, medium, high (CVSS 7.0 or more) or critical.
+          Lowest vulnerability severity that fails the dependency and image
+          Gates when a fix is available: low, medium, high (CVSS 7.0 or more)
+          or critical.
         type: string
         default: high
       code-scanning:
@@ -36,13 +44,57 @@ on:
           workflow must then grant security-events: write and actions: read.
         type: boolean
         default: false
-      # Reserved for the image Gate: image-artifact, image-ref.
+      image-artifact:
+        description: >-
+          Turns on the image Gate. The name of an artifact, uploaded earlier in
+          the Caller workflow's run, holding one `docker save` tarball. Don't
+          set image-ref as well.
+        type: string
+        default: ''
+      image-ref:
+        description: >-
+          Turns on the image Gate. An image reference the runner can pull
+          with `docker pull`, ideally pinned by digest. Don't set
+          image-artifact as well.
+        type: string
+        default: ''
 
 # No workflow-level permissions: the code-scanning job has to inherit the
 # Caller workflow's grant (see that job). Every other job sets its own.
 jobs:
+  inputs:
+    name: Check inputs
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    outputs:
+      call: ${{ steps.check.outputs.call }}
+      image: ${{ steps.check.outputs.image }}
+    steps:
+      # The call ID keeps artifact names apart when a Caller workflow calls
+      # this workflow more than once in a run, such as once per image.
+      - name: Check the image inputs
+        id: check
+        env:
+          IMAGE_ARTIFACT: ${{ inputs.image-artifact }}
+          IMAGE_REF: ${{ inputs.image-ref }}
+        run: |
+          if [ -n "$IMAGE_ARTIFACT" ] && [ -n "$IMAGE_REF" ]; then
+            echo "::error::Set image-artifact or image-ref, not both"
+            exit 1
+          fi
+          case "$IMAGE_REF" in
+            -*) echo "::error::image-ref must be an image reference"; exit 1 ;;
+          esac
+          image=false
+          if [ -n "$IMAGE_ARTIFACT$IMAGE_REF" ]; then image=true; fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "call=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')" >> "$GITHUB_OUTPUT"
+
   gate:
     name: ${{ matrix.title }} Gate
+    needs: inputs
     runs-on: ${{ fromJSON(inputs.runner) }}
     permissions:
       contents: read
@@ -96,14 +148,85 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: security-gates-${{ matrix.gate }}-${{ runner.arch }}
+          name: security-gates-${{ matrix.gate }}-${{ runner.arch }}-${{ needs.inputs.outputs.call }}
+          path: ${{ runner.temp }}/security-gates-results/
+          if-no-files-found: warn
+
+  image:
+    name: Image Gate (${{ matrix.tool }})
+    needs: inputs
+    if: needs.inputs.outputs.image == 'true'
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { gate: image-vulnerabilities, tool: trivy }
+          - { gate: image-lint, tool: dockle }
+    steps:
+      # Only for the repository's .trivyignore and .dockleignore.
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: target
+          persist-credentials: false
+      - name: Check out security-gates at the called commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: security-gates
+          sparse-checkout: packages/security-gates
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install and verify ${{ matrix.tool }}
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+          TOOL: ${{ matrix.tool }}
+        run: node security-gates/packages/security-gates/scripts/install-scanners.mjs --dest "$BIN" "$TOOL"
+      - name: Download the image artifact
+        if: inputs.image-artifact != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.image-artifact }}
+          path: ${{ runner.temp }}/security-gates-image
+      - name: Pull and save the image
+        if: inputs.image-ref != ''
+        env:
+          IMAGE_REF: ${{ inputs.image-ref }}
+          IMAGE_DIR: ${{ runner.temp }}/security-gates-image
+        run: |
+          docker pull "$IMAGE_REF"
+          mkdir -p "$IMAGE_DIR"
+          docker save --output "$IMAGE_DIR/image.tar" "$IMAGE_REF"
+      - name: Run the image Gate
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+          OUT: ${{ runner.temp }}/security-gates-results
+          IMAGE_DIR: ${{ runner.temp }}/security-gates-image
+          GATE: ${{ matrix.gate }}
+          SEVERITY: ${{ inputs.severity }}
+        run: >-
+          node security-gates/packages/security-gates/scripts/run-gate.mjs "$GATE"
+          --target target --out "$OUT" --bin "$BIN" --severity "$SEVERITY"
+          --image "$IMAGE_DIR"
+      - name: Upload SARIF and results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-gates-${{ matrix.gate }}-${{ runner.arch }}-${{ needs.inputs.outputs.call }}
           path: ${{ runner.temp }}/security-gates-results/
           if-no-files-found: warn
 
   summary:
     name: Security Gates summary
-    needs: gate
-    if: always()
+    needs: [inputs, gate, image]
+    if: always() && needs.inputs.result == 'success'
     runs-on: ${{ fromJSON(inputs.runner) }}
     permissions:
       contents: read
@@ -122,16 +245,22 @@ jobs:
           node-version: 24
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: security-gates-*-${{ runner.arch }}
+          pattern: security-gates-*-${{ runner.arch }}-${{ needs.inputs.outputs.call }}
           path: results
           merge-multiple: true
       - name: Write the summary table
-        run: node security-gates/packages/security-gates/scripts/write-summary.mjs --results results
+        env:
+          IMAGE: ${{ needs.inputs.outputs.image }}
+        run: |
+          args=(--results results)
+          if [ "$IMAGE" = true ]; then args+=(--image); fi
+          node security-gates/packages/security-gates/scripts/write-summary.mjs "${args[@]}"
+
 
   code-scanning:
     name: Upload SARIF to code scanning
-    needs: gate
-    if: ${{ always() && inputs.code-scanning }}
+    needs: [inputs, gate, image]
+    if: ${{ always() && inputs.code-scanning && needs.inputs.result == 'success' }}
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 10
     # No permissions block, so this job gets exactly what the Caller workflow
@@ -146,7 +275,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: security-gates-*-${{ runner.arch }}
+          pattern: security-gates-*-${{ runner.arch }}-${{ needs.inputs.outputs.call }}
           path: results
           merge-multiple: true
       - name: Upload secrets SARIF
@@ -169,4 +298,18 @@ jobs:
         with:
           sarif_file: results/static-analysis.sarif
           category: security-gates-static-analysis
+          checkout_path: ${{ github.workspace }}/target
+      - name: Upload image vulnerabilities SARIF
+        if: ${{ hashFiles('results/image-vulnerabilities.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: results/image-vulnerabilities.sarif
+          category: security-gates-image-vulnerabilities
+          checkout_path: ${{ github.workspace }}/target
+      - name: Upload image lint SARIF
+        if: ${{ hashFiles('results/image-lint.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: results/image-lint.sarif
+          category: security-gates-image-lint
           checkout_path: ${{ github.workspace }}/target

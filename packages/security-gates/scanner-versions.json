@@ -5,6 +5,12 @@
 			"arm64": "c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a"
 		}
 	},
+	"dockle": {
+		"0.4.15": {
+			"amd64": "8bfc9183d1d3d67800edb45bea4bb63ddf1d28bec5f89944075a07007d79caad",
+			"arm64": "14c2fbcd675afaa0f1717e97ab71eee178dabdef676066189f49bad0f53b8762"
+		}
+	},
 	"gitleaks": {
 		"8.30.1": {
 			"amd64": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
@@ -21,6 +27,12 @@
 		"2.6.0": {
 			"amd64": "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108",
 			"arm64": "2c71403eb443d05891c4f268c3ad771cf4f16e5443463fd7851ef8f454d3c7e4"
+		}
+	},
+	"trivy": {
+		"0.74.0": {
+			"amd64": "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a",
+			"arm64": "b94ce1976bbf3c15b514b605ee88be7c6d94a29be2302847ff01cb794d47aad5"
 		}
 	}
 }

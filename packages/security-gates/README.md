@@ -65,7 +65,7 @@ The steps assume `toolkit-sync` is vendored at `tools/toolkit-sync` and this pac
 
    Each finding's `Fingerprint:` line is the `.gitleaksignore` entry that suppresses it.
 
-6. **Open the pull request.** The Caller workflow runs the Gates on it. Each Gate's job summary lists its findings and marks the blocking ones, and the run keeps SARIF and JSON results as artifacts named `security-gates-<gate>-<arch>`.
+6. **Open the pull request.** The Caller workflow runs the Gates on it. Each Gate's job summary lists its findings and marks the blocking ones, and the run keeps SARIF and JSON results as artifacts named `security-gates-<gate>-<arch>-<call>`.
 
 7. **Fix or suppress every finding in the same pull request.** Fix what you can. First rotate any real secret: a Suppression doesn't make a leaked secret safe. Suppress the rest with a reason and an expiry, as [Suppressions](#suppressions) describes. Include the history findings from step 5, even though the pull request run doesn't report them. Push until every Gate passes.
 
@@ -117,7 +117,7 @@ Some details:
 - **Scope.** The secrets Gate scans the pull request's commits (`base..head`) on pull requests and the full history on every other event. The dependencies Gate reads every lockfile OSV-Scanner supports, anywhere in the repository. The static analysis Gate scans the checked-out tree, minus Opengrep's ignore list (see [the `.semgrepignore` caveat](#the-semgrepignore-caveat)).
 - **Opengrep rules.** The static analysis Gate runs Toolkit's hand-written ruleset for JavaScript and TypeScript (Node.js, Express, Next.js, React), Python and Dockerfiles. `ERROR` is kept for patterns that are nearly always a real problem, such as dynamic `eval`, shell commands built by interpolation or disabled TLS verification. If your repository has a `.opengrep/` folder, its rules run too, and the same severity rule applies to them.
 - **Inline markers don't work.** The secrets Gate runs Gitleaks with `--ignore-gitleaks-allow`, and the static analysis Gate runs Opengrep with `--disable-nosem`. A `gitleaks:allow` or `nosemgrep` comment has no effect. Every accepted finding needs a Suppression, which has an expiry.
-- **Results.** Every run writes a job summary per Gate, listing findings with the blocking ones first, plus a summary table across the Gates. It uploads each Gate's SARIF and JSON results as the artifact `security-gates-<gate>-<arch>`.
+- **Results.** Every run writes a job summary per Gate, listing findings with the blocking ones first, plus a summary table across the Gates. It uploads each Gate's SARIF and JSON results as the artifact `security-gates-<gate>-<arch>-<call>`, where `<call>` is a random ID for that call of the workflow, so a Caller workflow can call it more than once in a run, for example once per image.
 
 ## Suppressions
 
@@ -128,10 +128,12 @@ A Suppression is your recorded decision to accept one finding. It lives in the t
 | Secrets | `.gitleaksignore` at the repository root only | the finding's fingerprint | comment convention |
 | Static analysis | `.semgrepignore` | a path or pattern, in `.gitignore` syntax | comment convention |
 | Dependencies | `osv-scanner.toml`, in the same directory as the lockfile it applies to | `[[IgnoredVulns]]`, or a `[[PackageOverrides]]` that ignores something | OSV-Scanner's `reason` and `ignoreUntil` (`effectiveUntil` for a package override) |
+| Image (Trivy) | `.trivyignore` at the repository root only | a vulnerability ID, such as `CVE-2021-36159` | comment convention |
+| Image (Dockle) | `.dockleignore` at the repository root only | a checkpoint code, such as `CIS-DI-0001` | comment convention |
 
 OSV-Scanner reads `osv-scanner.toml` only from the lockfile's own directory. One at the repository root doesn't cover a lockfile in a subdirectory.
 
-**The comment convention.** In `.gitleaksignore` and `.semgrepignore`, put this comment directly above the entries it covers:
+**The comment convention.** In `.gitleaksignore`, `.semgrepignore`, `.trivyignore` and `.dockleignore`, put this comment directly above the entries it covers:
 
 ```
 # reason: <why this finding is accepted> expires: YYYY-MM-DD

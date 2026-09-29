@@ -6,9 +6,11 @@
 //   opengrep     .semgrepignore files
 //   osv-scanner  osv-scanner.toml files, using the native reason and
 //                ignoreUntil (or effectiveUntil) fields
+//   trivy        .trivyignore at the repository root
+//   dockle       .dockleignore at the repository root
 //
-// In .gitleaksignore and .semgrepignore, each entry carries a comment on the
-// line directly above it:
+// In the other files, each entry carries a comment on the line directly above
+// it:
 //   # reason: <text> expires: YYYY-MM-DD
 // A comment covers the consecutive entries below it, up to a blank line.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -16,7 +18,14 @@ import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 
 export const WARN_WITHIN_DAYS = 14;
-export const TOOLS = ["gitleaks", "opengrep", "osv-scanner"];
+export const TOOLS = ["gitleaks", "opengrep", "osv-scanner", "trivy", "dockle"];
+
+// Tools whose ignore file is a single file at the repository root.
+const ROOT_IGNORE_FILES = {
+	gitleaks: ".gitleaksignore",
+	trivy: ".trivyignore",
+	dockle: ".dockleignore",
+};
 
 const SKIP_DIRS = new Set([".git", "node_modules"]);
 
@@ -33,8 +42,8 @@ function walk(root, name, dir = root, found = []) {
 }
 
 export function ignoreFiles(tool, root) {
-	if (tool === "gitleaks")
-		return existsSync(join(root, ".gitleaksignore")) ? [".gitleaksignore"] : [];
+	const rootFile = ROOT_IGNORE_FILES[tool];
+	if (rootFile) return existsSync(join(root, rootFile)) ? [rootFile] : [];
 	if (tool === "opengrep") return walk(root, ".semgrepignore");
 	if (tool === "osv-scanner") return walk(root, "osv-scanner.toml");
 	throw new Error(`unknown tool "${tool}"; choose from ${TOOLS.join(", ")}`);

@@ -9,6 +9,7 @@ import {
 	evaluate,
 	osvSuppressions,
 	parseCommentedIgnoreFile,
+	TOOLS,
 } from "../scripts/check-suppressions.mjs";
 
 const TODAY = "2026-06-01";
@@ -236,9 +237,42 @@ test("the checker finds osv-scanner.toml and .semgrepignore files in subdirector
 	);
 });
 
+test("the checker reads .trivyignore and .dockleignore at the repository root", () => {
+	const root = repoWith({
+		".trivyignore":
+			"# reason: no fixed base image yet expires: 2026-12-31\nCVE-2021-36159\n\nCVE-2022-0001\n",
+		".dockleignore":
+			"# reason: runs as root until the migration expires: 2026-06-05\nCIS-DI-0001\n",
+		"sub/.trivyignore": "CVE-2022-0002\n",
+	});
+	assert.deepEqual(
+		checkSuppressions("trivy", root, TODAY).suppressions.map((s) => [
+			s.file,
+			s.entry,
+			s.level,
+		]),
+		[
+			[".trivyignore", "CVE-2021-36159", "ok"],
+			[".trivyignore", "CVE-2022-0001", "error"],
+		],
+	);
+	const trivy = cli(root, "trivy");
+	assert.equal(trivy.status, 1);
+	assert.match(
+		trivy.stdout,
+		/^::error file=\.trivyignore,line=4::trivy Suppression "CVE-2022-0001" has no reason, has no expiry date/m,
+	);
+	const dockle = cli(root, "dockle");
+	assert.equal(dockle.status, 0);
+	assert.match(
+		dockle.stdout,
+		/^::warning file=\.dockleignore,line=2::dockle Suppression "CIS-DI-0001" expires in 4 days/m,
+	);
+});
+
 test("a repository without ignore files passes", () => {
 	const root = repoWith({ "README.md": "hello\n" });
-	for (const tool of ["gitleaks", "opengrep", "osv-scanner"]) {
+	for (const tool of TOOLS) {
 		assert.equal(cli(root, tool).status, 0, tool);
 	}
 });

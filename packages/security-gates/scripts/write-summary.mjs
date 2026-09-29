@@ -1,11 +1,12 @@
 // Combines the <gate>.json results written by run-gate.mjs into one job
-// summary table. A Gate with no result file is listed without counts.
+// summary table. A Gate with no result file is listed without counts. The
+// image Gate's rows appear only when it's on (--image).
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { GATES } from "./run-gate.mjs";
 
-export function summaryMarkdown(resultsDir) {
+export function summaryMarkdown(resultsDir, { image = false } = {}) {
 	const lines = [
 		"## Security Gates",
 		"",
@@ -13,6 +14,7 @@ export function summaryMarkdown(resultsDir) {
 		"| --- | --- | --- | --- | --- | --- |",
 	];
 	for (const [gate, spec] of Object.entries(GATES)) {
+		if (spec.optIn && !image) continue;
 		const path = join(resultsDir, `${gate}.json`);
 		if (!existsSync(path)) {
 			lines.push(
@@ -37,12 +39,14 @@ export function summaryMarkdown(resultsDir) {
 }
 
 function main() {
-	const { values } = parseArgs({ options: { results: { type: "string" } } });
+	const { values } = parseArgs({
+		options: { results: { type: "string" }, image: { type: "boolean" } },
+	});
 	if (!values.results) {
-		console.log("usage: write-summary.mjs --results <dir>");
+		console.log("usage: write-summary.mjs --results <dir> [--image]");
 		process.exit(2);
 	}
-	const markdown = summaryMarkdown(values.results);
+	const markdown = summaryMarkdown(values.results, { image: values.image });
 	console.log(markdown);
 	if (process.env.GITHUB_STEP_SUMMARY)
 		appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);
