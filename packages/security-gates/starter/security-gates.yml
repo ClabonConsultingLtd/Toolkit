@@ -1,0 +1,49 @@
+# Caller workflow for Toolkit's security Gates. Copy it to
+# .github/workflows/security-gates.yml and put the commit SHA and tag of the
+# release you pinned on the `uses:` line. The adoption steps in the
+# security-gates README do both with sed. Dependabot then bumps the pin and
+# its version comment together.
+name: security-gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # New advisories appear without a code change, and Suppressions expire, so
+  # the Gates also run weekly. workflow_dispatch lets you run them by hand.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-gates:
+    uses: ClabonConsultingLtd/Toolkit/.github/workflows/security-gates.yml@TOOLKIT_SHA # TOOLKIT_TAG
+    # The reusable workflow's jobs get at most what this job grants. The Core
+    # Gates only read the repository. To turn code-scanning on below, also
+    # uncomment security-events and actions: the upload job needs both, and
+    # GitHub rejects the call when code-scanning is true without them.
+    permissions:
+      contents: read
+      # security-events: write
+      # actions: read
+    with:
+      # JSON for runs-on: a label string, or an array of labels such as
+      # '["self-hosted", "linux", "arm64"]'. Runners must be linux/amd64 or
+      # linux/arm64.
+      runner: '"ubuntu-latest"'
+      # Lowest CVSS severity with a fix available that fails the dependency
+      # Gate: low, medium, high or critical.
+      severity: high
+      # Upload each Gate's SARIF to code scanning. Needs code scanning to be
+      # available for the repository, and the permissions above.
+      code-scanning: false
+      # Opt-in image Gate (Trivy and Dockle). Set at most one of these, and
+      # only once your pinned release has the image Gate:
+      # image-artifact: app-image
+      #   The name of an artifact holding a `docker save` tarball, uploaded by
+      #   an earlier job in this workflow. Add that job to `needs:` here.
+      # image-ref: ghcr.io/example-org/app:1.2.3
+      #   An image reference the runner can pull.

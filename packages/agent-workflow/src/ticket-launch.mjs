@@ -3,6 +3,22 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { resolveProvider } from "./ticket-providers.mjs";
 
+function splitCommand(command) {
+	const parts = command.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+	return parts.map((part) =>
+		(part.startsWith('"') && part.endsWith('"')) ||
+		(part.startsWith("'") && part.endsWith("'"))
+			? part.slice(1, -1)
+			: part,
+	);
+}
+
+function quoteIfNeeded(value) {
+	return /[\s"'$`\\;&|<>()]/.test(value)
+		? `'${value.replace(/'/g, `'\\''`)}'`
+		: value;
+}
+
 const args = process.argv.slice(2),
 	dry = args.includes("--dry-run"),
 	n = args.indexOf("--config"),
@@ -29,13 +45,13 @@ const ticketRef = provider.resolveReference(ticketArg, process.cwd());
 const status = provider.getStatus(ticketRef, config);
 if (status !== config.readyStatus)
 	throw new Error(`ticket status must be ${config.readyStatus}`);
+const [commandName, ...commandArgs] = splitCommand(config.command);
 if (dry) {
-	console.log(`${config.command} ${ticketRef}`);
+	console.log(`${config.command} ${quoteIfNeeded(ticketRef)}`);
 	process.exit(0);
 }
-const result = spawnSync(config.command, [ticketRef], {
+const result = spawnSync(commandName, [...commandArgs, ticketRef], {
 	stdio: "inherit",
-	shell: true,
 });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;

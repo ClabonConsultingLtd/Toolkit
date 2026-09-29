@@ -30,11 +30,14 @@ const FAMILIES = ["sonnet", "opus", "haiku"];
 // Mirrors resolveRuntime's own matching in orchestration-github.mjs: an exact
 // id/label match, or a bare family name resolving to any numbered model in
 // that family (the digest has no model catalog to resolve a family to the
-// exact id that was actually launched).
+// exact id that was actually launched). Without a catalog, a versioned label
+// such as "Sonnet 5.5" is compared through its id form, "claude-sonnet-5-5".
 export function modelsMatch(recommendedModel, actualModel) {
 	const wanted = recommendedModel.toLowerCase();
 	const got = actualModel.toLowerCase();
 	if (wanted === got) return true;
+	const label = wanted.match(/^(sonnet|opus|haiku|fable) (\d+(?:\.\d+)?)$/);
+	if (label) return got === `claude-${label[1]}-${label[2].replace(".", "-")}`;
 	return (
 		FAMILIES.includes(wanted) &&
 		new RegExp(`^claude-${wanted}-[\\d-]+$`).test(got)
@@ -67,6 +70,7 @@ export function ticketRecord(
 		actual,
 		codexFallback,
 		fixCycleCapped: (ticket.fixCycles ?? 0) >= 2,
+		cleanupFailed: ticket.cleanup?.ok === false,
 		recommendationMismatch:
 			!!recommendation &&
 			!!actual &&
@@ -177,6 +181,7 @@ export function renderMarkdown(digest) {
 				t.codexFallback ? "codex-fallback" : null,
 				t.recommendationMismatch ? "model-mismatch" : null,
 				t.anomalous ? "stuck" : null,
+				t.cleanupFailed ? "cleanup-failed" : null,
 			]
 				.filter(Boolean)
 				.join(", ");

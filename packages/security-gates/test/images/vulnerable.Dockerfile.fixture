@@ -1,0 +1,7 @@
+# A base image whose only package, apk-tools 2.12.5-r1 on Alpine 3.14, has a
+# critical CVE with a fix (CVE-2021-36159, fixed in 2.12.6-r0). Built from
+# scratch with just the package database, so the findings don't change as
+# upstream images are rebuilt.
+FROM scratch
+COPY rootfs-vulnerable/ /
+USER 65532:65532

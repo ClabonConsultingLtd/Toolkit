@@ -1,0 +1,4 @@
+[[IgnoredVulns]]
+id = "GHSA-0000-0000-0000"
+ignoreUntil = 2026-01-05
+reason = "Not reachable: we never parse untrusted input with this package"

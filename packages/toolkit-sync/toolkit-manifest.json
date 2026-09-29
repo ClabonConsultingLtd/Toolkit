@@ -1,3 +1,10 @@
 {
-	"include": ["README.md", "package.json", "src/**", "claude/**", "codex/**"]
+	"include": [
+		"README.md",
+		"package.json",
+		"allowed_signers",
+		"src/**",
+		"claude/**",
+		"codex/**"
+	]
 }

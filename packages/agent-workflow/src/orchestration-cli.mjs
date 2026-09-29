@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readRepositoryIntakeConfig } from "./intake-config.mjs";
 import {
@@ -53,7 +53,121 @@ function claudeLimitPending(ticket, options) {
 		readClaudeCooldown(options.fallbackStatePath ?? fallbackStatePath()).active
 	);
 }
+// Repository scripts always run from the stable checkout, never from a
+// worker's worktree, so PR code never runs with the controller's permissions.
+function checkoutScript(cwd, relative, label) {
+	const checkout = realpathSync(cwd);
+	const script = realpathSync(resolve(checkout, relative));
+	if (!script.startsWith(`${checkout}${sep}`))
+		throw new Error(`${label} escapes the checkout`);
+	return script;
+}
+function repositoryConfigFor(state) {
+	const config = readRepositoryIntakeConfig(state.cwd);
+	if (
+		config &&
+		config.repository.toLowerCase() !== state.repository.toLowerCase()
+	)
+		throw new Error("repository intake config belongs to another repository");
+	return config;
+}
+function worktreeBranch(worktree) {
+	try {
+		return execFileSync("git", ["symbolic-ref", "--short", "-q", "HEAD"], {
+			cwd: worktree,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+	} catch {
+		return null;
+	}
+}
+const CLEANUP_TIMEOUT = 120_000;
+// Runs the repository's cleanupCommand against one ticket's worktree, e.g. to
+// remove Compose projects a worker or review started there. A failure is
+// recorded and reported but never changes the ticket's lifecycle state. The
+// hook runs outside the state mutex so a slow teardown does not block others.
+function cleanup(path, input, options) {
+	const number = String(input.number ?? "").replace(/^#/, "");
+	const prepared = transaction(path, (state) => {
+		if (!state) throw new Error("initialize batch first");
+		assertLease(state, input.token);
+		const t = state.tickets[number];
+		if (!t?.branch) throw new Error("reserve ticket first");
+		const config = repositoryConfigFor(state);
+		if (!config?.cleanupCommand)
+			return { output: { ticket: t.number, ran: false } };
+		if (
+			typeof input.worktreePath !== "string" ||
+			!isAbsolute(input.worktreePath)
+		)
+			throw new Error("worktreePath must be an absolute path");
+		const worktree = realpathSync(input.worktreePath);
+		if (!statSync(worktree).isDirectory())
+			throw new Error("worktreePath must be a directory");
+		const branch = worktreeBranch(worktree);
+		if (branch !== t.branch)
+			throw new Error(
+				`worktree is on ${branch || "a detached HEAD"}, not ${t.branch}`,
+			);
+		return {
+			output: {
+				ticket: t.number,
+				branch: t.branch,
+				worktree,
+				script: checkoutScript(
+					state.cwd,
+					config.cleanupCommand,
+					"cleanup command",
+				),
+			},
+		};
+	});
+	if (!prepared.script) return prepared;
+	let error = null;
+	try {
+		execFileSync(
+			process.execPath,
+			[
+				prepared.script,
+				prepared.worktree,
+				prepared.branch,
+				String(prepared.ticket),
+			],
+			{
+				cwd: prepared.worktree,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+				timeout: options.cleanupTimeout ?? CLEANUP_TIMEOUT,
+			},
+		);
+	} catch (failure) {
+		error = (
+			failure.signal
+				? `timed out or killed (${failure.signal})`
+				: failure.stderr || failure.message
+		).trim();
+	}
+	return transaction(path, (state) => {
+		assertLease(state, input.token);
+		state.tickets[number].cleanup = {
+			at: new Date().toISOString(),
+			ok: !error,
+			...(error ? { error } : {}),
+		};
+		return {
+			state,
+			output: {
+				ticket: prepared.ticket,
+				ran: true,
+				ok: !error,
+				...(error ? { error } : {}),
+			},
+		};
+	});
+}
 export function execute(command, path, input = {}, options = {}) {
+	if (command === "cleanup") return cleanup(path, input, options);
 	if (command === "claude-cooldown")
 		return readClaudeCooldown(options.fallbackStatePath ?? fallbackStatePath());
 	if (command === "record-claude-limit")
@@ -232,15 +346,7 @@ export function execute(command, path, input = {}, options = {}) {
 						policy.repository.toLowerCase() !== state.repository.toLowerCase()
 					)
 						throw new Error("intake policy belongs to another repository");
-					const repositoryConfig = readRepositoryIntakeConfig(state.cwd);
-					if (
-						repositoryConfig &&
-						repositoryConfig.repository.toLowerCase() !==
-							state.repository.toLowerCase()
-					)
-						throw new Error(
-							"repository intake config belongs to another repository",
-						);
+					const repositoryConfig = repositoryConfigFor(state);
 					let required =
 						repositoryConfig?.requiredChecks ?? policy?.requiredChecks;
 					if (required === undefined) {
@@ -256,12 +362,11 @@ export function execute(command, path, input = {}, options = {}) {
 					}
 					requirePassingChecks(pr.statusCheckRollup ?? [], required);
 					if (repositoryConfig?.localVerificationCommand) {
-						const checkout = realpathSync(state.cwd);
-						const gate = realpathSync(
-							resolve(checkout, repositoryConfig.localVerificationCommand),
+						const gate = checkoutScript(
+							state.cwd,
+							repositoryConfig.localVerificationCommand,
+							"local verification gate",
 						);
-						if (!gate.startsWith(`${checkout}${sep}`))
-							throw new Error("local verification gate escapes the checkout");
 						try {
 							execFileSync(
 								process.execPath,

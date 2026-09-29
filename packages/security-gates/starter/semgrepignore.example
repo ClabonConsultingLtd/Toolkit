@@ -1,0 +1,20 @@
+# Example .semgrepignore for the static analysis Gate. Copy it to the
+# repository root as .semgrepignore only if you need it.
+#
+# A .semgrepignore replaces Opengrep's default ignore list, which skips paths
+# such as test/, tests/, vendor/, build/, dist/ and node_modules/. Once the
+# file exists, those paths are scanned unless you list them here, and every
+# entry, including a copied default, is a Suppression that needs a reason and
+# an expiry.
+#
+# Entries use .gitignore syntax. The comment directly above an entry gives its
+# reason and expiry, and covers the consecutive entries below it, up to a
+# blank line. The Gate fails when an entry has no reason, no expiry, a date
+# that isn't YYYY-MM-DD, or a past expiry, and warns 14 days ahead.
+
+# reason: vendored third-party library, patched upstream only expires: 2027-03-31
+vendor/
+
+# reason: test fixtures build deliberately unsafe inputs expires: 2027-03-31
+tests/fixtures/
+test/fixtures/

@@ -62,6 +62,12 @@ test("canonical prompt names absolute paths and required instructions determinis
 		prompt,
 		/automatic completion notification within the same turn/,
 	);
+	assert.match(
+		prompt,
+		/subagent, review, verification, test run or timer in the foreground/,
+	);
+	assert.match(prompt, /never end the turn while any of them is in progress/);
+	assert.match(prompt, /Never wait for a lease held by another run to expire/);
 	assert.doesNotMatch(prompt, /Repository additions/);
 	assert.doesNotMatch(prompt, /\d{4}-\d{2}-\d{2}/);
 	writeFileSync(
@@ -121,6 +127,33 @@ test("selfAuthoredMerge adds the comment-review rule only when set", (t) => {
 	);
 });
 
+test("cleanupCommand adds the cleanup rule only when set; review teardown is always asked", (t) => {
+	const cwd = checkout(t, base);
+	const plain = schedulePrompt(cwd);
+	assert.match(
+		plain,
+		/Tear down any containers, volumes and networks this run started while verifying\./,
+	);
+	assert.doesNotMatch(plain, /cleanup STATE\.json/);
+	writeFileSync(
+		join(cwd, "toolkit-intake.json"),
+		JSON.stringify({ ...base, cleanupCommand: "scripts/intake-cleanup.mjs" }),
+	);
+	const opted = schedulePrompt(cwd);
+	assert.match(
+		opted,
+		/orchestrate\.mjs cleanup STATE\.json` with the lease token, ticket number and absolute `worktreePath`/,
+	);
+	assert.equal(
+		opted.replace(
+			/ Run `node [^`]+ cleanup STATE\.json`[^\n]*? as a warning\./,
+			"",
+		),
+		plain,
+		"only step 5 changes",
+	);
+});
+
 test("new config fields are validated", (t) => {
 	for (const [field, value] of [
 		["schedulePromptAppend", ""],
@@ -136,6 +169,10 @@ test("new config fields are validated", (t) => {
 		["controllerProvider", 3],
 		["controllerThinkingOptionId", ""],
 		["controllerThinkingOptionId", 3],
+		["cleanupCommand", "/abs/cleanup.mjs"],
+		["cleanupCommand", "../cleanup.mjs"],
+		["cleanupCommand", "cleanup.sh"],
+		["cleanupCommand", 3],
 	]) {
 		const cwd = checkout(t, { ...base, [field]: value });
 		assert.throws(() => readRepositoryIntakeConfig(cwd), new RegExp(field));

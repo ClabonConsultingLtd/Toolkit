@@ -18,12 +18,20 @@ export function writePins(pinFilePath, pins) {
 
 /**
  * Record `{tag, sha}` for `packageName`, keeping its recorded `dest` and
- * last-synced baseline. Pass `dest` (repo-relative, POSIX) to set or replace it.
+ * last-synced baseline. Pass `dest` (repo-relative, POSIX) to set or replace it,
+ * and `signer`, the verified signer principal, for a Signed release tag.
  */
-export function setPin(pinFilePath, packageName, tag, sha, { dest } = {}) {
+export function setPin(
+	pinFilePath,
+	packageName,
+	tag,
+	sha,
+	{ dest, signer } = {},
+) {
 	const pins = readPins(pinFilePath);
 	const previous = pins[packageName] ?? {};
 	const entry = { tag, sha };
+	if (signer !== undefined) entry.signer = signer;
 	const recordedDest = dest ?? previous.dest;
 	if (recordedDest !== undefined) entry.dest = recordedDest;
 	for (const key of ["syncedSha", "syncedFiles", "syncedHashes"]) {
@@ -52,6 +60,17 @@ export function setSyncedFiles(
 	if (sha !== undefined) entry.syncedSha = sha;
 	if (hashes !== undefined) entry.syncedHashes = hashes;
 	pins[packageName] = entry;
+	writePins(pinFilePath, pins);
+	return pins;
+}
+
+/** Record the verified signer principal of an existing pin, next to its `tag` and `sha`. */
+export function setSigner(pinFilePath, packageName, signer) {
+	const pins = readPins(pinFilePath);
+	if (!pins[packageName])
+		throw new Error(`no pin recorded for "${packageName}"`);
+	const { tag, sha, signer: _previous, ...rest } = pins[packageName];
+	pins[packageName] = { tag, sha, signer, ...rest };
 	writePins(pinFilePath, pins);
 	return pins;
 }

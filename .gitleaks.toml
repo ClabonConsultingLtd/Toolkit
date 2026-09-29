@@ -1,0 +1,9 @@
+# Gitleaks configuration for scans of this repository.
+[extend]
+useDefault = true
+
+# The security-gates fixtures hold fake credentials, planted on purpose so the
+# self-test can check that the secrets Gate fails on them.
+[[allowlists]]
+description = "security-gates test fixtures"
+paths = ['''^packages/security-gates/test/fixtures/''']

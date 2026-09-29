@@ -1,0 +1,278 @@
+# Tests the security-gates reusable workflow and its scripts on amd64 and
+# arm64 runners.
+#
+# clean-tree      calls the reusable workflow by local path, as a Caller
+#                 workflow would, over Toolkit's own tree. It must pass.
+# image-skipped   checks that clean-tree, which sets no image input, skipped
+#                 the image Gate.
+# image-artifact  calls the reusable workflow with a clean fixture image built
+#                 in an earlier job and passed as an artifact. It must pass.
+# image-ref       calls the reusable workflow with a public image, pinned by
+#                 digest, for it to pull. It must pass.
+# fixtures        runs each Core Gate over the committed fixtures in
+#                 packages/security-gates/test/fixtures, and checks that
+#                 planted findings fail their Gate and that clean ones pass.
+# image-fixtures  does the same for the image Gate, with images built from
+#                 packages/security-gates/test/images.
+#
+# A called workflow that fails fails this run, so the expected failures are
+# tested in the fixtures jobs, not through the reusable workflow.
+name: security-gates self-test
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/security-gates.yml
+      - .github/workflows/security-gates-self-test.yml
+      - .gitleaks.toml
+      - packages/security-gates/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/security-gates.yml
+      - .github/workflows/security-gates-self-test.yml
+      - .gitleaks.toml
+      - packages/security-gates/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-tree:
+    name: Clean tree (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    uses: ./.github/workflows/security-gates.yml
+    with:
+      runner: ${{ toJSON(matrix.runner) }}
+
+  image-skipped:
+    name: Image Gate skipped without image inputs
+    needs: clean-tree
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    timeout-minutes: 5
+    steps:
+      - name: Check that clean-tree skipped every image Gate job
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          jobs=$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" \
+            --jq '.jobs[] | select(.name | startswith("Clean tree (")) | "\(.conclusion)\t\(.name)"')
+          printf '%s\n' "$jobs"
+          image=$(printf '%s\n' "$jobs" | grep -F '/ Image Gate' || true)
+          if [ -z "$image" ]; then
+            echo "::error::No image Gate job found in the clean-tree calls"
+            exit 1
+          fi
+          if printf '%s\n' "$image" | grep -v '^skipped'; then
+            echo "::error::The image Gate ran without an image input"
+            exit 1
+          fi
+          echo "The image Gate was skipped in every clean-tree call"
+
+  image-build:
+    name: Build the fixture image (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Built and saved on the runner, and passed on as an artifact only.
+      - name: Build and save the clean fixture image
+        working-directory: packages/security-gates/test/images
+        env:
+          OUT: ${{ runner.temp }}/fixture-image
+        run: |
+          docker build --file clean.Dockerfile.fixture --tag security-gates-fixture-clean .
+          mkdir -p "$OUT"
+          docker save --output "$OUT/clean.tar" security-gates-fixture-clean
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fixture-image-${{ matrix.runner }}
+          path: ${{ runner.temp }}/fixture-image/clean.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  image-artifact:
+    name: Image artifact (${{ matrix.runner }})
+    needs: image-build
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    uses: ./.github/workflows/security-gates.yml
+    with:
+      runner: ${{ toJSON(matrix.runner) }}
+      image-artifact: fixture-image-${{ matrix.runner }}
+
+  image-ref:
+    name: Image reference (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    uses: ./.github/workflows/security-gates.yml
+    with:
+      runner: ${{ toJSON(matrix.runner) }}
+      # Multi-arch, non-root and with no fixable vulnerabilities.
+      image-ref: gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+
+  fixtures:
+    name: Fixtures (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    defaults:
+      run:
+        working-directory: packages/security-gates
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install and verify every scanner
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: node scripts/install-scanners.mjs --dest "$BIN" gitleaks osv-scanner opengrep
+      - name: A changed hash in the versions file fails the install
+        env:
+          BIN: ${{ runner.temp }}/tampered-bin
+          VERSIONS: ${{ runner.temp }}/tampered-versions.json
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const versions = JSON.parse(fs.readFileSync("scanner-versions.json", "utf8"));
+            for (const hashes of Object.values(versions.gitleaks)) {
+              for (const arch of Object.keys(hashes)) {
+                hashes[arch] = (hashes[arch][0] === "0" ? "1" : "0") + hashes[arch].slice(1);
+              }
+            }
+            fs.writeFileSync(process.argv[1], JSON.stringify(versions));
+          ' "$VERSIONS"
+          status=0
+          node scripts/install-scanners.mjs --versions "$VERSIONS" --dest "$BIN" gitleaks > install.log 2>&1 || status=$?
+          # Show the log without turning the expected error into an annotation.
+          token="expected-failure-$RANDOM$RANDOM"
+          echo "::stop-commands::$token"
+          cat install.log
+          echo "::$token::"
+          if [ "$status" -eq 0 ] || ! grep -q 'SHA-256 mismatch' install.log || [ -e "$BIN/gitleaks" ]; then
+            echo "::error::The install should have failed on the changed hash"
+            exit 1
+          fi
+          echo "The install failed on the changed hash, as expected"
+      # Run from inside test/rules: Opengrep skips paths under test/ by default.
+      - name: Opengrep rule tests
+        working-directory: packages/security-gates/test/rules
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: '"$BIN/opengrep" test --config ../../rules .'
+      - name: Clean fixture passes every Gate
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: |
+          for gate in secrets dependencies static-analysis; do
+            node test/fixture-gate.mjs clean "$gate" --expect pass --bin "$BIN"
+          done
+      - name: A planted secret fails the secrets Gate
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: node test/fixture-gate.mjs secrets-planted secrets --expect fail --bin "$BIN"
+      - name: A suppressed secret passes the secrets Gate
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: node test/fixture-gate.mjs secrets-suppressed secrets --expect pass --bin "$BIN"
+      - name: A fixable vulnerable dependency fails the dependencies Gate
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: node test/fixture-gate.mjs dependencies-fixable dependencies --expect fail --bin "$BIN"
+      - name: An unfixable high vulnerability is reported but passes
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: node test/fixture-gate.mjs dependencies-unfixable dependencies --expect pass --bin "$BIN"
+      - name: An Opengrep ERROR pattern fails the static analysis Gate
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: node test/fixture-gate.mjs static-planted static-analysis --expect fail --bin "$BIN"
+      - name: Suppressions with no reason, no expiry or a past expiry fail
+        run: node test/fixture-gate.mjs suppressions-invalid suppressions --expect fail
+      - name: Suppressions expiring within 14 days only warn
+        run: node test/fixture-gate.mjs suppressions-expiring suppressions --expect warn --today 2026-01-01
+
+  image-fixtures:
+    name: Image fixtures (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    defaults:
+      run:
+        working-directory: packages/security-gates
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install and verify Trivy and Dockle
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: node scripts/install-scanners.mjs --dest "$BIN" trivy dockle
+      - name: Build and save the fixture images
+        working-directory: packages/security-gates/test/images
+        env:
+          IMAGES: ${{ runner.temp }}/fixture-images
+        run: |
+          mkdir -p "$IMAGES"
+          for image in clean vulnerable root-secret; do
+            docker build --file "$image.Dockerfile.fixture" --tag "security-gates-fixture-$image" .
+            docker save --output "$IMAGES/$image.tar" "security-gates-fixture-$image"
+          done
+      - name: Clean image passes the image Gate
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+          IMAGES: ${{ runner.temp }}/fixture-images
+        run: |
+          for gate in image-vulnerabilities image-lint; do
+            node test/fixture-gate.mjs clean "$gate" --image "$IMAGES/clean.tar" --expect pass --bin "$BIN"
+          done
+      - name: A base image with a fixable critical CVE fails the image Gate
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+          IMAGES: ${{ runner.temp }}/fixture-images
+        run: node test/fixture-gate.mjs clean image-vulnerabilities --image "$IMAGES/vulnerable.tar" --severity critical --expect fail --bin "$BIN"
+      - name: The same CVE, suppressed with a future expiry, passes
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+          IMAGES: ${{ runner.temp }}/fixture-images
+        run: node test/fixture-gate.mjs image-suppressed image-vulnerabilities --image "$IMAGES/vulnerable.tar" --severity critical --expect pass --bin "$BIN"
+      - name: Root with a secret in an environment variable fails Dockle
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+          IMAGES: ${{ runner.temp }}/fixture-images
+        run: node test/fixture-gate.mjs clean image-lint --image "$IMAGES/root-secret.tar" --expect fail --bin "$BIN"
+      - name: The same finding, suppressed in .dockleignore, passes
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+          IMAGES: ${{ runner.temp }}/fixture-images
+        run: node test/fixture-gate.mjs image-suppressed image-lint --image "$IMAGES/root-secret.tar" --expect pass --bin "$BIN"

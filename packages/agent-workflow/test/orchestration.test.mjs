@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1067,4 +1070,90 @@ test("ready succeeds on a draft PR with checks skipped for draft; merge-ready st
 		execute("merge-ready", path, { token, number: 7 }, options).mergeReady,
 		true,
 	);
+});
+test("cleanup runs the checkout's hook against the ticket worktree and only records the outcome", (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cleanup-hook-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const checkout = join(dir, "checkout");
+	const worktree = join(dir, "tickets-pilot-7");
+	mkdirSync(checkout);
+	mkdirSync(worktree);
+	const git = (...args) =>
+		execFileSync("git", args, { cwd: worktree, stdio: "ignore" });
+	git("init", "-q", "-b", "tickets/pilot/7");
+	const config = {
+		version: 1,
+		repository: "example/project",
+		baseBranch: "main",
+		codexModel: "test-codex",
+		count: 1,
+	};
+	const writeConfig = (extra) =>
+		writeFileSync(
+			join(checkout, "toolkit-intake.json"),
+			JSON.stringify({ ...config, ...extra }),
+		);
+	writeConfig({});
+	const record = join(dir, "calls.jsonl");
+	writeFileSync(
+		join(checkout, "cleanup.mjs"),
+		`import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(record)}, JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + "\\n");\nif (process.env.CLEANUP_MODE === "fail") { console.error("network still in use"); process.exit(1); }\nif (process.env.CLEANUP_MODE === "hang") setTimeout(() => {}, 60_000);\n`,
+	);
+	// A same-named script in the worktree (PR code) must never be run.
+	writeFileSync(join(worktree, "cleanup.mjs"), "process.exit(9);\n");
+	const path = join(dir, "state.json");
+	execute("init", path, { ...manifest(), cwd: checkout });
+	const { token } = execute("acquire", path);
+	const options = { github: () => ({ snapshot, pr: () => pull() }) };
+	const cleanup = (extra = {}, opts = {}) =>
+		execute(
+			"cleanup",
+			path,
+			{ token, number: 7, worktreePath: worktree, ...extra },
+			opts,
+		);
+	assert.throws(cleanup, /reserve ticket first/);
+	execute("reserve", path, { token, number: 7, models }, options);
+	const statusBefore = execute("status", path).tickets[7].status;
+	assert.deepEqual(cleanup(), { ticket: "7", ran: false });
+
+	writeConfig({ cleanupCommand: "cleanup.mjs" });
+	assert.throws(() => cleanup({ worktreePath: "relative" }), /absolute/);
+	git("symbolic-ref", "HEAD", "refs/heads/other");
+	assert.throws(cleanup, /worktree is on other, not tickets\/pilot\/7/);
+	git("symbolic-ref", "HEAD", "refs/heads/tickets/pilot/7");
+	assert.throws(() => cleanup({ token: "stale" }), /lease/);
+
+	assert.deepEqual(cleanup(), { ticket: "7", ran: true, ok: true });
+	const [call] = readFileSync(record, "utf8")
+		.trim()
+		.split("\n")
+		.map(JSON.parse);
+	assert.deepEqual(call, {
+		args: [realpathSync(worktree), "tickets/pilot/7", "7"],
+		cwd: realpathSync(worktree),
+	});
+	let ticket = execute("status", path).tickets[7];
+	assert.equal(ticket.cleanup.ok, true);
+	assert.equal(ticket.status, statusBefore);
+
+	process.env.CLEANUP_MODE = "fail";
+	t.after(() => delete process.env.CLEANUP_MODE);
+	const failed = cleanup();
+	assert.equal(failed.ok, false);
+	assert.match(failed.error, /network still in use/);
+	ticket = execute("status", path).tickets[7];
+	assert.equal(ticket.cleanup.ok, false);
+	assert.equal(ticket.status, statusBefore);
+
+	process.env.CLEANUP_MODE = "hang";
+	const hung = cleanup({}, { cleanupTimeout: 300 });
+	assert.equal(hung.ok, false);
+	assert.match(hung.error, /timed out/);
+	assert.equal(execute("status", path).tickets[7].status, statusBefore);
+	delete process.env.CLEANUP_MODE;
+
+	symlinkSync(join(worktree, "cleanup.mjs"), join(checkout, "escape.mjs"));
+	writeConfig({ cleanupCommand: "escape.mjs" });
+	assert.throws(cleanup, /cleanup command escapes the checkout/);
 });

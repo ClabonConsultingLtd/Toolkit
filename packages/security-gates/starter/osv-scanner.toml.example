@@ -1,0 +1,23 @@
+# Example osv-scanner.toml for the dependency Gate. Copy it as
+# osv-scanner.toml into the directory of the lockfile it applies to.
+#
+# OSV-Scanner's own fields hold the reason and expiry: reason and ignoreUntil
+# for an ignored vulnerability, reason and effectiveUntil for a package
+# override that ignores something. The Gate fails when a Suppression has no
+# reason, no expiry, a date that isn't YYYY-MM-DD, or a past expiry, and warns
+# 14 days ahead.
+
+# Accept one vulnerability.
+[[IgnoredVulns]]
+id = "GHSA-xxxx-xxxx-xxxx"
+ignoreUntil = 2027-03-31
+reason = "Not reachable: we never pass untrusted input to the affected function"
+
+# Accept every vulnerability in one package version.
+[[PackageOverrides]]
+name = "example-package"
+version = "1.2.3"
+ecosystem = "npm"
+ignore = true
+effectiveUntil = 2027-03-31
+reason = "Build-time only; not shipped. Replacement tracked in our issue tracker"

@@ -1,0 +1,9 @@
+const express = require("express");
+
+const app = express();
+
+app.get("/calc", (req, res) => {
+	res.json({ result: eval(req.query.expression) });
+});
+
+app.listen(3000);

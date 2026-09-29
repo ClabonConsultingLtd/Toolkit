@@ -13,11 +13,29 @@
    package versions and Python lockfiles in lockstep. Because each run rebuilds
    the whole candidate, a cancelled or skipped run loses nothing: the next run
    picks the PR up, and rerunning adds no duplicate entries.
-6. Review and merge that generated release PR. GitHub Actions then creates the
-   immutable `vX.Y.Z` tag on its merge commit and refuses to move an existing tag.
-   This repo-wide tag is the reference a consuming repo pins with
-   `packages/toolkit-sync` (`node cli.mjs pin <package> vX.Y.Z`; see that
-   package's README).
+6. Review and merge that generated release PR. The merge's push to `main`
+   starts `Publish release tag`. Its first job asks the API whether the pushed
+   commit is the merge of this repository's `release/next` PR into `main`;
+   for any other push the signing job is skipped and never enters the
+   `release` environment. For a release merge, the signing job runs in the
+   `release` environment, whose `RELEASE_TAG_SIGNING_KEY` secret is only
+   available to `main`. It writes the key to a `0600` temporary file, signs
+   the immutable annotated `vX.Y.Z` tag on the merge commit with it
+   (`git tag -s` with `gpg.format=ssh`), and deletes the file even if a step
+   fails. It then checks the tag with `git verify-tag` against the Trust
+   anchor in the checked-out tree, `packages/toolkit-sync/allowed_signers`,
+   and pushes the tag only if that passes. It never moves an existing tag:
+   a rerun finds the tag and leaves it as is, without writing the key to disk.
+   This repo-wide Signed release tag is the reference a consuming repo pins
+   with `packages/toolkit-sync` (`node src/cli.mjs pin <package> vX.Y.Z`),
+   which verifies the signature against the same Trust anchor; see that
+   package's README. Tags below v0.14.0 are unsigned Legacy tags. The same
+   run builds a deterministic source archive of
+   the tagged tree, a `SHA256SUMS` file, and a CycloneDX SBOM, attests build
+   provenance for the archive, and publishes all three to the tag's GitHub
+   Release with notes taken from the matching `CHANGELOG.md` entry. Rerunning
+   this workflow for a tag that already has a Release re-uploads the same
+   assets in place rather than duplicating them.
 7. Publish only packages whose tests and documentation describe their current behavior.
 
 If `Prepare release` fails, fix the cause on `main`. The next merge into `main`
@@ -30,6 +48,28 @@ GitHub's
 [rerun documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
 
 No release should include runtime artifacts, credentials, generated images, models, provider transcripts, or local state.
+
+## Verifying a release
+
+Download a release's archive and `SHA256SUMS`, then check the archive against
+its provenance attestation and its checksum:
+
+```sh
+gh attestation verify toolkit-vX.Y.Z.tar.gz -R ClabonConsultingLtd/Toolkit
+sha256sum -c SHA256SUMS
+```
+
+Both must pass before treating the archive as the tagged tree.
+
+To check a tag's signature in a Toolkit clone:
+
+```sh
+git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=packages/toolkit-sync/allowed_signers verify-tag vX.Y.Z
+```
+
+Take `allowed_signers` from a copy you already trust, not from the tag being
+checked. Key rotation and key compromise are covered in
+`packages/toolkit-sync/README.md`.
 
 ## Consuming-repo version tracking
 

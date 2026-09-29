@@ -121,6 +121,13 @@ test("modelsMatch resolves a family-name recommendation against the resolved mod
 	assert.equal(modelsMatch("claude-sonnet-5", "claude-sonnet-5"), true);
 	assert.equal(modelsMatch("claude-sonnet-5", "claude-sonnet-4-6"), false);
 });
+test("modelsMatch resolves a versioned label recommendation against the resolved model id", () => {
+	assert.equal(modelsMatch("Sonnet 5.5", "claude-sonnet-5-5"), true);
+	assert.equal(modelsMatch("Sonnet 5", "claude-sonnet-5"), true);
+	assert.equal(modelsMatch("Opus 5.5", "claude-opus-5-5"), true);
+	assert.equal(modelsMatch("Sonnet 5.5", "claude-sonnet-5"), false);
+	assert.equal(modelsMatch("Sonnet 5", "claude-sonnet-5-5"), false);
+});
 test("ticketRecord does not flag a recommendation mismatch when the family-name recommendation matches the resolved model", () => {
 	const record = ticketRecord(
 		{
@@ -194,6 +201,20 @@ test("renderMarkdown produces a table per batch with flags", () => {
 	assert.match(markdown, /#7 \| blocked/);
 	assert.match(markdown, /model-mismatch/);
 	assert.match(markdown, /fix-cap/);
+});
+test("a failed worktree cleanup is flagged without changing the ticket", () => {
+	const s = fixtureState();
+	s.tickets[7].cleanup = { at: "2026-01-01T00:00:00Z", ok: false, error: "x" };
+	const digest = buildDigest([s], { now: 10_000, activity: () => null });
+	const seven = digest.batches[0].tickets.find((t) => t.number === "7");
+	assert.equal(seven.cleanupFailed, true);
+	assert.equal(seven.status, s.tickets[7].status);
+	assert.match(renderMarkdown(digest), /cleanup-failed/);
+	s.tickets[7].cleanup.ok = true;
+	assert.doesNotMatch(
+		renderMarkdown(buildDigest([s], { now: 10_000, activity: () => null })),
+		/cleanup-failed/,
+	);
 });
 test("digest lists merged tickets whose worktrees can be archived, without archiving", () => {
 	const s = fixtureState();
