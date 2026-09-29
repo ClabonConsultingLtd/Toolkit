@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.0 - 2026-09-29
+
+- #156: Sign release tags and make toolkit-sync verify them
+
 ## 0.13.0 - 2026-09-29
 
 - #148: security-gates: scheduled scanner version bumps
