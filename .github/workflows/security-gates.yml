@@ -1,0 +1,169 @@
+# security-gates: the Core Gates a consumer repository runs from its Caller
+# workflow, pinned to a Toolkit commit SHA. The inputs are a public interface:
+# an incompatible change to them is a release:major.
+#
+# Core Gates, which no input can switch off:
+#   Secrets          Gitleaks: the pull request's commits, or full history
+#                    on other events. Any unsuppressed finding fails.
+#   Dependencies     OSV-Scanner over every supported lockfile. Fails on
+#                    vulnerabilities at or above `severity` that have a fix.
+#   Static analysis  Opengrep with Toolkit's ruleset plus the repository's
+#                    .opengrep/ rules. Fails on ERROR findings.
+#
+# Suppressions live in each tool's own ignore file in the calling repository.
+# Each Gate fails when one has no reason, no expiry or a past expiry.
+name: security-gates
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >-
+          JSON for every job's runs-on: a label string such as
+          '"ubuntu-24.04-arm"', or an array of labels. Runners must be
+          linux/amd64 or linux/arm64.
+        type: string
+        default: '"ubuntu-latest"'
+      severity:
+        description: >-
+          Lowest vulnerability severity that fails the dependency Gate when a
+          fix is available: low, medium, high (CVSS 7.0 or more) or critical.
+        type: string
+        default: high
+      code-scanning:
+        description: >-
+          Upload each Gate's SARIF to GitHub code scanning. The Caller
+          workflow must then grant security-events: write and actions: read.
+        type: boolean
+        default: false
+      # Reserved for the image Gate: image-artifact, image-ref.
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: ${{ matrix.title }} Gate
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The secrets Gate needs history; the others only the tree.
+          - { gate: secrets, tool: gitleaks, title: Secrets, fetch-depth: 0 }
+          - { gate: dependencies, tool: osv-scanner, title: Dependencies, fetch-depth: 1 }
+          - { gate: static-analysis, tool: opengrep, title: Static analysis, fetch-depth: 1 }
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: target
+          fetch-depth: ${{ matrix.fetch-depth }}
+          persist-credentials: false
+      - name: Check out security-gates at the called commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: security-gates
+          sparse-checkout: packages/security-gates
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install and verify ${{ matrix.tool }}
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+          TOOL: ${{ matrix.tool }}
+        run: node security-gates/packages/security-gates/scripts/install-scanners.mjs --dest "$BIN" "$TOOL"
+      - name: Run the ${{ matrix.title }} Gate
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+          OUT: ${{ runner.temp }}/security-gates-results
+          GATE: ${{ matrix.gate }}
+          SEVERITY: ${{ inputs.severity }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          args=(--target target --out "$OUT" --bin "$BIN" --severity "$SEVERITY")
+          if [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
+            args+=(--base "$BASE_SHA" --head "$HEAD_SHA")
+          fi
+          node security-gates/packages/security-gates/scripts/run-gate.mjs "$GATE" "${args[@]}"
+      - name: Upload SARIF and results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-gates-${{ matrix.gate }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/security-gates-results/
+          if-no-files-found: warn
+
+  summary:
+    name: Security Gates summary
+    needs: gate
+    if: always()
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 10
+    steps:
+      - name: Check out security-gates at the called commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: security-gates
+          sparse-checkout: packages/security-gates
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: security-gates-*-${{ runner.arch }}
+          path: results
+          merge-multiple: true
+      - name: Write the summary table
+        run: node security-gates/packages/security-gates/scripts/write-summary.mjs --results results
+
+  code-scanning:
+    name: Upload SARIF to code scanning
+    needs: gate
+    if: ${{ always() && inputs.code-scanning }}
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: target
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: security-gates-*-${{ runner.arch }}
+          path: results
+          merge-multiple: true
+      - name: Upload secrets SARIF
+        if: ${{ hashFiles('results/secrets.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: results/secrets.sarif
+          category: security-gates-secrets
+          checkout_path: ${{ github.workspace }}/target
+      - name: Upload dependencies SARIF
+        if: ${{ hashFiles('results/dependencies.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: results/dependencies.sarif
+          category: security-gates-dependencies
+          checkout_path: ${{ github.workspace }}/target
+      - name: Upload static analysis SARIF
+        if: ${{ hashFiles('results/static-analysis.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: results/static-analysis.sarif
+          category: security-gates-static-analysis
+          checkout_path: ${{ github.workspace }}/target
