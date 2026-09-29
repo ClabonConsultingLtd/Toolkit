@@ -29,6 +29,8 @@ Findings from benchmarking 1.5B–7B local models (CPU-only, Ollama) against thi
 
 `ticket` and `ticket-batch` read ticket status through a pluggable provider, declared as `"provider"` in the ticket config file. A ticket reference (a manifest entry, or the argument to `pnpm ticket`) is resolved and its status compared against `readyStatus` (to launch) and `completeStatus` (to mark done). Toolkit does not bundle or invoke any ticket-authoring workflow; a project remains free to produce compatible tickets by whatever means it likes.
 
+`command` is split into a program and its own arguments (so `"node script.mjs --flag"` keeps working) and run without a shell, with the resolved ticket reference appended as one additional argument, exactly as resolved, whatever characters it contains. `--dry-run` prints the same command line, quoting the reference only if it needs it for a shell to read it back as one argument.
+
 ### `local-markdown` (default)
 
 Built for Markdown tickets, such as those produced by Matt Pocock's `/grill-with-docs` → `/to-spec` → `/to-tickets` workflow. A ticket reference is a file path, resolved relative to the manifest (or the current directory for a bare `pnpm ticket` call). Status is read from a top-level `**Status:** <value>` declaration by default; override the pattern with `statusPattern` (a regex string with one capture group) for projects that use a different convention, e.g. `"statusPattern": "^Status:\\s*(.+)$"`.
