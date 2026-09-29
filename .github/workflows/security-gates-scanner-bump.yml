@@ -8,16 +8,29 @@
 # writing scanner-versions.json. A release that can't be verified is
 # skipped with a warning, and its pin is left alone.
 #
+# Trust boundary: a newly released scanner binary is unreviewed. Its
+# checksum verifying only proves the download matches what upstream
+# published, not that upstream wasn't compromised, and that binary then
+# runs (the install, the Opengrep rule tests, the Gates) as part of
+# verifying the bump. So the job that runs it (verify-bump) never holds
+# push or pull-request credentials: contents: read, persist-credentials:
+# false, and only a read-scoped token for the release-API lookups. It hands
+# the verified scanner-versions.json and pull-request body to open-pr as an
+# artifact. open-pr, which does hold contents: write and pull-requests:
+# write, only re-checks that file's shape with the installer's own parser
+# (no download, no scanner execution) before committing, pushing and
+# opening the pull request.
+#
 # CI-trigger note: a pull request opened with the default GITHUB_TOKEN does
 # not trigger other workflows' pull_request events (GitHub's loop
-# prevention), so verify.yml and security-gates-self-test.yml would never
-# run on this PR. A job-level `uses: ./.github/workflows/security-gates.yml`
-# call would not help either: it checks out the ref that triggered *this*
-# run (main, for the schedule), not the branch this job is about to push,
-# so it would validate the wrong tree. Instead, once a bump is found, this
-# job runs the same checks itself, in place, against the bumped tree: the
-# security-gates unit tests, the Opengrep rule tests, and all three Gates.
-# A pull request only opens once those pass.
+# prevention), so verify.yml and security-gates-self-test.yml do not run on
+# the bump pull request automatically. A maintainer should close and reopen
+# it, or push an empty commit, to trigger those before merging. A job-level
+# `uses: ./.github/workflows/security-gates.yml` call would not substitute
+# for that: it checks out the ref that triggered *this* run (main, for the
+# schedule), not the branch open-pr pushes, so it would validate the wrong
+# tree. verify-bump runs the same checks itself instead, against the
+# bumped tree, before any pull request exists.
 name: security-gates scanner bump
 
 on:
@@ -32,26 +45,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  bump:
-    name: Bump scanner versions
+  verify-bump:
+    name: Check for scanner updates and verify them
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # The only permissions this job needs: push the bump branch and open or
-    # update its pull request.
+    # Read-only: this job downloads and runs unreviewed, newly released
+    # scanner binaries to verify them. It must not be able to push or open
+    # a pull request.
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+    outputs:
+      changed: ${{ steps.bump.outputs.changed }}
     env:
-      BRANCH: chore/scanner-bump
+      ARTIFACT_DIR: ${{ runner.temp }}/security-gates-bump
     steps:
       - name: Check out the repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] persisted credentials are used below to push the bump branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-      - name: Configure Git identity
-        run: |
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
@@ -59,8 +70,9 @@ jobs:
         name: Check for scanner updates
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_BODY: ${{ runner.temp }}/pr-body.md
-        run: node packages/security-gates/scripts/bump-scanners.mjs --pr-body "$PR_BODY"
+        run: |
+          mkdir -p "$ARTIFACT_DIR"
+          node packages/security-gates/scripts/bump-scanners.mjs --pr-body "$ARTIFACT_DIR/pr-body.md"
       - name: Install and verify the bumped scanners
         if: steps.bump.outputs.changed == 'true'
         env:
@@ -85,34 +97,75 @@ jobs:
           for gate in secrets dependencies static-analysis; do
             node packages/security-gates/scripts/run-gate.mjs "$gate" --out "$OUT" --bin "$BIN"
           done
-      - name: Commit the bump
+      - name: Stage the bumped versions file for the pull request job
         if: steps.bump.outputs.changed == 'true'
+        run: cp packages/security-gates/scanner-versions.json "$ARTIFACT_DIR/scanner-versions.json"
+      - name: Upload the verified bump
+        if: steps.bump.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-gates-scanner-bump
+          path: ${{ env.ARTIFACT_DIR }}
+          if-no-files-found: error
+
+  open-pr:
+    name: Open or update the bump pull request
+    needs: verify-bump
+    if: needs.verify-bump.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only this job pushes and opens the pull request; it never installs or
+    # runs a scanner binary, so it never runs anything unreviewed.
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      BRANCH: chore/scanner-bump
+      ARTIFACT_DIR: ${{ runner.temp }}/security-gates-bump
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] persisted credentials are used below to push the bump branch
+        with:
+          fetch-depth: 0
+      - name: Configure Git identity
         run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Download the verified bump
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: security-gates-scanner-bump
+          path: ${{ env.ARTIFACT_DIR }}
+      - name: Validate the downloaded versions file's shape
+        run: node packages/security-gates/scripts/validate-versions.mjs "$ARTIFACT_DIR/scanner-versions.json"
+      - name: Commit the bump
+        run: |
+          cp "$ARTIFACT_DIR/scanner-versions.json" packages/security-gates/scanner-versions.json
           git checkout -B "$BRANCH"
           git add packages/security-gates/scanner-versions.json
           git commit -m "chore(security-gates): bump scanner versions"
       - id: pending
         name: Find the open bump pull request
-        if: steps.bump.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           number="$(gh pr list --base main --head "$BRANCH" --state open --json number --jq '.[0].number')"
           echo "number=$number" >> "$GITHUB_OUTPUT"
       - name: Push the bump branch
-        if: steps.bump.outputs.changed == 'true'
         run: git push --force-with-lease origin "$BRANCH"
       - name: Create or update the bump pull request
-        if: steps.bump.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pending.outputs.number }}
-          PR_BODY: ${{ runner.temp }}/pr-body.md
         run: |
+          body_file="$ARTIFACT_DIR/pr-body.md"
           if [[ -n "$PR_NUMBER" ]]; then
-            gh pr edit "$PR_NUMBER" --body-file "$PR_BODY"
+            gh pr edit "$PR_NUMBER" --body-file "$body_file"
           else
             gh pr create --base main --head "$BRANCH" \
               --title "chore(security-gates): bump scanner versions" \
-              --body-file "$PR_BODY" --label release:patch
+              --body-file "$body_file" --label release:patch
           fi
