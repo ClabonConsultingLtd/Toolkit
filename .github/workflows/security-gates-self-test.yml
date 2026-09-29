@@ -83,10 +83,12 @@ jobs:
             exit 1
           fi
           echo "The install failed on the changed hash, as expected"
+      # Run from inside test/rules: Opengrep skips paths under test/ by default.
       - name: Opengrep rule tests
+        working-directory: packages/security-gates/test/rules
         env:
           BIN: ${{ runner.temp }}/security-gates-bin
-        run: '"$BIN/opengrep" test --config rules test/rules'
+        run: '"$BIN/opengrep" test --config ../../rules .'
       - name: Clean fixture passes every Gate
         env:
           BIN: ${{ runner.temp }}/security-gates-bin
