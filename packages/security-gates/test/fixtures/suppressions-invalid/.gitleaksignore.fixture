@@ -1,0 +1,8 @@
+# expires: 2099-12-31
+0000000000000000000000000000000000000000:no-reason.env:generic-api-key:1
+
+# reason: vendored test key, not a real credential
+0000000000000000000000000000000000000000:no-expiry.env:generic-api-key:1
+
+# reason: rotated in the old system expires: 2020-01-31
+0000000000000000000000000000000000000000:expired.env:generic-api-key:1

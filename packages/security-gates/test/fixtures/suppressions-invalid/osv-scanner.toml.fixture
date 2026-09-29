@@ -1,0 +1,3 @@
+[[IgnoredVulns]]
+id = "GHSA-0000-0000-0000"
+reason = "Not reachable: we never parse untrusted input with this package"
