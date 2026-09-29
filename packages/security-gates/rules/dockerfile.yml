@@ -1,0 +1,46 @@
+# Hand-written Opengrep rules for Dockerfiles. ERROR fails the static
+# analysis Gate; WARNING and INFO are reported only.
+rules:
+  - id: dockerfile-pipe-to-shell
+    languages: [dockerfile]
+    severity: WARNING
+    message: >-
+      A script is downloaded and piped straight into a shell, so the build
+      runs whatever the server returns. Download it, check its checksum,
+      then run it.
+    metadata:
+      cwe: "CWE-494: Download of Code Without Integrity Check"
+    pattern-either:
+      - pattern-regex: (curl|wget)\s[^|;&]*\|\s*(sudo\s+)?(ba|z|da)?sh\b
+
+  - id: dockerfile-add-remote-url
+    languages: [dockerfile]
+    severity: WARNING
+    message: >-
+      ADD fetches a remote URL without checking what it gets. Use ADD
+      --checksum=sha256:..., or download and verify it in a RUN step.
+    metadata:
+      cwe: "CWE-494: Download of Code Without Integrity Check"
+    patterns:
+      - pattern-regex: (?im)^\s*ADD\s+(?!.*--checksum)(--\S+\s+)*https?://
+
+  - id: dockerfile-secret-in-env
+    languages: [dockerfile]
+    severity: ERROR
+    message: >-
+      A value that looks like a secret is set with ENV or ARG, so it's kept in
+      the image layers and history. Pass it at build time with a secret mount
+      (RUN --mount=type=secret) instead.
+    metadata:
+      cwe: "CWE-538: Insertion of Sensitive Information into Externally-Accessible File"
+    pattern-regex: (?im)^\s*(ENV|ARG)\s+\w*(PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|APIKEY|PRIVATE_KEY)\s*=\s*\S+
+
+  - id: dockerfile-user-root
+    languages: [dockerfile]
+    severity: WARNING
+    message: >-
+      The image switches to the root user. Make sure a later USER instruction
+      switches back to an unprivileged user before the image is run.
+    metadata:
+      cwe: "CWE-250: Execution with Unnecessary Privileges"
+    pattern-regex: (?im)^\s*USER\s+(root|0)(:\S+)?\s*$

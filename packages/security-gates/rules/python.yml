@@ -1,0 +1,122 @@
+# Hand-written Opengrep rules for Python. ERROR fails the static analysis
+# Gate; WARNING and INFO are reported only.
+rules:
+  - id: py-eval-dynamic
+    languages: [python]
+    severity: ERROR
+    message: >-
+      eval() or exec() runs a value that isn't a string literal. If any part
+      of it comes from outside the program, this is code injection. Use
+      ast.literal_eval for data, or a lookup table.
+    metadata:
+      cwe: "CWE-95: Eval Injection"
+    patterns:
+      - pattern-either:
+          - pattern: eval($CODE, ...)
+          - pattern: exec($CODE, ...)
+      - pattern-not: eval("...", ...)
+      - pattern-not: exec("...", ...)
+
+  - id: py-subprocess-shell-dynamic
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A command that isn't a string literal runs with shell=True, so any
+      interpolated value can inject shell syntax. Pass an argument list and
+      drop shell=True.
+    metadata:
+      cwe: "CWE-78: OS Command Injection"
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.$F($CMD, ..., shell=True, ...)
+          - pattern: os.system($CMD)
+          - pattern: os.popen($CMD, ...)
+      - pattern-not: subprocess.$F("...", ...)
+      - pattern-not: subprocess.$F(["...", ...], ...)
+      - pattern-not: os.system("...")
+      - pattern-not: os.popen("...", ...)
+
+  - id: py-yaml-unsafe-load
+    languages: [python]
+    severity: ERROR
+    message: >-
+      yaml.load() without a safe loader can build arbitrary Python objects
+      from the document. Use yaml.safe_load().
+    metadata:
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+    patterns:
+      - pattern-either:
+          - pattern: yaml.load($DATA)
+          - pattern: yaml.load($DATA, Loader=$LOADER)
+          - pattern: yaml.unsafe_load(...)
+          - pattern: yaml.full_load(...)
+      - pattern-not: yaml.load($DATA, Loader=yaml.SafeLoader)
+      - pattern-not: yaml.load($DATA, Loader=yaml.CSafeLoader)
+      - pattern-not: yaml.load($DATA, Loader=SafeLoader)
+      - pattern-not: yaml.load($DATA, Loader=CSafeLoader)
+
+  - id: py-pickle-load
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Unpickling runs code chosen by whoever wrote the data. Only load
+      pickles you created yourself; use JSON for anything else.
+    metadata:
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+    pattern-either:
+      - pattern: pickle.load(...)
+      - pattern: pickle.loads(...)
+      - pattern: cPickle.load(...)
+      - pattern: cPickle.loads(...)
+      - pattern: dill.loads(...)
+
+  - id: py-tls-verification-disabled
+    languages: [python]
+    severity: ERROR
+    message: >-
+      TLS certificate verification is turned off, so any machine in the path
+      can read and change this traffic. Point verify= at the right CA bundle
+      instead.
+    metadata:
+      cwe: "CWE-295: Improper Certificate Validation"
+    pattern-either:
+      - pattern: requests.$F(..., verify=False, ...)
+      - pattern: httpx.$F(..., verify=False, ...)
+      - pattern: ssl._create_unverified_context(...)
+
+  - id: py-sql-string-building
+    languages: [python]
+    severity: ERROR
+    message: >-
+      An SQL statement is built with string formatting and passed to
+      execute(). Use query parameters instead.
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+    pattern-either:
+      - pattern: $CUR.execute(f"...", ...)
+      - pattern: $CUR.execute("..." % $ARGS, ...)
+      - pattern: $CUR.execute("...".format(...), ...)
+      - pattern: $CUR.execute("..." + $X, ...)
+      - pattern: $CUR.executemany(f"...", ...)
+
+  - id: py-flask-debug
+    languages: [python]
+    severity: WARNING
+    message: >-
+      The Flask debugger lets anyone who can reach it run code. Keep debug
+      off outside local development.
+    metadata:
+      cwe: "CWE-489: Active Debug Code"
+    pattern: $APP.run(..., debug=True, ...)
+
+  - id: py-weak-hash
+    languages: [python]
+    severity: INFO
+    message: >-
+      MD5 and SHA-1 are broken for security use. If this protects a password,
+      a signature or an integrity check, use SHA-256 or a password hash.
+    metadata:
+      cwe: "CWE-328: Use of Weak Hash"
+    pattern-either:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.sha1(...)

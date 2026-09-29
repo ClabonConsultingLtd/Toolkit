@@ -1,0 +1,5 @@
+const ms = require("ms");
+
+module.exports = function timeout(label) {
+	return ms(label);
+};
