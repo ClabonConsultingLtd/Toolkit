@@ -14,10 +14,15 @@
    the whole candidate, a cancelled or skipped run loses nothing: the next run
    picks the PR up, and rerunning adds no duplicate entries.
 6. Review and merge that generated release PR. GitHub Actions then creates the
-   immutable `vX.Y.Z` tag on its merge commit and refuses to move an existing tag.
+   immutable `vX.Y.Z` tag on its merge commit; it never moves an existing tag.
    This repo-wide tag is the reference a consuming repo pins with
    `packages/toolkit-sync` (`node cli.mjs pin <package> vX.Y.Z`; see that
-   package's README).
+   package's README). The same run builds a deterministic source archive of
+   the tagged tree, a `SHA256SUMS` file, and a CycloneDX SBOM, attests build
+   provenance for the archive, and publishes all three to the tag's GitHub
+   Release with notes taken from the matching `CHANGELOG.md` entry. Rerunning
+   this workflow for a tag that already has a Release re-uploads the same
+   assets in place rather than duplicating them.
 7. Publish only packages whose tests and documentation describe their current behavior.
 
 If `Prepare release` fails, fix the cause on `main`. The next merge into `main`
@@ -30,6 +35,18 @@ GitHub's
 [rerun documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
 
 No release should include runtime artifacts, credentials, generated images, models, provider transcripts, or local state.
+
+## Verifying a release
+
+Download a release's archive and `SHA256SUMS`, then check the archive against
+its provenance attestation and its checksum:
+
+```sh
+gh attestation verify toolkit-vX.Y.Z.tar.gz -R ClabonConsultingLtd/Toolkit
+sha256sum -c SHA256SUMS
+```
+
+Both must pass before treating the archive as the tagged tree.
 
 ## Consuming-repo version tracking
 
