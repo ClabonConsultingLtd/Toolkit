@@ -1,17 +1,25 @@
-// Runs one Core Gate over a checked-out repository, applies its failure
-// policy, and writes <gate>.sarif and <gate>.json into the output directory.
-// Exits 1 when the Gate fails.
+// Runs one Gate over a checked-out repository, applies its failure policy,
+// and writes <gate>.sarif and <gate>.json into the output directory. Exits 1
+// when the Gate fails.
 //
-//   secrets          Gitleaks. Any unsuppressed finding fails.
-//   dependencies     OSV-Scanner. Fails on a vulnerability at or above the
-//                    severity threshold (CVSS) that has a fix available.
-//   static-analysis  Opengrep. Fails on ERROR findings.
+//   secrets                Gitleaks. Any unsuppressed finding fails.
+//   dependencies           OSV-Scanner. Fails on a vulnerability at or above
+//                          the severity threshold (CVSS) that has a fix
+//                          available.
+//   static-analysis        Opengrep. Fails on ERROR findings.
+//
+// The opt-in image Gate scans a `docker save` tarball (--image) in two parts:
+//   image-vulnerabilities  Trivy. The same policy as dependencies, for OS
+//                          and application packages in the image.
+//   image-lint             Dockle. Fails on FATAL findings, reports WARN.
 import { spawnSync } from "node:child_process";
 import {
 	appendFileSync,
 	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -22,6 +30,8 @@ export const GATES = {
 	secrets: { title: "Secrets", tool: "gitleaks" },
 	dependencies: { title: "Dependencies", tool: "osv-scanner" },
 	"static-analysis": { title: "Static analysis", tool: "opengrep" },
+	"image-vulnerabilities": { title: "Image", tool: "trivy", optIn: true },
+	"image-lint": { title: "Image", tool: "dockle", optIn: true },
 };
 
 // Lowest CVSS base score in each severity band.
@@ -233,6 +243,133 @@ function runStaticAnalysis({ target, outDir, opengrep, rulesDir }) {
 	};
 }
 
+// --- image -------------------------------------------------------------------
+
+// The image to scan: a `docker save` tarball, or a directory (such as a
+// downloaded artifact) holding exactly one file.
+export function resolveImage(path) {
+	if (!path) throw new Error("the image Gate needs --image");
+	if (!statSync(path).isDirectory()) return path;
+	const files = readdirSync(path, { recursive: true, withFileTypes: true })
+		.filter((entry) => entry.isFile())
+		.map((entry) => join(entry.parentPath, entry.name));
+	if (files.length !== 1) {
+		throw new Error(
+			`the image artifact must hold exactly one docker save tarball, but it holds ${files.length} files`,
+		);
+	}
+	return files[0];
+}
+
+// Trivy's highest CVSS score for a vulnerability across its sources, or its
+// severity label when there's no score.
+export function imageSeverityScore(vulnerability) {
+	const scores = Object.values(vulnerability.CVSS ?? {})
+		.flatMap((cvss) => [cvss.V40Score, cvss.V3Score])
+		.filter((score) => Number.isFinite(score) && score > 0);
+	if (scores.length) return Math.max(...scores);
+	return LABEL_SCORES[String(vulnerability.Severity ?? "").toUpperCase()];
+}
+
+export function imageVulnerabilityFindings(trivy, threshold) {
+	const findings = [];
+	for (const result of trivy.Results ?? []) {
+		for (const v of result.Vulnerabilities ?? []) {
+			const score = imageSeverityScore(v);
+			const fixable = Boolean(v.FixedVersion);
+			const atThreshold = score !== undefined && score >= threshold;
+			findings.push({
+				blocking: atThreshold && fixable,
+				text: `${v.PkgName}@${v.InstalledVersion} (${result.Type}) ${v.VulnerabilityID}: severity ${score ?? "unknown"}, ${fixable ? `fix available in ${v.FixedVersion}` : "no fix available"} in ${result.Target}`,
+			});
+		}
+	}
+	return findings;
+}
+
+function imageName(trivy) {
+	const { RepoTags = [], ImageID } = trivy.Metadata ?? {};
+	return [...RepoTags, ImageID].filter(Boolean).join(", ") || undefined;
+}
+
+function runImageVulnerabilities({ target, outDir, trivy, image, threshold }) {
+	const json = join(outDir, "image-vulnerabilities.trivy.json");
+	const sarif = join(outDir, "image-vulnerabilities.sarif");
+	// Trivy fails on a missing --ignorefile, and otherwise reads .trivyignore
+	// from its working directory, so it runs in outDir.
+	const ignoreFile = join(target, ".trivyignore");
+	const ignore = existsSync(ignoreFile) ? ["--ignorefile", ignoreFile] : [];
+	run(
+		trivy,
+		[
+			"image",
+			"--input",
+			image,
+			"--scanners",
+			"vuln",
+			"--no-progress",
+			"--skip-version-check",
+			"--timeout",
+			"20m",
+			...ignore,
+			"--format",
+			"json",
+			"--output",
+			json,
+		],
+		{ cwd: outDir },
+	);
+	run(
+		trivy,
+		["convert", ...ignore, "--format", "sarif", "--output", sarif, json],
+		{ cwd: outDir },
+	);
+	const report = JSON.parse(readFileSync(json, "utf8"));
+	return {
+		findings: imageVulnerabilityFindings(report, threshold),
+		image: imageName(report),
+		sarif,
+	};
+}
+
+export function imageLintFindings(dockle) {
+	return (dockle.details ?? [])
+		.filter((d) => d.level === "FATAL" || d.level === "WARN")
+		.map((d) => ({
+			blocking: d.level === "FATAL",
+			text: `${d.level} ${d.code} ${d.title}: ${(d.alerts ?? []).join("; ")}`,
+		}));
+}
+
+function runImageLint({ target, outDir, dockle, image }) {
+	const json = join(outDir, "image-lint.dockle.json");
+	const sarif = join(outDir, "image-lint.sarif");
+	// Dockle reads .dockleignore from its working directory.
+	for (const [format, output] of [
+		["json", json],
+		["sarif", sarif],
+	]) {
+		run(
+			dockle,
+			[
+				"--exit-code",
+				"0",
+				"--format",
+				format,
+				"--output",
+				output,
+				"--input",
+				image,
+			],
+			{ cwd: target },
+		);
+	}
+	return {
+		findings: imageLintFindings(JSON.parse(readFileSync(json, "utf8"))),
+		sarif,
+	};
+}
+
 // --- summary -----------------------------------------------------------------
 
 export function gateMarkdown(result) {
@@ -241,6 +378,7 @@ export function gateMarkdown(result) {
 		"",
 		`${result.findings} finding(s), ${result.blocking} blocking. ${result.suppressed} Suppression(s), ${result.expiringSoon} expiring soon, ${result.suppressionErrors} invalid.`,
 	];
+	if (result.image) lines.push("", `Image: ${result.image}`);
 	if (result.error) lines.push("", `Error: ${result.error}`);
 	const listed = result.details.slice(0, DETAIL_LIMIT);
 	if (listed.length) {
@@ -313,12 +451,27 @@ export function runGate(gate, options) {
 				osvScanner: bin("osv-scanner"),
 				threshold,
 			});
-		} else {
+		} else if (gate === "static-analysis") {
 			scan = runStaticAnalysis({
 				target,
 				outDir,
 				opengrep: bin("opengrep"),
 				rulesDir: options.rulesDir ?? DEFAULT_RULES_DIR,
+			});
+		} else if (gate === "image-vulnerabilities") {
+			scan = runImageVulnerabilities({
+				target,
+				outDir,
+				trivy: bin("trivy"),
+				image: resolve(resolveImage(options.image)),
+				threshold,
+			});
+		} else {
+			scan = runImageLint({
+				target,
+				outDir,
+				dockle: bin("dockle"),
+				image: resolve(resolveImage(options.image)),
 			});
 		}
 		result.findings = scan.findings.length;
@@ -327,6 +480,7 @@ export function runGate(gate, options) {
 			(a, b) => Number(b.blocking) - Number(a.blocking),
 		);
 		if (scan.licences) result.licences = scan.licences;
+		if (scan.image) result.image = scan.image;
 	} catch (error) {
 		result.error = error.message;
 	}
@@ -345,6 +499,8 @@ options:
   --target <dir>      repository to scan (default: .)
   --bin <dir>         directory holding the scanner binaries (default: PATH)
   --severity <level>  ${Object.keys(SEVERITY_THRESHOLDS).join(", ")} (default: high)
+  --image <path>      docker save tarball, or a directory holding one, for
+                      the image Gate
   --base <sha> --head <sha>
                       scan only this commit range for secrets
   --rules <dir>       Opengrep rules (default: the bundled ruleset)
@@ -362,6 +518,7 @@ async function main() {
 			base: { type: "string" },
 			head: { type: "string" },
 			rules: { type: "string" },
+			image: { type: "string" },
 			"path-prefix": { type: "string" },
 			today: { type: "string" },
 			help: { type: "boolean", short: "h" },
@@ -379,6 +536,7 @@ async function main() {
 		base: values.base,
 		head: values.head,
 		rulesDir: values.rules,
+		image: values.image,
 		pathPrefix: values["path-prefix"],
 		today: values.today,
 	});

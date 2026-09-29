@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,10 @@ import {
 	GATES,
 	gateMarkdown,
 	hasFix,
+	imageLintFindings,
+	imageSeverityScore,
+	imageVulnerabilityFindings,
+	resolveImage,
 	SEVERITY_THRESHOLDS,
 	secretsFindings,
 	severityScore,
@@ -242,5 +246,147 @@ test("summaryMarkdown writes one row per Core Gate", () => {
 		markdown,
 		/\| Static analysis \(opengrep\) \| no result: the job stopped before the scan finished \|/,
 	);
-	assert.equal(Object.keys(GATES).length, 3);
+	assert.equal(Object.values(GATES).filter((spec) => !spec.optIn).length, 3);
+});
+
+function trivyReport(vulnerabilities) {
+	return {
+		Results: [
+			{
+				Target: "image.tar (alpine 3.14.0)",
+				Type: "alpine",
+				Vulnerabilities: vulnerabilities.map((v) => ({
+					PkgName: "apk-tools",
+					InstalledVersion: "2.12.5-r1",
+					...v,
+				})),
+			},
+		],
+	};
+}
+
+test("an image vulnerability at or above the threshold with a fix blocks", () => {
+	const findings = imageVulnerabilityFindings(
+		trivyReport([
+			{
+				VulnerabilityID: "CVE-2021-36159",
+				FixedVersion: "2.12.6-r0",
+				Severity: "CRITICAL",
+				CVSS: { nvd: { V3Score: 9.1 } },
+			},
+			{
+				VulnerabilityID: "CVE-2000-0002",
+				FixedVersion: "",
+				Severity: "CRITICAL",
+				CVSS: { nvd: { V3Score: 9.8 } },
+			},
+			{
+				VulnerabilityID: "CVE-2000-0003",
+				FixedVersion: "2.12.6-r0",
+				Severity: "MEDIUM",
+				CVSS: { nvd: { V3Score: 5.3 } },
+			},
+		]),
+		HIGH,
+	);
+	assert.deepEqual(
+		findings.map((f) => f.blocking),
+		[true, false, false],
+	);
+	assert.match(
+		findings[0].text,
+		/apk-tools@2\.12\.5-r1 \(alpine\) CVE-2021-36159: severity 9\.1, fix available in 2\.12\.6-r0/,
+	);
+	assert.match(findings[1].text, /no fix available/);
+});
+
+test("imageSeverityScore takes the highest CVSS score, then falls back to the label", () => {
+	assert.equal(
+		imageSeverityScore({
+			Severity: "LOW",
+			CVSS: { nvd: { V3Score: 9.8 }, redhat: { V3Score: 5.5, V40Score: 6.1 } },
+		}),
+		9.8,
+	);
+	assert.equal(imageSeverityScore({ Severity: "HIGH" }), 7.0);
+	assert.equal(
+		imageSeverityScore({ Severity: "UNKNOWN", CVSS: { nvd: {} } }),
+		undefined,
+	);
+	const [unscored] = imageVulnerabilityFindings(
+		trivyReport([
+			{ VulnerabilityID: "DLA-1", FixedVersion: "1", Severity: "UNKNOWN" },
+		]),
+		SEVERITY_THRESHOLDS.low,
+	);
+	assert.equal(unscored.blocking, false);
+	assert.match(unscored.text, /severity unknown/);
+});
+
+test("imageLintFindings blocks on FATAL, reports WARN and leaves out INFO", () => {
+	const findings = imageLintFindings({
+		details: [
+			{
+				code: "CIS-DI-0010",
+				title: "Do not store credential in environment variables/files",
+				level: "FATAL",
+				alerts: ["Suspicious ENV key found : DATABASE_PASSWORD"],
+			},
+			{
+				code: "CIS-DI-0001",
+				title: "Create a user for the container",
+				level: "WARN",
+				alerts: ["Last user should not be root"],
+			},
+			{ code: "CIS-DI-0006", title: "Add HEALTHCHECK", level: "INFO" },
+			{ code: "DKL-LI-0001", title: "Avoid empty password", level: "SKIP" },
+		],
+	});
+	assert.deepEqual(
+		findings.map((f) => [f.blocking, f.text.split(" ").slice(0, 2).join(" ")]),
+		[
+			[true, "FATAL CIS-DI-0010"],
+			[false, "WARN CIS-DI-0001"],
+		],
+	);
+});
+
+test("resolveImage takes a tarball, or a directory holding exactly one file", () => {
+	const dir = mkdtempSync(join(tmpdir(), "security-gates-image-"));
+	assert.throws(() => resolveImage(undefined), /needs --image/);
+	assert.throws(() => resolveImage(dir), /holds 0 files/);
+	mkdirSync(join(dir, "nested"));
+	writeFileSync(join(dir, "nested", "app.tar"), "tar");
+	assert.equal(resolveImage(dir), join(dir, "nested", "app.tar"));
+	assert.equal(
+		resolveImage(join(dir, "nested", "app.tar")),
+		join(dir, "nested", "app.tar"),
+	);
+	writeFileSync(join(dir, "other.tar"), "tar");
+	assert.throws(() => resolveImage(dir), /holds 2 files/);
+});
+
+test("summaryMarkdown lists the image Gate only when it's on", () => {
+	const dir = mkdtempSync(join(tmpdir(), "security-gates-summary-"));
+	writeFileSync(
+		join(dir, "image-lint.json"),
+		JSON.stringify({
+			gate: "image-lint",
+			passed: false,
+			findings: 2,
+			blocking: 1,
+			suppressed: 0,
+			expiringSoon: 0,
+			suppressionErrors: 0,
+		}),
+	);
+	const off = summaryMarkdown(dir);
+	assert.doesNotMatch(off, /Image/);
+	assert.equal(
+		off.match(/^\| (Secrets|Dependencies|Static analysis) /gm).length,
+		3,
+	);
+	const on = summaryMarkdown(dir, { image: true });
+	assert.match(on, /\| Image \(dockle\) \| failed \| 2 \| 1 \| 0 \| 0 \|/);
+	assert.match(on, /\| Image \(trivy\) \| no result/);
 });
