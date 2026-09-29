@@ -5,3 +5,5 @@ Credentials are supplied only through environment variables and are never writte
 Image runners are caller-supplied executables. Queue and prompt identifiers reject parent traversal. Image-to-3D relative paths cannot escape the supplied source root.
 
 Runtime state, logs, generated images, model outputs, and provider transcripts belong outside source control. Use a local state directory or project ignore rules.
+
+The [threat model](threat-model.md) lists Toolkit's trust boundaries, the threats to each, their mitigations and the residual risks accepted for them.

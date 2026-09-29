@@ -39,3 +39,5 @@ Nothing enforces pre-commit locally; the Gates in CI still decide whether a chan
 ## Pull requests
 
 Explain the user-facing outcome, list tests run, and call out any changed prerequisites, environment variables, or CLI contracts. A contributor must be able to understand the proposed behavior without access to a private project.
+
+A pull request that changes a trust boundary updates [the threat model](docs/threat-model.md) in the same pull request. Trust boundaries include workflow permissions, the release process, vendoring, hooks, and what reaches consumers.
