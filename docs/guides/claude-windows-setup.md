@@ -8,9 +8,9 @@ This guide sets up a repository on a fresh Windows machine to use three Toolkit 
 
 It then walks through the complete feature workflow using Matt Pocock's skills: `/grill-with-docs` → `/to-spec` → `/to-tickets` → implementation. Both issue trackers are covered: **GitHub issues** and **local Markdown files in `.scratch/`**.
 
-Out of scope: Codex; the Paseo-scheduled skills (`orchestrate-tickets`, `triage-tickets`, `report-tickets`), which now have Claude entrypoints but still run on Paseo schedules; the bounded model handoff; and the image packages.
+Out of scope: Codex; the Paseo-scheduled skills (`orchestrate-tickets`, `triage-tickets`, `report-tickets`), which have Claude entrypoints but run on Paseo schedules; the bounded model handoff; [`security-gates`](../../packages/security-gates/README.md), which adds security scanning to CI and is set up separately; and the image packages.
 
-Commands run in **Git Bash** unless a step says **PowerShell**. Agent instructions live in `AGENTS.md`, not `CLAUDE.md`: Claude Code reads `AGENTS.md` when a repository has no `CLAUDE.md`, and other coding agents read the same file, so one set of instructions serves them all. The guide needs a Toolkit release that includes `packages/setup-wizard`, which provides the launcher template and the wizard. Earlier releases also lack pieces the steps rely on: `v0.9.0` added the manifest that lets `toolkit-sync` pin itself, and `v0.10.0` fixed `ticket-batch` on Windows.
+Commands run in **Git Bash** unless a step says **PowerShell**. Agent instructions live in `AGENTS.md`, not `CLAUDE.md`: Claude Code reads `AGENTS.md` when a repository has no `CLAUDE.md`, and other coding agents read the same file, so one set of instructions serves them all. The guide needs a Toolkit release that includes `packages/setup-wizard`, which provides the launcher template and the wizard. That release is signed, like every release from `v0.14.0` on, and `toolkit-sync` refuses tags it can't verify.
 
 > **Prefer automation?** The [setup wizard](../../packages/setup-wizard/README.md) does most of sections 1 to 7 for you: a PowerShell script installs the prerequisites and clones Toolkit, then one `node` command sets up the repository. The manual steps below explain what it does and are the reference when you want to change something.
 
@@ -32,7 +32,7 @@ Commands run in **Git Bash** unless a step says **PowerShell**. Agent instructio
 
 | Tool | Needed for | Required? |
 | --- | --- | --- |
-| Git for Windows (includes Git Bash) | Everything | Yes |
+| Git for Windows 2.34+ (includes Git Bash and `ssh-keygen`) | Everything, including checking release signatures | Yes |
 | Node.js 24+ | `toolkit-sync`, hooks, ticket runner, `npx` | Yes |
 | Claude Code | Everything Claude does | Yes |
 | GitHub CLI (`gh`) | GitHub issue tracker | GitHub track only |
@@ -139,9 +139,9 @@ npm install -g pnpm@11
 
 Open a new Git Bash window and run `pnpm --version`. npm installs global commands into `%APPDATA%\npm`, which the Node.js installer adds to your `PATH`. If `pnpm` isn't found, check that folder is on your user `PATH` (`npm prefix -g` prints it) and add it the same way as in 1.4.
 
-### 1.6 Pick a working folder without spaces
+### 1.6 Pick a working folder
 
-The ticket runner passes the ticket path to its launch command through a shell, so a path containing spaces breaks it. `C:\Users\Jane Doe\...` has a space, so this guide uses `C:\src`, which is `/c/src` in Git Bash:
+This guide keeps repositories in `C:\src`, which is `/c/src` in Git Bash. Any folder works, including one with spaces in its path:
 
 ```bash
 mkdir -p /c/src
@@ -149,7 +149,7 @@ mkdir -p /c/src
 
 ## 2. Clone Toolkit
 
-Keep one persistent Toolkit checkout. It's where you copy `toolkit-sync` and the `toolkit-upgrade` skill from; the vendored packages themselves are fetched by `toolkit-sync`.
+Keep one persistent Toolkit checkout. Its `toolkit-sync` does the first sync and its launcher template seeds your repository; after that, your repository's vendored `toolkit-sync` fetches everything itself.
 
 ```bash
 cd /c/src
@@ -160,6 +160,14 @@ git -C Toolkit switch --detach "$TAG"
 ```
 
 `TAG` holds the newest release, and later commands use it. It only lasts for this Git Bash window; in a new window, set it again with the same `TAG=$(...)` line.
+
+Check the release's signature against the release key in the clone:
+
+```bash
+git -C Toolkit -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=packages/toolkit-sync/allowed_signers verify-tag "$TAG"
+```
+
+It should print `Good "git" signature for toolkit-release with ED25519 key SHA256:cKZJXbRUVW+hizwqKikJj/iJKGdslbs3+OSpT7x0xOo`. The key file came from the same download it's checking, so compare that fingerprint once with the copy published in [Toolkit issue #154](https://github.com/ClabonConsultingLtd/Toolkit/issues/154). From here on, `toolkit-sync` checks every release against the key your repository vendors, and only a release signed by that key can change it.
 
 ## 3. Prepare your repository
 
@@ -206,14 +214,14 @@ node "$TS" pin agent-workflow "$TAG" --dest tools/agent-workflow
 node "$TS" pin claude-token-optimisation "$TAG" --dest tools/claude-token-optimisation
 ```
 
-This writes `toolkit-pins.json`. Nothing is copied yet. Copy the files, then check them with the repository's own vendored copy:
+This writes `toolkit-pins.json`, including each tag's verified `signer`. Nothing is copied yet. Copy the files, then check them with the repository's own vendored copy:
 
 ```bash
 node "$TS" sync
 node tools/toolkit-sync/src/cli.mjs check
 ```
 
-`check` should report all three packages as up to date with your tag. It exits non-zero if a vendored file differs from the pinned release. Run it in CI if you want to catch accidental edits. From now on, use `node tools/toolkit-sync/src/cli.mjs`; you don't need the clone's copy again.
+`check` should report all three packages as up to date with your tag. It exits non-zero if a vendored file differs from the pinned release, or if a tag's signature doesn't verify. `pin`, `check` and `sync` all verify the tag against `tools/toolkit-sync/allowed_signers`, the release key vendored with `toolkit-sync`. Don't edit that file; the [`toolkit-sync` README](../../packages/toolkit-sync/README.md#release-tag-verification) explains how the key is rotated. Run it in CI if you want to catch accidental edits. From now on, use `node tools/toolkit-sync/src/cli.mjs`; you don't need the clone's copy again.
 
 Don't edit files under `tools/` directly: the next `sync` refuses to overwrite them and you have to resolve it by hand. Make changes upstream in Toolkit and sync the release, or put project-specific rules in an overlay ([4.3](#43-project-rules-for-vendored-skills-overlays)).
 
@@ -615,8 +623,6 @@ pnpm implement-batch .scratch/csv-export/batch.json
 
 The batch launches one ticket, waits for Claude to exit, and re-reads the ticket's status. It moves on only if the status is now `done`. Otherwise it stops and prints `ticket did not complete`. Tickets already `done` are skipped. Progress is saved to `.toolkit/ticket-batch-state.json` beside the manifest, so after fixing a problem you re-run the same command and it resumes. `--max N` limits how many tickets launch in one run. `--continue-on-failure` carries on past a failed ticket, which is only safe when the remaining tickets don't depend on it.
 
-A Node `DEP0190` deprecation warning about `shell: true` is expected and harmless.
-
 ### 9.6 Review and merge
 
 Unattended work still needs a human review before it reaches `main`:
@@ -654,6 +660,8 @@ Use the toolkit-upgrade skill to upgrade toolkit-sync, agent-workflow and claude
 The skill branches, re-pins, checks for local edits, syncs, runs your checks, and opens a pull request.
 
 Alternatively, re-run the [setup wizard](../../packages/setup-wizard/README.md) on a new branch. It re-pins all three packages to the tag the clone has checked out, syncs, and refreshes the upgrade skill and hooks. It keeps your own files, and stops if `sync` finds local edits.
+
+Either way, your repository's vendored `toolkit-sync` verifies the new release against the key it already trusts, not the one in the clone. A release signed by any other key is refused.
 
 To do it by hand:
 
@@ -711,7 +719,7 @@ Claude finished without marking the ticket `done`. The usual causes are a shell 
 Run this in a new Git Bash window. Each tool should print a location:
 
 ```bash
-for tool in git node npm pnpm claude gh; do printf '%-7s' "$tool"; command -v "$tool" || echo "NOT FOUND"; done
+for tool in git ssh-keygen node npm pnpm claude gh; do printf '%-11s' "$tool"; command -v "$tool" || echo "NOT FOUND"; done
 ```
 
 `gh` is only needed for the GitHub track. For anything missing:
@@ -719,20 +727,25 @@ for tool in git node npm pnpm claude gh; do printf '%-7s' "$tool"; command -v "$
 | Tool | Where it's installed | Fix |
 | --- | --- | --- |
 | `git` | `C:\Program Files\Git\cmd` | Re-run the Git installer and choose "Git from the command line and also from 3rd-party software". Node and `toolkit-sync` need `git.exe` on the Windows `PATH`. |
+| `ssh-keygen` | `C:\Program Files\Git\usr\bin` (Git Bash has it on `PATH`) | Needed to verify release signatures. Git for Windows includes it, and Git Bash puts it on `PATH`. Windows' built-in OpenSSH client (`C:\Windows\System32\OpenSSH`) also provides one. |
 | `node`, `npm` | `C:\Program Files\nodejs` | Reopen Git Bash. If it's still missing, reinstall Node.js. |
 | `pnpm` | `%APPDATA%\npm` | See [1.5](#15-pnpm). |
 | `claude` | `%USERPROFILE%\.local\bin` | See [1.4](#14-claude-code). |
 | `gh` | `C:\Program Files\GitHub CLI` | Reopen Git Bash. If it's still missing, reinstall the GitHub CLI. |
 
-Programs started from Git Bash inherit its `PATH`, including anything `~/.bashrc` adds. This covers `pnpm`, the ticket runner, and the `cmd.exe` shell the runner uses to start Claude. PowerShell, cmd, and editor terminals such as VS Code's read only the Windows `PATH`. To check what they see, run `cmd //c where claude` from Git Bash, or `where.exe claude` in PowerShell.
+Programs started from Git Bash inherit its `PATH`, including anything `~/.bashrc` adds. This covers `pnpm`, the ticket runner, and Claude when the launcher starts it. PowerShell, cmd, and editor terminals such as VS Code's read only the Windows `PATH`. To check what they see, run `cmd //c where claude` from Git Bash, or `where.exe claude` in PowerShell.
 
 ### `claude` not found when the runner launches it
 
 The runner found no `claude` on the `PATH` it inherited. If you started it from Git Bash, `command -v claude` fails there too; fix it as in [1.4](#14-claude-code). If you started it from PowerShell, cmd or an editor terminal, `claude` must be on the Windows user `PATH`, not only in `~/.bashrc`. Open a new terminal after changing `PATH`.
 
-### Paths with spaces
+### `not a Signed release tag` or `verify-tag` fails
 
-The runner joins the launch command and the ticket path into a single shell command. Keep repositories under a path without spaces, such as `C:\src`.
+`toolkit-sync` refuses a tag it can't verify. Check that:
+
+- `git --version` is 2.34 or later, and `ssh-keygen` is on `PATH` (see [Checking PATH](#checking-path)).
+- The tag is `v0.14.0` or later. Earlier tags were never signed; `toolkit-sync` accepts them only with `--allow-unsigned`, and this guide needs a later release anyway.
+- `tools/toolkit-sync/allowed_signers` hasn't been edited. If it has, restore it with `git checkout -- tools/toolkit-sync/allowed_signers`.
 
 ### Hooks don't run
 

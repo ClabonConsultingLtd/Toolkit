@@ -26,11 +26,12 @@ ${shared}
 When every acceptance criterion is met and the checks pass, tick its checkboxes and change its status line to exactly:
 **Status:** done`;
 
-const result = spawnSync("claude", ["-p", "--permission-mode", "acceptEdits"], {
-	input: prompt,
-	stdio: ["pipe", "inherit", "inherit"],
-	// On Windows, claude may be a .cmd shim that needs a shell to resolve.
-	shell: process.platform === "win32",
-});
+const args = ["-p", "--permission-mode", "acceptEdits"];
+const io = { input: prompt, stdio: ["pipe", "inherit", "inherit"] };
+let result = spawnSync("claude", args, io);
+// An npm-installed claude on Windows is a .cmd shim, which only a shell can
+// start. The native installer's claude.exe needs no shell.
+if (result.error?.code === "ENOENT" && process.platform === "win32")
+	result = spawnSync(["claude", ...args].join(" "), { ...io, shell: true });
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);

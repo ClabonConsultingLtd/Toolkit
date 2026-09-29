@@ -132,3 +132,12 @@ test("removeLines drops exact lines only", () => {
 	assert.equal(removeLines(".toolkit/*\n", [".toolkit/"]).changed, false);
 	assert.equal(removeLines("a\r\n.toolkit/\r\n", [".toolkit/"]).text, "a\r\n");
 });
+
+test("gitSupportsSshSignatures needs git 2.34 or later", async () => {
+	const { gitSupportsSshSignatures } = await import("../src/wizard.mjs");
+	assert.equal(gitSupportsSshSignatures("git version 2.34.0"), true);
+	assert.equal(gitSupportsSshSignatures("git version 2.47.1.windows.1"), true);
+	assert.equal(gitSupportsSshSignatures("git version 3.0.0"), true);
+	assert.equal(gitSupportsSshSignatures("git version 2.33.8"), false);
+	assert.equal(gitSupportsSshSignatures("not git"), false);
+});

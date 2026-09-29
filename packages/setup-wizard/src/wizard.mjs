@@ -3,10 +3,12 @@ import {
 	cpSync,
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
 	ensureLines,
@@ -168,6 +170,33 @@ function readText(path) {
 	return existsSync(path) ? readFileSync(path, "utf8") : "";
 }
 
+/** True for `git version X.Y...` at 2.34 or later, the first with SSH signatures. */
+export function gitSupportsSshSignatures(versionText) {
+	const match = /(\d+)\.(\d+)/.exec(versionText);
+	if (!match) return false;
+	const [major, minor] = [Number(match[1]), Number(match[2])];
+	return major > 2 || (major === 2 && minor >= 34);
+}
+
+/** SHA256 fingerprint of the first key in an allowed_signers file, if readable. */
+function anchorFingerprint(path) {
+	if (!existsSync(path)) return undefined;
+	const line = readFileSync(path, "utf8")
+		.split("\n")
+		.find((entry) => /\bssh-\S+ \S+/.test(entry));
+	const key = line && /\b(ssh-\S+ \S+)/.exec(line)[1];
+	if (!key) return undefined;
+	const dir = mkdtempSync(join(tmpdir(), "setup-anchor-"));
+	try {
+		writeFileSync(join(dir, "key.pub"), `${key}\n`);
+		return /SHA256:\S+/.exec(
+			run("ssh-keygen", ["-lf", join(dir, "key.pub")]).stdout,
+		)?.[0];
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 /**
  * Set up a consuming repository for Claude Code. `io` supplies log, warn,
  * ask(question, choices, fallback) and confirm(question, fallback).
@@ -188,8 +217,13 @@ export async function runSetup(options, io) {
 		throw new Error(
 			`Node.js 24 or later is required (found ${process.versions.node})`,
 		);
-	if (!run("git", ["--version"]).ok)
+	const gitVersion = run("git", ["--version"]);
+	if (!gitVersion.ok)
 		throw new Error(notOnPath("git", "Install Git for Windows."));
+	if (!gitSupportsSshSignatures(gitVersion.stdout))
+		throw new Error(
+			`toolkit-sync verifies SSH-signed release tags, which needs git 2.34 or later (found: ${gitVersion.stdout}). Update Git and re-run the wizard.`,
+		);
 
 	const target = resolve(options.target ?? ".");
 	if (!existsSync(target)) throw new Error(`target does not exist: ${target}`);
@@ -206,11 +240,6 @@ export async function runSetup(options, io) {
 	}
 	const root = resolve(git(target, ["rev-parse", "--show-toplevel"]));
 	io.log(`Repository: ${root}`);
-	if (/\s/.test(root))
-		warn(
-			"The repository path contains a space; the ticket runner passes ticket paths through a shell and will break. Move it to a path such as C:\\src\\<name>.",
-		);
-
 	const tag =
 		options.tag ??
 		run("git", ["describe", "--tags", "--exact-match", "HEAD"], {
@@ -312,18 +341,30 @@ export async function runSetup(options, io) {
 			inherit: true,
 		});
 		if (!result.ok)
-			throw new Error(`toolkit-sync ${args[0]} failed; see the output above`);
+			throw new Error(
+				`toolkit-sync ${args[0]} failed; see the output above. It verifies each release tag's SSH signature, which needs git 2.34+ and ssh-keygen on PATH, and a release tag from v0.14.0 on.`,
+			);
 	};
-	const cloneCli = join(
-		toolkitRoot,
-		"packages",
-		"toolkit-sync",
-		"src",
-		"cli.mjs",
-	);
+	// A repository that already vendors a verifying toolkit-sync checks the new
+	// release against the key it already trusts. Only a first setup trusts the
+	// clone's copy, and its key is shown so it can be checked once.
+	const vendored = join(root, destRoot, "toolkit-sync");
+	const upgrading = existsSync(join(vendored, "allowed_signers"));
+	const cli = upgrading
+		? join(vendored, "src", "cli.mjs")
+		: join(toolkitRoot, "packages", "toolkit-sync", "src", "cli.mjs");
+	if (!upgrading) {
+		const fingerprint = anchorFingerprint(
+			join(toolkitRoot, "packages", "toolkit-sync", "allowed_signers"),
+		);
+		if (fingerprint) {
+			summary.fingerprint = fingerprint;
+			io.log(`Release signing key: ${fingerprint}`);
+		}
+	}
 	for (const name of PACKAGES)
-		toolkitSync(cloneCli, ["pin", name, tag, "--dest", `${destRoot}/${name}`]);
-	toolkitSync(cloneCli, ["sync"]);
+		toolkitSync(cli, ["pin", name, tag, "--dest", `${destRoot}/${name}`]);
+	toolkitSync(cli, ["sync"]);
 	toolkitSync(join(root, destRoot, "toolkit-sync", "src", "cli.mjs"), [
 		"check",
 	]);
@@ -468,9 +509,14 @@ export async function runSetup(options, io) {
 }
 
 export function nextSteps(result) {
-	const steps = [
+	const steps = [];
+	if (result.fingerprint)
+		steps.push(
+			`Once, check the release signing key ${result.fingerprint} matches the one published at https://github.com/ClabonConsultingLtd/Toolkit/issues/154. toolkit-sync trusts it from now on.`,
+		);
+	steps.push(
 		"Review permissions.allow in .claude/settings.json and add the test, lint and build commands tickets need.",
-	];
+	);
 	if (!result.skills)
 		steps.push(
 			"Install Matt Pocock's skills: claude plugin install mattpocock-skills --scope project.",

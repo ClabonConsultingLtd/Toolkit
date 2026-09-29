@@ -95,6 +95,11 @@ $tag = git -C $ToolkitDir tag --list 'v*' --sort=-v:refname | Select-Object -Fir
 git -C $ToolkitDir -c advice.detachedHead=false switch --detach $tag
 if ($LASTEXITCODE -ne 0) { throw "could not check out $tag in $ToolkitDir" }
 
+# Releases are SSH-signed. The key file comes from the same download, so the
+# fingerprint printed here should also be checked once against issue #154.
+git -C $ToolkitDir -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=packages/toolkit-sync/allowed_signers verify-tag $tag
+if ($LASTEXITCODE -ne 0) { throw "the signature on $tag did not verify; don't use this clone" }
+
 # Every tool must now resolve from the refreshed PATH. New terminals see the
 # same PATH; terminals that were already open need reopening.
 $tools = @('git', 'node', 'npm', 'pnpm', 'claude')
@@ -106,7 +111,9 @@ if ($missing.Count -gt 0) {
 
 $bashDir = '/' + $ToolkitDir.Substring(0, 1).ToLower() + $ToolkitDir.Substring(2).Replace('\', '/')
 Write-Host ''
-Write-Host "Done. Toolkit $tag is in $ToolkitDir."
+Write-Host "Done. Toolkit $tag is in $ToolkitDir, and its signature verified."
+Write-Host 'Check once that the key fingerprint printed above matches the one published at'
+Write-Host '  https://github.com/ClabonConsultingLtd/Toolkit/issues/154'
 Write-Host 'Next, in a NEW Git Bash window (already-open terminals keep the old PATH):'
 if ($GitHub) { Write-Host '  - Sign in to GitHub: gh auth login, then gh auth setup-git' }
 Write-Host '  - Run claude once, sign in, then /exit'

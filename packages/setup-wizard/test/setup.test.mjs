@@ -21,9 +21,36 @@ function git(cwd, args) {
 	return execFileSync("git", args, { cwd, encoding: "utf8" });
 }
 
+// toolkit-sync only trusts tags signed by a key in its allowed_signers, so the
+// fixture ships its own throwaway key as that Trust anchor and signs with it.
+let signingKey;
+function testSigningKey() {
+	signingKey ??= createSigningKey();
+	return signingKey;
+}
+
+function createSigningKey() {
+	const privateKey = join(mkdtempSync(join(tmpdir(), "setup-key-")), "key");
+	execFileSync("ssh-keygen", [
+		"-q",
+		"-t",
+		"ed25519",
+		"-N",
+		"",
+		"-f",
+		privateKey,
+	]);
+	const publicKey = readFileSync(`${privateKey}.pub`, "utf8")
+		.trim()
+		.split(" ")
+		.slice(0, 2)
+		.join(" ");
+	return { privateKey, publicKey };
+}
+
 // A tagged Toolkit-shaped repository built from this working tree, so the
 // test exercises the current packages without network access or real tags.
-function fixtureToolkit() {
+function fixtureToolkit({ signed = true, key = testSigningKey() } = {}) {
 	const root = mkdtempSync(join(tmpdir(), "setup-toolkit-"));
 	for (const name of [
 		"toolkit-sync",
@@ -35,19 +62,28 @@ function fixtureToolkit() {
 			recursive: true,
 			filter: (source) => basename(source) !== "node_modules",
 		});
+	writeFileSync(
+		join(root, "packages", "toolkit-sync", "allowed_signers"),
+		`toolkit-release namespaces="git" ${key.publicKey}\n`,
+	);
 	git(root, ["init", "-q", "-b", "main"]);
+	git(root, ["config", "user.name", "Test"]);
+	git(root, ["config", "user.email", "test@example.com"]);
 	git(root, ["add", "-A"]);
-	git(root, [
-		"-c",
-		"user.name=Test",
-		"-c",
-		"user.email=test@example.com",
-		"commit",
-		"-q",
-		"-m",
-		"fixture",
-	]);
-	git(root, ["tag", TAG]);
+	git(root, ["commit", "-q", "-m", "fixture"]);
+	if (signed)
+		git(root, [
+			"-c",
+			"gpg.format=ssh",
+			"-c",
+			`user.signingkey=${key.privateKey}`,
+			"tag",
+			"-s",
+			"-m",
+			`Release ${TAG}`,
+			TAG,
+		]);
+	else git(root, ["tag", TAG]);
 	return root;
 }
 
@@ -92,6 +128,7 @@ test("sets up a repository for both trackers and is idempotent", async () => {
 
 	const result = await runSetup(options, quietIo());
 	assert.equal(result.tracker, "both");
+	assert.match(result.fingerprint, /^SHA256:/);
 	assert.equal(
 		git(target, ["branch", "--show-current"]).trim(),
 		"chore/toolkit-setup",
@@ -200,6 +237,7 @@ test("sets up a repository for both trackers and is idempotent", async () => {
 		".gitignore",
 	].map((file) => readFileSync(join(target, file), "utf8"));
 	const again = await runSetup(options, quietIo());
+	assert.equal(again.fingerprint, undefined, "re-runs trust the vendored key");
 	assert.deepEqual(again.kept, []);
 	assert.deepEqual(
 		["AGENTS.md", ".claude/settings.json", "package.json", ".gitignore"].map(
@@ -281,6 +319,48 @@ test("replaces a bare .toolkit/ ignore so overlays can be committed", async () =
 		}).status,
 		0,
 		"runtime state is ignored",
+	);
+});
+
+test("stops when the release tag is not signed", async () => {
+	const toolkit = fixtureToolkit({ signed: false });
+	const target = consumer();
+	await assert.rejects(
+		runSetup(
+			{
+				target,
+				toolkitRoot: toolkit,
+				repo: toolkit,
+				tag: TAG,
+				tracker: "local",
+				yes: true,
+				skills: false,
+			},
+			quietIo(),
+		),
+		/toolkit-sync pin failed/,
+	);
+	assert.equal(existsSync(join(target, "tools/agent-workflow")), false);
+});
+
+test("a re-run verifies the release with the key the repository already trusts", async () => {
+	const target = consumer();
+	const first = fixtureToolkit();
+	const options = {
+		target,
+		tag: TAG,
+		tracker: "local",
+		yes: true,
+		skills: false,
+		branch: false,
+	};
+	await runSetup({ ...options, toolkitRoot: first, repo: first }, quietIo());
+
+	// A clone whose release, and whose own allowed_signers, use another key.
+	const other = fixtureToolkit({ key: createSigningKey() });
+	await assert.rejects(
+		runSetup({ ...options, toolkitRoot: other, repo: other }, quietIo()),
+		/toolkit-sync pin failed/,
 	);
 });
 
