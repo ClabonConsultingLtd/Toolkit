@@ -3,6 +3,9 @@
 //
 //   node fixture-gate.mjs <fixture> <gate|suppressions> --expect <pass|fail|warn> [options]
 //
+// The image Gate also needs --image, a `docker save` tarball of an image the
+// self-test built from test/images.
+//
 // The fixture is copied into a new git repository with a ".fixture" suffix
 // stripped from each file name. The suffix keeps the planted findings out of
 // Toolkit's own scans and lint. Its files are committed on top of an empty
@@ -13,6 +16,7 @@ import { cpSync, mkdtempSync, readdirSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { TOOLS } from "../scripts/check-suppressions.mjs";
 
 const FIXTURES = new URL("./fixtures/", import.meta.url).pathname;
 const SCRIPTS = new URL("../scripts/", import.meta.url).pathname;
@@ -77,12 +81,14 @@ function main() {
 			bin: { type: "string" },
 			today: { type: "string" },
 			out: { type: "string" },
+			image: { type: "string" },
+			severity: { type: "string" },
 		},
 	});
 	const [fixture, gate] = positionals;
 	if (!fixture || !gate || !["pass", "fail", "warn"].includes(values.expect)) {
 		console.log(
-			"usage: fixture-gate.mjs <fixture> <gate|suppressions> --expect <pass|fail|warn> [--bin <dir>] [--today YYYY-MM-DD] [--out <dir>]",
+			"usage: fixture-gate.mjs <fixture> <gate|suppressions> --expect <pass|fail|warn> [--bin <dir>] [--image <tarball>] [--severity <level>] [--today YYYY-MM-DD] [--out <dir>]",
 		);
 		process.exit(2);
 	}
@@ -90,7 +96,7 @@ function main() {
 	const today = values.today ? ["--today", values.today] : [];
 	const runs =
 		gate === "suppressions"
-			? ["gitleaks", "opengrep", "osv-scanner"].map((tool) => [
+			? TOOLS.map((tool) => [
 					join(SCRIPTS, "check-suppressions.mjs"),
 					"--tool",
 					tool,
@@ -112,6 +118,8 @@ function main() {
 						"--head",
 						head,
 						...(values.bin ? ["--bin", values.bin] : []),
+						...(values.image ? ["--image", values.image] : []),
+						...(values.severity ? ["--severity", values.severity] : []),
 						...today,
 					],
 				];

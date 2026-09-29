@@ -1,0 +1,5 @@
+# The same base image with apk-tools at the fixed version, running as a
+# non-root user. It passes the image Gate.
+FROM scratch
+COPY rootfs-fixed/ /
+USER 65532:65532

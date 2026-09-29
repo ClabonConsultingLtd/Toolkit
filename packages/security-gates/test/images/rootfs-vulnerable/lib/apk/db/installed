@@ -1,0 +1,6 @@
+P:apk-tools
+V:2.12.5-r1
+T:Alpine Package Keeper - package manager for alpine
+L:GPL-2.0-only
+o:apk-tools
+
