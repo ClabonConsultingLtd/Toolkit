@@ -1125,7 +1125,10 @@ test("cleanup runs the checkout's hook against the ticket worktree and only reco
 	assert.throws(() => cleanup({ token: "stale" }), /lease/);
 
 	assert.deepEqual(cleanup(), { ticket: "7", ran: true, ok: true });
-	const [call] = readFileSync(record, "utf8").trim().split("\n").map(JSON.parse);
+	const [call] = readFileSync(record, "utf8")
+		.trim()
+		.split("\n")
+		.map(JSON.parse);
 	assert.deepEqual(call, {
 		args: [realpathSync(worktree), "tickets/pilot/7", "7"],
 		cwd: realpathSync(worktree),

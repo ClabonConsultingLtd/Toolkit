@@ -14,7 +14,11 @@ if (!worktree) {
 }
 // Compose's default project name: the directory name, lowercased, keeping
 // only letters, digits, dashes and underscores.
-const projects = [basename(worktree).toLowerCase().replace(/[^a-z0-9_-]/g, "")];
+const projects = [
+	basename(worktree)
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]/g, ""),
+];
 for (const project of projects) {
 	const result = spawnSync(
 		"docker",

@@ -130,16 +130,25 @@ test("selfAuthoredMerge adds the comment-review rule only when set", (t) => {
 test("cleanupCommand adds the cleanup rule only when set; review teardown is always asked", (t) => {
 	const cwd = checkout(t, base);
 	const plain = schedulePrompt(cwd);
-	assert.match(plain, /Tear down any containers, volumes and networks this run started while verifying\./);
+	assert.match(
+		plain,
+		/Tear down any containers, volumes and networks this run started while verifying\./,
+	);
 	assert.doesNotMatch(plain, /cleanup STATE\.json/);
 	writeFileSync(
 		join(cwd, "toolkit-intake.json"),
 		JSON.stringify({ ...base, cleanupCommand: "scripts/intake-cleanup.mjs" }),
 	);
 	const opted = schedulePrompt(cwd);
-	assert.match(opted, /orchestrate\.mjs cleanup STATE\.json` with the lease token, ticket number and absolute `worktreePath`/);
+	assert.match(
+		opted,
+		/orchestrate\.mjs cleanup STATE\.json` with the lease token, ticket number and absolute `worktreePath`/,
+	);
 	assert.equal(
-		opted.replace(/ Run `node [^`]+ cleanup STATE\.json`[^\n]*? as a warning\./, ""),
+		opted.replace(
+			/ Run `node [^`]+ cleanup STATE\.json`[^\n]*? as a warning\./,
+			"",
+		),
 		plain,
 		"only step 5 changes",
 	);
