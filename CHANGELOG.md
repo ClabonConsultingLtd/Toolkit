@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.0 - 2026-09-29
+
+- #138: feat(agent-workflow): add a cleanupCommand hook for ticket worktrees
+
 ## 0.11.2 - 2026-09-29
 
 - #123: fix(agent-workflow): match versioned model labels in the digest
