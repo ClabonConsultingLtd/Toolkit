@@ -1,0 +1,118 @@
+# Proposes scanner version bumps for security-gates. Weekly, plus
+# workflow_dispatch for a manual run.
+#
+# packages/security-gates/scripts/bump-scanners.mjs checks each pinned
+# tool's latest GitHub release (read from the same tool table
+# install-scanners.mjs installs from) and, for any tool that is behind,
+# downloads and verifies the new release for both architectures before
+# writing scanner-versions.json. A release that can't be verified is
+# skipped with a warning, and its pin is left alone.
+#
+# CI-trigger note: a pull request opened with the default GITHUB_TOKEN does
+# not trigger other workflows' pull_request events (GitHub's loop
+# prevention), so verify.yml and security-gates-self-test.yml would never
+# run on this PR. A job-level `uses: ./.github/workflows/security-gates.yml`
+# call would not help either: it checks out the ref that triggered *this*
+# run (main, for the schedule), not the branch this job is about to push,
+# so it would validate the wrong tree. Instead, once a bump is found, this
+# job runs the same checks itself, in place, against the bumped tree: the
+# security-gates unit tests, the Opengrep rule tests, and all three Gates.
+# A pull request only opens once those pass.
+name: security-gates scanner bump
+
+on:
+  schedule:
+    - cron: '15 3 * * 1'
+  workflow_dispatch:
+
+# One bump branch at a time; a later run should build on the latest pins,
+# not race an earlier one.
+concurrency:
+  group: security-gates-scanner-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump scanner versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The only permissions this job needs: push the bump branch and open or
+    # update its pull request.
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      BRANCH: chore/scanner-bump
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] persisted credentials are used below to push the bump branch
+        with:
+          fetch-depth: 0
+      - name: Configure Git identity
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - id: bump
+        name: Check for scanner updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ runner.temp }}/pr-body.md
+        run: node packages/security-gates/scripts/bump-scanners.mjs --pr-body "$PR_BODY"
+      - name: Install and verify the bumped scanners
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: node packages/security-gates/scripts/install-scanners.mjs --dest "$BIN" gitleaks osv-scanner opengrep
+      - name: security-gates unit tests
+        if: steps.bump.outputs.changed == 'true'
+        run: node --test 'packages/security-gates/test/*.test.mjs'
+      # Run from inside test/rules: Opengrep skips paths under test/ by default.
+      - name: Opengrep rule tests
+        if: steps.bump.outputs.changed == 'true'
+        working-directory: packages/security-gates/test/rules
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+        run: '"$BIN/opengrep" test --config ../../rules .'
+      - name: Run the Gates over this repository with the bumped scanners
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          BIN: ${{ runner.temp }}/security-gates-bin
+          OUT: ${{ runner.temp }}/security-gates-results
+        run: |
+          for gate in secrets dependencies static-analysis; do
+            node packages/security-gates/scripts/run-gate.mjs "$gate" --out "$OUT" --bin "$BIN"
+          done
+      - name: Commit the bump
+        if: steps.bump.outputs.changed == 'true'
+        run: |
+          git checkout -B "$BRANCH"
+          git add packages/security-gates/scanner-versions.json
+          git commit -m "chore(security-gates): bump scanner versions"
+      - id: pending
+        name: Find the open bump pull request
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          number="$(gh pr list --base main --head "$BRANCH" --state open --json number --jq '.[0].number')"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+      - name: Push the bump branch
+        if: steps.bump.outputs.changed == 'true'
+        run: git push --force-with-lease origin "$BRANCH"
+      - name: Create or update the bump pull request
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pending.outputs.number }}
+          PR_BODY: ${{ runner.temp }}/pr-body.md
+        run: |
+          if [[ -n "$PR_NUMBER" ]]; then
+            gh pr edit "$PR_NUMBER" --body-file "$PR_BODY"
+          else
+            gh pr create --base main --head "$BRANCH" \
+              --title "chore(security-gates): bump scanner versions" \
+              --body-file "$PR_BODY" --label release:patch
+          fi
