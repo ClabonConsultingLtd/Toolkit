@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.2 - 2026-09-29
+
+- #123: fix(agent-workflow): match versioned model labels in the digest
+
 ## 0.11.1 - 2026-09-27
 
 - #121: fix(agent-workflow): keep controller background work in the turn
