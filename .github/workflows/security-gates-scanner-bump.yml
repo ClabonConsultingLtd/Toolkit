@@ -77,7 +77,7 @@ jobs:
         if: steps.bump.outputs.changed == 'true'
         env:
           BIN: ${{ runner.temp }}/security-gates-bin
-        run: node packages/security-gates/scripts/install-scanners.mjs --dest "$BIN" gitleaks osv-scanner opengrep
+        run: node packages/security-gates/scripts/install-scanners.mjs --dest "$BIN" gitleaks osv-scanner opengrep trivy dockle
       - name: security-gates unit tests
         if: steps.bump.outputs.changed == 'true'
         run: node --test 'packages/security-gates/test/*.test.mjs'

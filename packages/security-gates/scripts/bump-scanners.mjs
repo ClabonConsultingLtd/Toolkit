@@ -8,7 +8,7 @@
 // left unchanged. Nothing is written when no tool is behind.
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 import {
 	ARCHES,
@@ -19,7 +19,7 @@ import {
 	parseVersions,
 	runnerArch,
 	sha256,
-	verifyDigest,
+	verifyReleaseChecksum,
 	verifySignature,
 } from "./install-scanners.mjs";
 
@@ -76,15 +76,9 @@ export function isNewer(current, latest) {
 	return false;
 }
 
-// goreleaser-style checksums files: one "<sha256>  <filename>" line per asset
-// (a leading "*" before the filename, for binary mode, is also accepted).
-export function parseChecksums(text) {
-	const hashes = new Map();
-	for (const match of text.matchAll(/^([0-9a-f]{64})\s+\*?(\S+)/gm))
-		hashes.set(match[2], match[1]);
-	return hashes;
-}
-
+// Tools that don't declare a `checksums` URL in install-scanners.mjs's TOOLS
+// table (Gitleaks, OSV-Scanner, cosign) still publish one; this finds it by
+// name among the release's assets instead of a per-tool URL template.
 const CHECKSUMS_ASSET = /checksums|sha256sums/i;
 
 export function findChecksumsAsset(assets) {
@@ -92,9 +86,11 @@ export function findChecksumsAsset(assets) {
 }
 
 // Downloads and verifies one tool's release assets for both architectures
-// against the release's own checksums file, and its cosign signature where
-// install-scanners.mjs requires one. Returns the { arch: sha256 } pin to
-// write, or throws on the first arch that fails verification.
+// against the release's own checksums file — install-scanners.mjs's
+// verifyReleaseChecksum decides whether each download matches it — and its
+// cosign signature where install-scanners.mjs requires one. Returns the
+// { arch: sha256 } pin to write, or throws on the first arch that fails
+// verification.
 export async function bumpTool(
 	tool,
 	version,
@@ -102,35 +98,34 @@ export async function bumpTool(
 	{ fetchImpl, cosign, tools = DEFAULT_TOOLS },
 ) {
 	const spec = tools[tool];
-	const checksumsAsset = findChecksumsAsset(release.assets);
-	let checksums = new Map();
-	if (checksumsAsset) {
-		const text = (await download(checksumsAsset.url, fetchImpl)).toString(
-			"utf8",
-		);
-		checksums = parseChecksums(text);
-	}
+	const checksumsUrl = spec.checksums
+		? spec.checksums(version)
+		: findChecksumsAsset(release.assets)?.url;
+	if (!checksumsUrl)
+		throw new Error(`${tool}: no published checksums found for ${version}`);
+	const checksumsText = (await download(checksumsUrl, fetchImpl)).toString(
+		"utf8",
+	);
+
 	const sha256s = {};
 	for (const arch of ARCHES) {
 		const url = spec.url(version, arch);
-		const filename = url.split("/").pop();
+		const filename = basename(url);
 		const buffer = await download(url, fetchImpl);
-		const expected = checksums.get(filename);
-		if (!expected)
-			throw new Error(`${tool}: no published checksum found for ${filename}`);
-		verifyDigest(tool, buffer, expected);
+		const actual = sha256(buffer);
+		verifyReleaseChecksum(tool, checksumsText, filename, actual);
 		if (spec.signer) {
 			const staged = join(
 				mkdtempSync(join(tmpdir(), `security-gates-bump-${tool}-`)),
-				tool,
+				filename,
 			);
 			writeFileSync(staged, buffer);
-			await verifySignature(tool, staged, url, spec.signer, {
+			await verifySignature(tool, staged, url, spec.signer(version), {
 				cosign,
 				fetchImpl,
 			});
 		}
-		sha256s[arch] = sha256(buffer);
+		sha256s[arch] = actual;
 	}
 	return sha256s;
 }

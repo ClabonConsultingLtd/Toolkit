@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import test from "node:test";
 import {
 	bumpScanners,
@@ -9,14 +9,15 @@ import {
 	fetchLatestRelease,
 	findChecksumsAsset,
 	isNewer,
-	parseChecksums,
 	prBody,
 	toolRepo,
 } from "../scripts/bump-scanners.mjs";
-import { sha256 } from "../scripts/install-scanners.mjs";
+import { TOOLS as REAL_TOOLS, sha256 } from "../scripts/install-scanners.mjs";
 
 // A small, self-contained tool table so these tests don't depend on the real
-// scanner set, and stay valid once #133 adds more tools to install-scanners.mjs.
+// scanner set, and stay valid as more tools are added to install-scanners.mjs.
+// gadget mirrors Opengrep (a static cert/sig signer); camera mirrors Dockle
+// (a checksums() URL function, no signer).
 function fakeTools() {
 	return {
 		widget: {
@@ -26,10 +27,16 @@ function fakeTools() {
 		gadget: {
 			url: (v, arch) =>
 				`https://github.com/acme/gadget/releases/download/v${v}/gadget_linux_${arch}`,
-			signer: {
+			signer: () => ({
 				identityRegexp: "^https://.*$",
 				oidcIssuer: "https://issuer.example",
-			},
+			}),
+		},
+		camera: {
+			url: (v, arch) =>
+				`https://github.com/acme/camera/releases/download/v${v}/camera_linux_${arch}`,
+			checksums: (v) =>
+				`https://github.com/acme/camera/releases/download/v${v}/camera_checksums.txt`,
 		},
 	};
 }
@@ -99,22 +106,20 @@ test("toolRepo reads owner/repo back from a tool's download URL", () => {
 	});
 });
 
+test("toolRepo reads Trivy's and Dockle's repos straight from the installer's real table", () => {
+	assert.deepEqual(toolRepo("trivy"), { owner: "aquasecurity", repo: "trivy" });
+	assert.deepEqual(toolRepo("dockle"), {
+		owner: "goodwithtech",
+		repo: "dockle",
+	});
+});
+
 test("isNewer compares X.Y.Z versions", () => {
 	assert.equal(isNewer("1.2.3", "1.2.4"), true);
 	assert.equal(isNewer("1.2.3", "1.3.0"), true);
 	assert.equal(isNewer("1.2.3", "2.0.0"), true);
 	assert.equal(isNewer("1.2.3", "1.2.3"), false);
 	assert.equal(isNewer("1.2.3", "1.2.2"), false);
-});
-
-test("parseChecksums reads goreleaser-style checksum lines", () => {
-	const text = checksumsText([
-		["a".repeat(64), "widget_linux_amd64"],
-		["b".repeat(64), "widget_linux_arm64"],
-	]);
-	const hashes = parseChecksums(text);
-	assert.equal(hashes.get("widget_linux_amd64"), "a".repeat(64));
-	assert.equal(hashes.get("widget_linux_arm64"), "b".repeat(64));
 });
 
 test("findChecksumsAsset matches common checksum file names", () => {
@@ -222,7 +227,7 @@ test("bumpTool rejects a download that doesn't match its published checksum", as
 	});
 	await assert.rejects(
 		bumpTool("widget", "2.0.0", release, { fetchImpl: impl, tools }),
-		/SHA-256 mismatch/,
+		/the release checksums file gives .* but the pin is/,
 	);
 });
 
@@ -288,6 +293,104 @@ test("bumpTool rejects a failed cosign signature", async () => {
 		bumpTool("gadget", "2.0.0", release, { fetchImpl: impl, tools, cosign }),
 		/cosign signature verification failed/,
 	);
+});
+
+test("bumpTool fetches a tool's declared checksums() URL directly instead of guessing from release assets", async () => {
+	const tools = fakeTools();
+	const amd64Body = "camera-amd64";
+	const arm64Body = "camera-arm64";
+	const url = (arch) => tools.camera.url("2.0.0", arch);
+	const checksumsUrl = tools.camera.checksums("2.0.0");
+	// The release lists no asset that looks like a checksums file; camera's
+	// checksums() function is the only way to find it.
+	const release = { url: "https://example.com", assets: [] };
+	const { impl, requested } = fakeFetch({
+		assets: {
+			[checksumsUrl]: checksumsText([
+				[sha256(Buffer.from(amd64Body)), "camera_linux_amd64"],
+				[sha256(Buffer.from(arm64Body)), "camera_linux_arm64"],
+			]),
+			[url("amd64")]: amd64Body,
+			[url("arm64")]: arm64Body,
+		},
+	});
+	const sha256s = await bumpTool("camera", "2.0.0", release, {
+		fetchImpl: impl,
+		tools,
+	});
+	assert.equal(sha256s.amd64, sha256(Buffer.from(amd64Body)));
+	assert.equal(sha256s.arm64, sha256(Buffer.from(arm64Body)));
+	assert.ok(requested.includes(checksumsUrl));
+});
+
+// Trivy and Dockle are covered automatically through install-scanners.mjs's
+// real TOOLS table: Trivy has both a checksums() URL and a version-anchored
+// cosign bundle signer, Dockle only a checksums() URL. These use the real
+// table (not fakeTools) to prove that coverage directly, per install-scanners'
+// own url()/checksums() shapes for each.
+test("bumpTool covers Trivy through the installer's table: checksums() plus a cosign bundle signature", async () => {
+	const version = "0.75.0";
+	const amd64Body = "trivy-amd64";
+	const arm64Body = "trivy-arm64";
+	const amd64Url = REAL_TOOLS.trivy.url(version, "amd64");
+	const arm64Url = REAL_TOOLS.trivy.url(version, "arm64");
+	const checksumsUrl = REAL_TOOLS.trivy.checksums(version);
+	const { path: cosign, log } = fakeCosign(0);
+	const { impl } = fakeFetch({
+		assets: {
+			[checksumsUrl]: checksumsText([
+				[sha256(Buffer.from(amd64Body)), basename(amd64Url)],
+				[sha256(Buffer.from(arm64Body)), basename(arm64Url)],
+			]),
+			[amd64Url]: amd64Body,
+			[arm64Url]: arm64Body,
+			[`${amd64Url}.sigstore.json`]: "{}",
+			[`${arm64Url}.sigstore.json`]: "{}",
+		},
+	});
+	const sha256s = await bumpTool(
+		"trivy",
+		version,
+		{ url: "https://example.com", assets: [] },
+		{ fetchImpl: impl, cosign },
+	);
+	assert.equal(sha256s.amd64, sha256(Buffer.from(amd64Body)));
+	assert.equal(sha256s.arm64, sha256(Buffer.from(arm64Body)));
+	const args = readFileSync(log, "utf8").trim().split("\n");
+	assert.equal(args[0], "verify-blob");
+	assert.ok(args.includes("--bundle"));
+	assert.ok(
+		args.some((a) => a.includes(version)),
+		"the signer identity is anchored to this pinned version",
+	);
+});
+
+test("bumpTool covers Dockle through the installer's table: checksums() only, no signature required", async () => {
+	const version = "0.4.16";
+	const amd64Body = "dockle-amd64";
+	const arm64Body = "dockle-arm64";
+	const amd64Url = REAL_TOOLS.dockle.url(version, "amd64");
+	const arm64Url = REAL_TOOLS.dockle.url(version, "arm64");
+	const checksumsUrl = REAL_TOOLS.dockle.checksums(version);
+	assert.equal(REAL_TOOLS.dockle.signer, undefined);
+	const { impl } = fakeFetch({
+		assets: {
+			[checksumsUrl]: checksumsText([
+				[sha256(Buffer.from(amd64Body)), basename(amd64Url)],
+				[sha256(Buffer.from(arm64Body)), basename(arm64Url)],
+			]),
+			[amd64Url]: amd64Body,
+			[arm64Url]: arm64Body,
+		},
+	});
+	const sha256s = await bumpTool(
+		"dockle",
+		version,
+		{ url: "https://example.com", assets: [] },
+		{ fetchImpl: impl },
+	);
+	assert.equal(sha256s.amd64, sha256(Buffer.from(amd64Body)));
+	assert.equal(sha256s.arm64, sha256(Buffer.from(arm64Body)));
 });
 
 // --- bumpScanners: the end-to-end orchestration -----------------------------

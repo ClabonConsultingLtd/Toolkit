@@ -24,11 +24,11 @@ test("validate-versions rejects a file that doesn't match the installer's shape"
 	const file = join(dir, "versions.json");
 	writeFileSync(
 		file,
-		JSON.stringify({ trivy: { "1.0.0": { amd64: "x", arm64: "y" } } }),
+		JSON.stringify({ grype: { "1.0.0": { amd64: "x", arm64: "y" } } }),
 	);
 	const result = run(file);
 	assert.equal(result.status, 1);
-	assert.match(result.stderr, /::error::.*unknown tool "trivy"/);
+	assert.match(result.stderr, /::error::.*unknown tool "grype"/);
 });
 
 test("validate-versions never touches the network or spawns a scanner", () => {
