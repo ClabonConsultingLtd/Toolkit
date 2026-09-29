@@ -5,9 +5,7 @@ on:
     types: [closed]
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 # Only the release PR's own merge may join the group: GitHub cancels the older
 # pending run when another joins, and skipped runs would displace a real one.
@@ -22,8 +20,15 @@ jobs:
       github.event.pull_request.base.ref == 'main' &&
       github.event.pull_request.head.ref == 'release/next'
     runs-on: ubuntu-latest
+    # Elevated beyond the workflow-level default: pushing the tag and
+    # publishing the GitHub Release need contents: write, and attesting build
+    # provenance needs id-token: write and attestations: write.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] persisted credentials are used below to push the release tag
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0

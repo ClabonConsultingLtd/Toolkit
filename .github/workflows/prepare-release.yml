@@ -20,7 +20,7 @@ jobs:
     if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] persisted credentials are used below to push the release branch
         with:
           ref: main
           fetch-depth: 0
@@ -48,9 +48,10 @@ jobs:
         if: steps.version.outputs.value != ''
         env:
           PR_NUMBER: ${{ steps.pending.outputs.number }}
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
           git add CHANGELOG.md packages/*/package.json packages/*/pyproject.toml packages/*/uv.lock
-          git commit -m "Release v${{ steps.version.outputs.value }}"
+          git commit -m "Release v$VERSION"
           if [[ -n "$PR_NUMBER" ]] && git rev-parse -q --verify origin/release/next >/dev/null && git diff --quiet origin/release/next HEAD; then
             echo "release/next already matches this candidate"
           else
