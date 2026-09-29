@@ -38,13 +38,14 @@ on:
         default: false
       # Reserved for the image Gate: image-artifact, image-ref.
 
-permissions:
-  contents: read
-
+# No workflow-level permissions: the code-scanning job has to inherit the
+# Caller workflow's grant (see that job). Every other job sets its own.
 jobs:
   gate:
     name: ${{ matrix.title }} Gate
     runs-on: ${{ fromJSON(inputs.runner) }}
+    permissions:
+      contents: read
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -104,6 +105,8 @@ jobs:
     needs: gate
     if: always()
     runs-on: ${{ fromJSON(inputs.runner) }}
+    permissions:
+      contents: read
     timeout-minutes: 10
     steps:
       - name: Check out security-gates at the called commit
@@ -131,10 +134,10 @@ jobs:
     if: ${{ always() && inputs.code-scanning }}
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 10
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
+    # No permissions block, so this job gets exactly what the Caller workflow
+    # grants: security-events: write and actions: read when it turns
+    # code-scanning on. Declaring them here would make GitHub reject every
+    # call that doesn't grant them, even with code-scanning off.
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
