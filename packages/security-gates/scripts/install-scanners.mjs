@@ -80,11 +80,11 @@ export const TOOLS = {
 
 // Checks the versions file shape: tool → version → { arch → sha256 }, with
 // exactly one version per tool and a hash for every supported architecture.
-export function parseVersions(text) {
+export function parseVersions(text, tools = TOOLS) {
 	const data = JSON.parse(text);
 	const pins = {};
 	for (const [tool, versions] of Object.entries(data)) {
-		if (!TOOLS[tool]) throw new Error(`versions file: unknown tool "${tool}"`);
+		if (!tools[tool]) throw new Error(`versions file: unknown tool "${tool}"`);
 		const entries = Object.entries(versions ?? {});
 		if (entries.length !== 1)
 			throw new Error(`versions file: ${tool} must have exactly one version`);
@@ -152,7 +152,7 @@ export function verifyReleaseChecksum(tool, checksumsText, asset, expected) {
 	}
 }
 
-async function download(url, fetchImpl) {
+export async function download(url, fetchImpl) {
 	const response = await fetchImpl(url);
 	if (!response.ok)
 		throw new Error(`download failed: ${url} returned HTTP ${response.status}`);
@@ -169,7 +169,7 @@ function run(command, args) {
 	}
 }
 
-async function verifySignature(
+export async function verifySignature(
 	tool,
 	assetPath,
 	url,
