@@ -121,6 +121,13 @@ test("modelsMatch resolves a family-name recommendation against the resolved mod
 	assert.equal(modelsMatch("claude-sonnet-5", "claude-sonnet-5"), true);
 	assert.equal(modelsMatch("claude-sonnet-5", "claude-sonnet-4-6"), false);
 });
+test("modelsMatch resolves a versioned label recommendation against the resolved model id", () => {
+	assert.equal(modelsMatch("Sonnet 5.5", "claude-sonnet-5-5"), true);
+	assert.equal(modelsMatch("Sonnet 5", "claude-sonnet-5"), true);
+	assert.equal(modelsMatch("Opus 5.5", "claude-opus-5-5"), true);
+	assert.equal(modelsMatch("Sonnet 5.5", "claude-sonnet-5"), false);
+	assert.equal(modelsMatch("Sonnet 5", "claude-sonnet-5-5"), false);
+});
 test("ticketRecord does not flag a recommendation mismatch when the family-name recommendation matches the resolved model", () => {
 	const record = ticketRecord(
 		{
