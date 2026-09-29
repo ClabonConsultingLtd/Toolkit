@@ -77,7 +77,11 @@ jobs:
           ' "$VERSIONS"
           status=0
           node scripts/install-scanners.mjs --versions "$VERSIONS" --dest "$BIN" gitleaks > install.log 2>&1 || status=$?
+          # Show the log without turning the expected error into an annotation.
+          token="expected-failure-$RANDOM$RANDOM"
+          echo "::stop-commands::$token"
           cat install.log
+          echo "::$token::"
           if [ "$status" -eq 0 ] || ! grep -q 'SHA-256 mismatch' install.log || [ -e "$BIN/gitleaks" ]; then
             echo "::error::The install should have failed on the changed hash"
             exit 1
