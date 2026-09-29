@@ -9,7 +9,7 @@ Upgrade one vendored Toolkit package to a release tag. Stop and ask the user whe
 
 1. Fetch and branch from the consumer repo's up-to-date default branch: `git fetch origin && git switch -c toolkit/<package>-<tag> origin/<default>`. Never commit on the default branch.
 2. Locate the CLI: `cli.mjs` from a Toolkit checkout (`packages/toolkit-sync/src/cli.mjs`) or the consumer's vendored `toolkit-sync` copy. Run commands from the repo root that holds `toolkit-pins.json`; `node <cli> --help` lists options.
-3. Pin: `node <cli> pin <package> <tag>`. Add `--dest <dir>` if the pin has no recorded `dest` and the package is not vendored at `<package>/`.
+3. Pin: `node <cli> pin <package> <tag>`. Add `--dest <dir>` if the pin has no recorded `dest` and the package is not vendored at `<package>/`. `pin`, `check` and `sync` verify the tag's signature against the vendored Trust anchor. If verification fails, stop and show the user the error; never edit `allowed_signers` to get past it. Pass `--allow-unsigned` only for a Legacy tag (below v0.14.0), and only when the user agrees.
 4. Check: `node <cli> check`. `upstream-change` and `missing-local` need no action. For `local-edit` or `modified`, show the user how each file differs from the tag's version (`git show <tag>:packages/<package>/<path>` in a Toolkit checkout) before any `--force`. Prefer upstreaming a local patch to Toolkit over keeping it only in the vendored copy.
 5. Sync: `node <cli> sync <package>`. Use `--force` only after the user has reviewed the listed files and agreed to overwrite them.
 6. Verify: run the vendored package's tests, if vendored, and the consumer's relevant checks.

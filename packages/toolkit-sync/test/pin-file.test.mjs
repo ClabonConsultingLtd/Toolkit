@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { readPins, setPin, setSyncedFiles } from "../src/pin-file.mjs";
+import {
+	readPins,
+	setPin,
+	setSigner,
+	setSyncedFiles,
+} from "../src/pin-file.mjs";
 import { mkTempDir } from "../test-helpers/fixture-repo.mjs";
 
 test("readPins returns an empty object when no pin file exists", () => {
@@ -55,4 +60,45 @@ test("setPin overwrites an existing package's pin", () => {
 	assert.deepEqual(readPins(pinFilePath), {
 		widget: { tag: "v0.2.0", sha: "b".repeat(40) },
 	});
+});
+
+test("setPin records the signer next to tag and sha, and drops it for an unsigned re-pin", () => {
+	const pinFilePath = join(mkTempDir(), "toolkit-pins.json");
+	setPin(pinFilePath, "widget", "v1.0.0", "a".repeat(40), {
+		dest: "tools/widget",
+		signer: "toolkit-release",
+	});
+	assert.deepEqual(Object.keys(readPins(pinFilePath).widget), [
+		"tag",
+		"sha",
+		"signer",
+		"dest",
+	]);
+	setPin(pinFilePath, "widget", "v0.13.0", "b".repeat(40));
+	assert.deepEqual(readPins(pinFilePath).widget, {
+		tag: "v0.13.0",
+		sha: "b".repeat(40),
+		dest: "tools/widget",
+	});
+});
+
+test("setSigner adds a signer to an older pin without touching its other fields", () => {
+	const pinFilePath = join(mkTempDir(), "toolkit-pins.json");
+	setPin(pinFilePath, "widget", "v1.0.0", "a".repeat(40), {
+		dest: "tools/widget",
+	});
+	setSyncedFiles(pinFilePath, "widget", ["README.md"], { sha: "a".repeat(40) });
+	setSigner(pinFilePath, "widget", "toolkit-release");
+	assert.deepEqual(readPins(pinFilePath).widget, {
+		tag: "v1.0.0",
+		sha: "a".repeat(40),
+		signer: "toolkit-release",
+		dest: "tools/widget",
+		syncedFiles: ["README.md"],
+		syncedSha: "a".repeat(40),
+	});
+	assert.throws(
+		() => setSigner(pinFilePath, "nope", "toolkit-release"),
+		/no pin recorded/,
+	);
 });

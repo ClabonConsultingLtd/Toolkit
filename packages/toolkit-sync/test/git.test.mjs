@@ -15,7 +15,7 @@ import {
 	writeFile,
 } from "../test-helpers/fixture-repo.mjs";
 
-test("resolveTagToSha resolves a lightweight tag to its commit sha", () => {
+test("resolveTagToSha resolves an annotated tag to its commit sha", () => {
 	const { repoUrl, tag } = createFixtureRepo();
 	const sha = resolveTagToSha(repoUrl, tag);
 	assert.match(sha, /^[0-9a-f]{40}$/);
@@ -83,7 +83,7 @@ test("fetchPinnedTag re-fetches cleanly after the upstream tag moves, and report
 
 	assert.throws(
 		() => fetchPinnedTag(cacheDir, repoUrl, tag, firstSha),
-		/tag "v0\.1\.0" now points to/,
+		/tag "v1\.0\.0" now points to/,
 	);
 	const refetched = fetchPinnedTag(cacheDir, repoUrl, tag, secondSha);
 	assert.equal(refetched, secondSha);
