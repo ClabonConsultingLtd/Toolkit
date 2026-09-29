@@ -11,6 +11,7 @@ import {
 	runnerArch,
 	sha256,
 	TOOLS,
+	verifyReleaseChecksum,
 } from "../scripts/install-scanners.mjs";
 
 const tempDir = () => mkdtempSync(join(tmpdir(), "security-gates-test-"));
@@ -53,8 +54,8 @@ test("the committed versions file pins every tool on both architectures", () => 
 test("parseVersions rejects files that don't follow tool → version → { arch → sha256 }", () => {
 	const hashes = { amd64: "a".repeat(64), arm64: "b".repeat(64) };
 	assert.throws(
-		() => parseVersions(JSON.stringify({ trivy: { "1.0.0": hashes } })),
-		/unknown tool "trivy"/,
+		() => parseVersions(JSON.stringify({ grype: { "1.0.0": hashes } })),
+		/unknown tool "grype"/,
 	);
 	assert.throws(
 		() =>
@@ -206,6 +207,143 @@ test("a failed signature check stops the Opengrep install", async () => {
 		/opengrep: cosign signature verification failed/,
 	);
 	assert.equal(existsSync(join(dest, "opengrep")), false);
+});
+
+function tarball(member, body) {
+	const work = tempDir();
+	writeFileSync(join(work, member), body);
+	assert.equal(
+		spawnSync("tar", ["-czf", "asset.tar.gz", member], { cwd: work }).status,
+		0,
+	);
+	return readFileSync(join(work, "asset.tar.gz"));
+}
+
+// Trivy's assets, with a checksums file listing the given hash for the
+// amd64 tarball, and a stand-in cosign like opengrepAssets'.
+function trivyAssets({ cosignStatus = 0, listedHash } = {}) {
+	const log = join(tempDir(), "cosign-args");
+	const cosign = `#!/bin/sh\nprintf '%s\\n' "$@" > ${log}\nexit ${cosignStatus}\n`;
+	const trivy = tarball("trivy", "#!/bin/sh\necho trivy\n");
+	const url = TOOLS.trivy.url("1.2.3", "amd64");
+	const hash = listedHash ?? sha256(trivy);
+	return {
+		log,
+		versionsText: versionsFor({ cosign, trivy }),
+		assets: {
+			[TOOLS.cosign.url("1.2.3", "amd64")]: cosign,
+			[url]: trivy,
+			[`${url}.sigstore.json`]: "{}",
+			[TOOLS.trivy.checksums("1.2.3")]:
+				`${"f".repeat(64)}  trivy_1.2.3_Linux-ARM64.tar.gz\n${hash}  trivy_1.2.3_Linux-64bit.tar.gz\n`,
+		},
+	};
+}
+
+test("Trivy is installed after its release checksum and signature bundle are verified", async () => {
+	const { log, versionsText, assets } = trivyAssets();
+	const dest = tempDir();
+	const { impl, requested } = fakeFetch(assets);
+	await installScanners(["trivy"], {
+		versionsText,
+		arch: "amd64",
+		dest,
+		fetchImpl: impl,
+	});
+	assert.ok(requested.includes(TOOLS.trivy.checksums("1.2.3")));
+	const args = readFileSync(log, "utf8").trim().split("\n");
+	assert.equal(args[0], "verify-blob");
+	assert.equal(
+		args[args.indexOf("--bundle") + 1].endsWith(".sigstore.json"),
+		true,
+	);
+	assert.equal(
+		args[args.indexOf("--certificate-identity-regexp") + 1],
+		"^https://github\\.com/aquasecurity/trivy/\\.github/workflows/[^@]+@refs/tags/v1\\.2\\.3$",
+	);
+	assert.equal(
+		readFileSync(join(dest, "trivy"), "utf8"),
+		"#!/bin/sh\necho trivy\n",
+	);
+});
+
+test("a pin that differs from the release checksums file fails the install", async () => {
+	const { versionsText, assets } = trivyAssets({ listedHash: "e".repeat(64) });
+	const dest = tempDir();
+	await assert.rejects(
+		installScanners(["trivy"], {
+			versionsText,
+			arch: "amd64",
+			dest,
+			fetchImpl: fakeFetch(assets).impl,
+		}),
+		/trivy: the release checksums file gives e{64} for trivy_1\.2\.3_Linux-64bit\.tar\.gz/,
+	);
+	assert.equal(existsSync(join(dest, "trivy")), false);
+});
+
+test("a failed signature check stops the Trivy install", async () => {
+	const { versionsText, assets } = trivyAssets({ cosignStatus: 1 });
+	const dest = tempDir();
+	await assert.rejects(
+		installScanners(["trivy"], {
+			versionsText,
+			arch: "amd64",
+			dest,
+			fetchImpl: fakeFetch(assets).impl,
+		}),
+		/trivy: cosign signature verification failed/,
+	);
+	assert.equal(existsSync(join(dest, "trivy")), false);
+});
+
+test("Dockle is checked against its release checksums file, without cosign", async () => {
+	const dockle = tarball("dockle", "#!/bin/sh\necho dockle\n");
+	const url = TOOLS.dockle.url("1.2.3", "arm64");
+	assert.match(url, /dockle_1\.2\.3_Linux-ARM64\.tar\.gz$/);
+	const versionsText = JSON.stringify({
+		dockle: { "1.2.3": { amd64: "0".repeat(64), arm64: sha256(dockle) } },
+	});
+	const dest = tempDir();
+	const { impl, requested } = fakeFetch({
+		[url]: dockle,
+		[TOOLS.dockle.checksums("1.2.3")]:
+			`${sha256(dockle)}  dockle_1.2.3_Linux-ARM64.tar.gz\n`,
+	});
+	const installed = await installScanners(["dockle"], {
+		versionsText,
+		arch: "arm64",
+		dest,
+		fetchImpl: impl,
+	});
+	assert.deepEqual(
+		installed.map((i) => i.tool),
+		["dockle"],
+	);
+	assert.equal(requested.length, 2);
+	assert.equal(
+		readFileSync(join(dest, "dockle"), "utf8"),
+		"#!/bin/sh\necho dockle\n",
+	);
+});
+
+test("verifyReleaseChecksum fails when the checksums file doesn't list the asset", () => {
+	assert.throws(
+		() =>
+			verifyReleaseChecksum(
+				"dockle",
+				`${"a".repeat(64)}  dockle_1.2.3_Linux-64bit.tar.gz\n`,
+				"dockle_1.2.3_Linux-ARM64.tar.gz",
+				"a".repeat(64),
+			),
+		/dockle: the release checksums file doesn't list dockle_1\.2\.3_Linux-ARM64\.tar\.gz/,
+	);
+	verifyReleaseChecksum(
+		"dockle",
+		`${"A".repeat(64)} *dockle_1.2.3_Linux-ARM64.tar.gz\n`,
+		"dockle_1.2.3_Linux-ARM64.tar.gz",
+		"a".repeat(64),
+	);
 });
 
 test("the CLI reports a bad versions file as an error annotation", () => {

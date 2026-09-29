@@ -1,6 +1,8 @@
 // Installs pinned scanner release binaries after checking each download's
-// SHA-256 against scanner-versions.json. Opengrep's signature is also checked
-// with cosign, which this script installs the same way first.
+// SHA-256 against scanner-versions.json. Where a release publishes a checksums
+// file (Trivy, Dockle), the pin must also match it. Opengrep's and Trivy's
+// signatures are checked with cosign, which this script installs the same way
+// first.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -12,7 +14,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 
 export const DEFAULT_VERSIONS_PATH = new URL(
@@ -21,13 +23,25 @@ export const DEFAULT_VERSIONS_PATH = new URL(
 ).pathname;
 export const ARCHES = ["amd64", "arm64"];
 
+const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
+
 const OPENGREP_SIGNER = {
 	identityRegexp:
 		"^https://github\\.com/opengrep/opengrep/\\.github/workflows/[^@]+@refs/(heads|tags)/.+$",
-	oidcIssuer: "https://token.actions.githubusercontent.com",
+	oidcIssuer: GITHUB_OIDC_ISSUER,
 };
 
+// Trivy signs each asset with a Sigstore bundle from its release workflow.
+// The identity is anchored to the pinned version's tag.
+const trivySigner = (v) => ({
+	identityRegexp: `^https://github\\.com/aquasecurity/trivy/\\.github/workflows/[^@]+@refs/tags/v${v.replaceAll(".", "\\.")}$`,
+	oidcIssuer: GITHUB_OIDC_ISSUER,
+	bundle: true,
+});
+
 // Where each tool's release asset lives, and how to turn it into a binary.
+// signer gives the cosign identity for a version; checksums, the release's
+// checksums file.
 export const TOOLS = {
 	cosign: {
 		url: (v, arch) =>
@@ -45,7 +59,22 @@ export const TOOLS = {
 	opengrep: {
 		url: (v, arch) =>
 			`https://github.com/opengrep/opengrep/releases/download/v${v}/opengrep_manylinux_${arch === "amd64" ? "x86" : "aarch64"}`,
-		signer: OPENGREP_SIGNER,
+		signer: () => OPENGREP_SIGNER,
+	},
+	trivy: {
+		url: (v, arch) =>
+			`https://github.com/aquasecurity/trivy/releases/download/v${v}/trivy_${v}_Linux-${arch === "amd64" ? "64bit" : "ARM64"}.tar.gz`,
+		tarMember: "trivy",
+		checksums: (v) =>
+			`https://github.com/aquasecurity/trivy/releases/download/v${v}/trivy_${v}_checksums.txt`,
+		signer: trivySigner,
+	},
+	dockle: {
+		url: (v, arch) =>
+			`https://github.com/goodwithtech/dockle/releases/download/v${v}/dockle_${v}_Linux-${arch === "amd64" ? "64bit" : "ARM64"}.tar.gz`,
+		tarMember: "dockle",
+		checksums: (v) =>
+			`https://github.com/goodwithtech/dockle/releases/download/v${v}/dockle_${v}_checksums.txt`,
 	},
 };
 
@@ -105,6 +134,24 @@ export function verifyDigest(tool, buffer, expected) {
 	}
 }
 
+// Checks that a release's checksums file ("<sha256>  <asset>" per line)
+// lists the asset with the pinned hash.
+export function verifyReleaseChecksum(tool, checksumsText, asset, expected) {
+	const listed = checksumsText
+		.split(/\r?\n/)
+		.map((line) => line.trim().split(/\s+\*?/))
+		.find(([, name]) => name === asset)?.[0];
+	if (!listed)
+		throw new Error(
+			`${tool}: the release checksums file doesn't list ${asset}`,
+		);
+	if (listed.toLowerCase() !== expected) {
+		throw new Error(
+			`${tool}: the release checksums file gives ${listed} for ${asset}, but the pin is ${expected}`,
+		);
+	}
+}
+
 async function download(url, fetchImpl) {
 	const response = await fetchImpl(url);
 	if (!response.ok)
@@ -124,29 +171,41 @@ function run(command, args) {
 
 async function verifySignature(
 	tool,
-	binaryPath,
+	assetPath,
 	url,
 	signer,
 	{ cosign, fetchImpl },
 ) {
-	const [signature, certificate] = await Promise.all([
-		download(`${url}.sig`, fetchImpl),
-		download(`${url}.cert`, fetchImpl),
-	]);
-	writeFileSync(`${binaryPath}.sig`, signature);
-	writeFileSync(`${binaryPath}.cert`, certificate);
+	let material;
+	if (signer.bundle) {
+		writeFileSync(
+			`${assetPath}.sigstore.json`,
+			await download(`${url}.sigstore.json`, fetchImpl),
+		);
+		material = ["--bundle", `${assetPath}.sigstore.json`];
+	} else {
+		const [signature, certificate] = await Promise.all([
+			download(`${url}.sig`, fetchImpl),
+			download(`${url}.cert`, fetchImpl),
+		]);
+		writeFileSync(`${assetPath}.sig`, signature);
+		writeFileSync(`${assetPath}.cert`, certificate);
+		material = [
+			"--certificate",
+			`${assetPath}.cert`,
+			"--signature",
+			`${assetPath}.sig`,
+		];
+	}
 	try {
 		run(cosign, [
 			"verify-blob",
-			"--certificate",
-			`${binaryPath}.cert`,
-			"--signature",
-			`${binaryPath}.sig`,
+			...material,
 			"--certificate-identity-regexp",
 			signer.identityRegexp,
 			"--certificate-oidc-issuer",
 			signer.oidcIssuer,
-			binaryPath,
+			assetPath,
 		]);
 	} catch (error) {
 		throw new Error(
@@ -156,7 +215,8 @@ async function verifySignature(
 }
 
 // Downloads, verifies and installs one tool into dest. Nothing is written to
-// dest until the digest (and signature, where there is one) has been checked.
+// dest until the digest, and the release checksums file and signature where
+// there are any, have been checked.
 export async function installTool(
 	tool,
 	pin,
@@ -166,24 +226,32 @@ export async function installTool(
 	const url = spec.url(pin.version, arch);
 	const payload = await download(url, fetchImpl);
 	verifyDigest(tool, payload, pin.sha256[arch]);
+	if (spec.checksums) {
+		const checksums = await download(spec.checksums(pin.version), fetchImpl);
+		verifyReleaseChecksum(
+			tool,
+			checksums.toString("utf8"),
+			basename(url),
+			pin.sha256[arch],
+		);
+	}
 
 	const workDir = mkdtempSync(join(tmpdir(), `security-gates-${tool}-`));
 	try {
-		let binary = payload;
-		if (spec.tarMember) {
-			const archive = join(workDir, "asset.tar.gz");
-			writeFileSync(archive, payload);
-			run("tar", ["-xzf", archive, "-C", workDir, spec.tarMember]);
-			binary = readFileSync(join(workDir, spec.tarMember));
-		}
-		const staged = join(workDir, tool);
-		writeFileSync(staged, binary);
-		chmodSync(staged, 0o755);
+		const asset = join(workDir, basename(url));
+		writeFileSync(asset, payload);
 		if (spec.signer)
-			await verifySignature(tool, staged, url, spec.signer, {
+			await verifySignature(tool, asset, url, spec.signer(pin.version), {
 				cosign,
 				fetchImpl,
 			});
+		let binary = payload;
+		if (spec.tarMember) {
+			const unpacked = join(workDir, "unpacked");
+			mkdirSync(unpacked);
+			run("tar", ["-xzf", asset, "-C", unpacked, spec.tarMember]);
+			binary = readFileSync(join(unpacked, spec.tarMember));
+		}
 
 		mkdirSync(dest, { recursive: true });
 		const target = join(dest, tool);
