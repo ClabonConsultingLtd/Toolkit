@@ -13,6 +13,7 @@ const fields = new Set([
 	"requiredChecks",
 	"specLabels",
 	"localVerificationCommand",
+	"cleanupCommand",
 	"schedulePromptAppend",
 	"codexWorkerFullAccess",
 	"selfAuthoredMerge",
@@ -111,16 +112,17 @@ export function readRepositoryIntakeConfig(cwd) {
 			(typeof config[field] !== "string" || !config[field].trim())
 		)
 			throw new Error(`invalid toolkit-intake.json: ${field} must be nonempty`);
-	if (
-		config.localVerificationCommand !== undefined &&
-		(typeof config.localVerificationCommand !== "string" ||
-			!/^[-\w./]+\.mjs$/.test(config.localVerificationCommand) ||
-			config.localVerificationCommand.startsWith("/") ||
-			config.localVerificationCommand.split("/").includes(".."))
-	)
-		throw new Error(
-			"invalid toolkit-intake.json: localVerificationCommand must be a relative .mjs path inside the checkout",
-		);
+	for (const field of ["localVerificationCommand", "cleanupCommand"])
+		if (
+			config[field] !== undefined &&
+			(typeof config[field] !== "string" ||
+				!/^[-\w./]+\.mjs$/.test(config[field]) ||
+				config[field].startsWith("/") ||
+				config[field].split("/").includes(".."))
+		)
+			throw new Error(
+				`invalid toolkit-intake.json: ${field} must be a relative .mjs path inside the checkout`,
+			);
 	const append = config.schedulePromptAppend;
 	if (
 		append !== undefined &&

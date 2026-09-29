@@ -127,6 +127,24 @@ test("selfAuthoredMerge adds the comment-review rule only when set", (t) => {
 	);
 });
 
+test("cleanupCommand adds the cleanup rule only when set; review teardown is always asked", (t) => {
+	const cwd = checkout(t, base);
+	const plain = schedulePrompt(cwd);
+	assert.match(plain, /Tear down any containers, volumes and networks this run started while verifying\./);
+	assert.doesNotMatch(plain, /cleanup STATE\.json/);
+	writeFileSync(
+		join(cwd, "toolkit-intake.json"),
+		JSON.stringify({ ...base, cleanupCommand: "scripts/intake-cleanup.mjs" }),
+	);
+	const opted = schedulePrompt(cwd);
+	assert.match(opted, /orchestrate\.mjs cleanup STATE\.json` with the lease token, ticket number and absolute `worktreePath`/);
+	assert.equal(
+		opted.replace(/ Run `node [^`]+ cleanup STATE\.json`[^\n]*? as a warning\./, ""),
+		plain,
+		"only step 5 changes",
+	);
+});
+
 test("new config fields are validated", (t) => {
 	for (const [field, value] of [
 		["schedulePromptAppend", ""],
@@ -142,6 +160,10 @@ test("new config fields are validated", (t) => {
 		["controllerProvider", 3],
 		["controllerThinkingOptionId", ""],
 		["controllerThinkingOptionId", 3],
+		["cleanupCommand", "/abs/cleanup.mjs"],
+		["cleanupCommand", "../cleanup.mjs"],
+		["cleanupCommand", "cleanup.sh"],
+		["cleanupCommand", 3],
 	]) {
 		const cwd = checkout(t, { ...base, [field]: value });
 		assert.throws(() => readRepositoryIntakeConfig(cwd), new RegExp(field));

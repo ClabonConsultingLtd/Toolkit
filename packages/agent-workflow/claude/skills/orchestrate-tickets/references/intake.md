@@ -21,6 +21,9 @@ at the checkout root (see `examples/toolkit-intake.json`). It supports `version:
 `repository`, `baseBranch`, `codexModel`, `count`, and optional `cron`, `timezone`,
 `excludeTickets` issue numbers, `requiredChecks` check-run names or status
 contexts, `localVerificationCommand`, a relative `.mjs` path,
+`cleanupCommand`, a relative `.mjs` path the controller runs against each
+ticket worktree to remove what it started (see the orchestration skill's
+`cleanup` command),
 `codexWorkerFullAccess` (see [Codex sandbox preflight](#codex-sandbox-preflight)),
 `selfAuthoredMerge: "comment-review"` (see controller step on approval and merging),
 `controllerProvider` (`"claude/<model>"` or `"codex/<model>"`, default
@@ -145,7 +148,11 @@ the run to:
    verified merges close their issues and release dependencies. Otherwise only
    reconcile PRs already merged outside the controller. Renew each held lease at
    least every five minutes during long reviews or tests and immediately before
-   external mutations. Release it in a cleanup step even after a failed review;
+   external mutations. Tear down anything this run started while verifying. With
+   `cleanupCommand` configured, run `orchestrate cleanup` for each ticket after
+   review, on block, when a finished or stopped worker is reconciled, and after
+   `sync` finalizes a merge; report `ok: false` as a warning, not a blocker.
+   Release the lease in a cleanup step even after a failed review;
    report a failed release rather than claiming success. Resume queued work in
    older batches first. Stop launching if the shared cap rejects a reservation.
    Never mark a capacity wait as a human blocker.
