@@ -4,6 +4,10 @@
 
 Security fixes are applied to the current `main` branch while Toolkit remains pre-1.0.
 
+## Threat model
+
+The [threat model](docs/threat-model.md) records Toolkit's trust boundaries, their mitigations and the accepted residual risks.
+
 ## Reporting a vulnerability
 
 Do not open a public issue for suspected credential exposure, path traversal, arbitrary command execution, unsafe provider access, or data-loss risks.
