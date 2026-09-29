@@ -70,6 +70,7 @@ export function ticketRecord(
 		actual,
 		codexFallback,
 		fixCycleCapped: (ticket.fixCycles ?? 0) >= 2,
+		cleanupFailed: ticket.cleanup?.ok === false,
 		recommendationMismatch:
 			!!recommendation &&
 			!!actual &&
@@ -180,6 +181,7 @@ export function renderMarkdown(digest) {
 				t.codexFallback ? "codex-fallback" : null,
 				t.recommendationMismatch ? "model-mismatch" : null,
 				t.anomalous ? "stuck" : null,
+				t.cleanupFailed ? "cleanup-failed" : null,
 			]
 				.filter(Boolean)
 				.join(", ");

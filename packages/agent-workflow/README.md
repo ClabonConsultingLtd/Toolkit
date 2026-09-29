@@ -190,6 +190,21 @@ review completion. Keep this file separate from the ignored
 last observed pause state, and tick history. The live Paseo schedule determines
 whether intake is paused.
 
+An optional `cleanupCommand`, also a relative `.mjs` path inside the stable
+checkout, removes whatever a ticket's worktree started, such as Docker Compose
+projects, which otherwise outlive the worker (a project started without `-p` is
+named after the worktree directory, e.g. `tickets-intake-<hour>-<n>`, and leaves
+its `_default` network behind). The controller runs
+`node <cleanupCommand> <worktreePath> <branch> <ticketNumber>` from the stable
+checkout, with the worktree as working directory, after each review, when a
+ticket is blocked, when a stopped or finished worker is reconciled, and after a
+merge is finalized. It must be idempotent and exit zero when there is nothing to
+remove. A failure or timeout is reported (and flagged `cleanup-failed` in the
+digest) but never changes the ticket's state. `examples/intake-cleanup.mjs`
+tears down the default Compose project. The hook is a backstop: scripts that
+start containers should still tear them down in an exit trap
+(`docker compose -p <project> down --volumes --remove-orphans`).
+
 Run `node <skill>/scripts/intake.mjs configure CHECKOUT` to initialize the live
 policy from this file. Later changes are applied by `sync-config` or the next
 `tick`; an invalid file or limit lower than active work stops safely. The helper

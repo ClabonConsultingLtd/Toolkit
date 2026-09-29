@@ -202,6 +202,20 @@ test("renderMarkdown produces a table per batch with flags", () => {
 	assert.match(markdown, /model-mismatch/);
 	assert.match(markdown, /fix-cap/);
 });
+test("a failed worktree cleanup is flagged without changing the ticket", () => {
+	const s = fixtureState();
+	s.tickets[7].cleanup = { at: "2026-01-01T00:00:00Z", ok: false, error: "x" };
+	const digest = buildDigest([s], { now: 10_000, activity: () => null });
+	const seven = digest.batches[0].tickets.find((t) => t.number === "7");
+	assert.equal(seven.cleanupFailed, true);
+	assert.equal(seven.status, s.tickets[7].status);
+	assert.match(renderMarkdown(digest), /cleanup-failed/);
+	s.tickets[7].cleanup.ok = true;
+	assert.doesNotMatch(
+		renderMarkdown(buildDigest([s], { now: 10_000, activity: () => null })),
+		/cleanup-failed/,
+	);
+});
 test("digest lists merged tickets whose worktrees can be archived, without archiving", () => {
 	const s = fixtureState();
 	Object.assign(s.tickets[8], {

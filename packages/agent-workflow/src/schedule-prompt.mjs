@@ -66,6 +66,9 @@ export function schedulePrompt(checkout) {
 		settings.selfAuthoredMerge === "comment-review"
 			? " When GitHub refuses the approval only because the controller's account opened the PR, post the independent review as a PR comment naming the reviewed head SHA instead, then merge; never use `--admin` or otherwise bypass branch protection, so a merge GitHub rejects stays awaiting a human."
 			: "";
+	const cleanup = settings.cleanupCommand
+		? ` Run \`node ${paths.orchestrateHelper} cleanup STATE.json\` with the lease token, ticket number and absolute \`worktreePath\` after each review, when a ticket is blocked, when a stopped or finished worker is reconciled, and after \`sync\` finalizes a merge; report any \`ok: false\` result as a warning.`
+		: "";
 	const lines = [
 		`Run the ticket intake controller for ${settings.repository} (schedule \`ticket-intake:${settings.repository}\`).`,
 		"",
@@ -83,7 +86,7 @@ export function schedulePrompt(checkout) {
 		`2. If toolkit-intake.json exists, run \`${helper} sync-config ${paths.checkout}\` first; stop on invalid settings or a limit below active work. Read N from the saved policy, never from this prompt.`,
 		`3. Inspect the saved Paseo schedule by ID, reading only id, name, status/paused, cron, timezone, provider/model, mode and prompt, not run history. Pipe \`paseo schedule inspect ID --json\` into \`${helper} schedule-summary ${paths.checkout} -\` for that projection instead of reading the full \`inspect_schedule\` output. A missing schedule, ID/name mismatch or unknown paused state stops new admission. Report cron, timezone or model drift against the policy.`,
 		`4. Compare the live schedule prompt with \`${helper} schedule-prompt ${paths.checkout}\` (the summary's \`promptMatches\`, or \`schedule-prompt ${paths.checkout} --check -\`). Report drift with the regenerate command; do not rewrite this prompt yourself.`,
-		"5. Reconcile all existing batches under normal orchestration leases before admission; renew leases at least every five minutes and immediately before external mutations, and release them in cleanup. Review completed workers and PRs independently, at most two fix cycles per ticket.",
+		`5. Reconcile all existing batches under normal orchestration leases before admission; renew leases at least every five minutes and immediately before external mutations, and release them in cleanup. Review completed workers and PRs independently, at most two fix cycles per ticket. Tear down any containers, volumes and networks this run started while verifying.${cleanup}`,
 		"6. Check `claude-cooldown`, pass the raw Paseo model catalogs, then re-fetch the schedule and pass `schedule: {id, name, paused}` to `tick`. Process admitted batches with the orchestration workflow; `managedByIntake` batches get no per-batch schedule, and this shared schedule is not paused when a batch completes.",
 		`7. Before launching a Codex worker in \`auto-review\`, run the sandbox preflight from the skill (for example \`codex sandbox true\`). Errors such as \`bwrap: No permissions to create a new namespace\` mean the sandbox is unavailable. ${workerMode}`,
 		"8. Workers implement only their ticket and open draft PRs. They never merge, close issues, change labels or batch state, create schedules or launch other workers. Preserve each worker's selected mode; never widen permissions or batch scope beyond this prompt.",

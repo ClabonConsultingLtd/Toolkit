@@ -192,6 +192,7 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 						...policy,
 						activeHelper,
 						repositoryConfig: config ? "toolkit-intake.json" : null,
+						cleanupCommand: config?.cleanupCommand ?? null,
 					},
 					config?.requiredChecks ?? policy.requiredChecks,
 				)
