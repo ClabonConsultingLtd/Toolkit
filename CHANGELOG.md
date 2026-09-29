@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0 - 2026-09-29
+
+- #148: security-gates: scheduled scanner version bumps
+- #149: feat(security-gates): opt-in image Gate with Trivy and Dockle
+- #147: feat(security-gates): package, Starter configuration and adoption guide
+- #146: feat(security-gates): reusable workflow with Core Gates, verified scanner installs and Suppression expiry
+- #143: Publish GitHub Releases with checksums, SBOM and build-provenance attestation
+- #140: fix(agent-workflow): stop shelling out the ticket reference
+
 ## 0.12.0 - 2026-09-29
 
 - #138: feat(agent-workflow): add a cleanupCommand hook for ticket worktrees
