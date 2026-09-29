@@ -3,18 +3,21 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import {
+	allowedSignersLine,
 	createFixtureRepo,
+	createSigningKey,
+	installCli,
 	mkTempDir,
 	moveTag,
+	testSigningKey,
 	writeFile,
 } from "../test-helpers/fixture-repo.mjs";
 
-const cli = fileURLToPath(new URL("../src/cli.mjs", import.meta.url));
+const cli = installCli();
 
-function run(args) {
-	return spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
+function run(args, cliPath = cli) {
+	return spawnSync(process.execPath, [cliPath, ...args], { encoding: "utf8" });
 }
 
 test("pin resolves the tag, records it, and rejects an unknown package", () => {
@@ -263,7 +266,7 @@ test("sync removes a local file dropped from the manifest upstream", () => {
 });
 
 test("sync with no package argument syncs every pinned package", () => {
-	const first = createFixtureRepo({ packageName: "widget-a", tag: "v0.1.0" });
+	const first = createFixtureRepo({ packageName: "widget-a", tag: "v1.0.0" });
 	const cwd = mkTempDir();
 	run([
 		"pin",
@@ -281,4 +284,189 @@ test("sync with no package argument syncs every pinned package", () => {
 		readFileSync(join(cwd, "widget-a", "README.md"), "utf8"),
 		"# widget\n",
 	);
+});
+
+function readPin(cwd, packageName) {
+	return JSON.parse(readFileSync(join(cwd, "toolkit-pins.json"), "utf8"))[
+		packageName
+	];
+}
+
+/** Write a pin by hand, as for a tag pinned before it was replaced upstream. */
+function writePin(cwd, packageName, pin) {
+	writeFileSync(
+		join(cwd, "toolkit-pins.json"),
+		`${JSON.stringify({ [packageName]: pin })}\n`,
+	);
+}
+
+function shaOf(root, tag) {
+	return spawnSync("git", ["rev-parse", `${tag}^{commit}`], {
+		cwd: root,
+		encoding: "utf8",
+	}).stdout.trim();
+}
+
+test("a Signed release tag passes pin, check and sync, and pin records its signer", () => {
+	const { repoUrl, tag, packageName } = createFixtureRepo();
+	const cwd = mkTempDir();
+	const common = ["--repo", repoUrl, "--cwd", cwd];
+
+	const pinned = run(["pin", packageName, tag, ...common]);
+	assert.equal(pinned.status, 0, pinned.stderr);
+	assert.equal(readPin(cwd, packageName).signer, "toolkit-release");
+	assert.deepEqual(Object.keys(readPin(cwd, packageName)).slice(0, 3), [
+		"tag",
+		"sha",
+		"signer",
+	]);
+
+	const synced = run(["sync", packageName, ...common]);
+	assert.equal(synced.status, 0, synced.stderr);
+	const checked = run(["check", ...common]);
+	assert.equal(checked.status, 0, checked.stderr);
+	assert.match(checked.stdout, /up to date/);
+	assert.equal(checked.stderr, "");
+});
+
+test("an unsigned tag at or above the first signed version fails pin, check and sync", () => {
+	for (const annotate of [true, false]) {
+		const { repoUrl, root, tag, packageName } = createFixtureRepo({
+			signingKey: null,
+			annotate,
+		});
+		const cwd = mkTempDir();
+		const common = ["--repo", repoUrl, "--cwd", cwd];
+
+		const pinned = run(["pin", packageName, tag, ...common]);
+		assert.equal(pinned.status, 1);
+		assert.match(pinned.stderr, /"v1\.0\.0" is not a Signed release tag/);
+		assert.equal(existsSync(join(cwd, "toolkit-pins.json")), false);
+
+		writePin(cwd, packageName, { tag, sha: shaOf(root, tag) });
+		for (const command of ["check", "sync"]) {
+			const result = run([command, ...common]);
+			assert.equal(result.status, 1, `${command}: ${result.stdout}`);
+			assert.match(result.stderr, /is not a Signed release tag/);
+		}
+		assert.equal(existsSync(join(cwd, packageName)), false);
+	}
+});
+
+test("a tag signed by an unknown key fails pin, check and sync", () => {
+	const { repoUrl, root, tag, packageName } = createFixtureRepo({
+		signingKey: createSigningKey(),
+	});
+	const cwd = mkTempDir();
+	const common = ["--repo", repoUrl, "--cwd", cwd];
+
+	const pinned = run(["pin", packageName, tag, ...common]);
+	assert.equal(pinned.status, 1);
+	assert.match(pinned.stderr, /does not verify against the Trust anchor/);
+
+	writePin(cwd, packageName, { tag, sha: shaOf(root, tag) });
+	for (const command of ["check", "sync"]) {
+		const result = run([command, ...common]);
+		assert.equal(result.status, 1, `${command}: ${result.stdout}`);
+		assert.match(result.stderr, /does not verify against the Trust anchor/);
+	}
+});
+
+test("a Legacy tag fails without --allow-unsigned and passes with it plus a warning", () => {
+	const { repoUrl, tag, packageName } = createFixtureRepo({
+		tag: "v0.13.0",
+		signingKey: null,
+		annotate: true,
+	});
+	const cwd = mkTempDir();
+	const common = ["--repo", repoUrl, "--cwd", cwd];
+
+	const refused = run(["pin", packageName, tag, ...common]);
+	assert.equal(refused.status, 1);
+	assert.match(refused.stderr, /"v0\.13\.0" is a Legacy tag/);
+	assert.match(refused.stderr, /--allow-unsigned/);
+
+	for (const args of [
+		["pin", packageName, tag],
+		["sync", packageName],
+		["check"],
+	]) {
+		const result = run([...args, "--allow-unsigned", ...common]);
+		assert.equal(result.status, 0, `${args[0]}: ${result.stderr}`);
+		assert.match(result.stderr, /warning: .*Legacy tag "v0\.13\.0"/);
+	}
+	assert.equal(readPin(cwd, packageName).signer, undefined);
+
+	for (const command of ["check", "sync"]) {
+		const result = run([command, ...common]);
+		assert.equal(result.status, 1, `${command}: ${result.stdout}`);
+		assert.match(result.stderr, /is a Legacy tag/);
+	}
+});
+
+test("--allow-unsigned doesn't help an unsigned tag at or above the first signed version", () => {
+	const { repoUrl, tag, packageName } = createFixtureRepo({
+		signingKey: null,
+		annotate: true,
+	});
+	const cwd = mkTempDir();
+	const result = run([
+		"pin",
+		packageName,
+		tag,
+		"--allow-unsigned",
+		"--repo",
+		repoUrl,
+		"--cwd",
+		cwd,
+	]);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /is not a Signed release tag/);
+	assert.match(result.stderr, /--allow-unsigned only applies to Legacy tags/);
+	assert.doesNotMatch(result.stderr, /warning/);
+});
+
+test("a key used outside its valid-before window fails", () => {
+	const { repoUrl, tag, packageName } = createFixtureRepo();
+	const expired = installCli({
+		anchor: allowedSignersLine(testSigningKey(), {
+			options: ['valid-before="20200101"'],
+		}),
+	});
+	const cwd = mkTempDir();
+	const result = run(
+		["pin", packageName, tag, "--repo", repoUrl, "--cwd", cwd],
+		expired,
+	);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /does not verify against the Trust anchor/);
+	assert.match(result.stderr, /expired/);
+});
+
+test("a vendored copy without its Trust anchor fails closed", () => {
+	const { repoUrl, tag, packageName } = createFixtureRepo();
+	const cwd = mkTempDir();
+	const result = run(
+		["pin", packageName, tag, "--repo", repoUrl, "--cwd", cwd],
+		installCli({ anchor: null }),
+	);
+	assert.equal(result.status, 1);
+	assert.match(result.stderr, /no Trust anchor at .*allowed_signers/);
+});
+
+test("a pin file without a signer keeps working, and the next verified command adds it", () => {
+	const { repoUrl, root, tag, packageName } = createFixtureRepo();
+	const cwd = mkTempDir();
+	const common = ["--repo", repoUrl, "--cwd", cwd];
+	writePin(cwd, packageName, { tag, sha: shaOf(root, tag) });
+
+	const checked = run(["check", ...common]);
+	assert.equal(checked.status, 1);
+	assert.match(checked.stdout, /missing-local: README\.md/);
+	assert.equal(readPin(cwd, packageName).signer, "toolkit-release");
+
+	writePin(cwd, packageName, { tag, sha: shaOf(root, tag) });
+	const synced = run(["sync", ...common]);
+	assert.equal(synced.status, 0, synced.stderr);
+	assert.equal(readPin(cwd, packageName).signer, "toolkit-release");
 });

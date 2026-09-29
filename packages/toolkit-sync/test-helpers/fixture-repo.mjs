@@ -1,7 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 function git(cwd, args) {
 	return execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -13,15 +21,89 @@ function writeFile(root, relPath, content) {
 	writeFileSync(full, content);
 }
 
+export function mkTempDir(prefix = "toolkit-sync-") {
+	return mkdtempSync(join(tmpdir(), prefix));
+}
+
+/** Generate a throwaway ed25519 key in a temporary directory. */
+export function createSigningKey() {
+	const privateKey = join(mkTempDir("toolkit-sync-key-"), "key");
+	execFileSync("ssh-keygen", [
+		"-q",
+		"-t",
+		"ed25519",
+		"-N",
+		"",
+		"-C",
+		"toolkit-sync-test",
+		"-f",
+		privateKey,
+	]);
+	const publicKey = readFileSync(`${privateKey}.pub`, "utf8")
+		.trim()
+		.split(" ")
+		.slice(0, 2)
+		.join(" ");
+	return { privateKey, publicKey };
+}
+
+let sharedKey;
+
+/** The throwaway key the fixtures sign with by default, made once per test file. */
+export function testSigningKey() {
+	sharedKey ??= createSigningKey();
+	return sharedKey;
+}
+
+/** One `allowed_signers` line trusting `key` for git signatures. */
+export function allowedSignersLine(
+	key,
+	{ principal = "toolkit-release", options = [] } = {},
+) {
+	return `${principal} ${['namespaces="git"', ...options].join(",")} ${key.publicKey}\n`;
+}
+
+/**
+ * Tag HEAD in `root`. `signingKey` signs an annotated tag; `null` makes an
+ * unsigned one, annotated if `annotate` is set and lightweight otherwise.
+ */
+export function tagRelease(
+	root,
+	tag,
+	{ signingKey = testSigningKey(), annotate = false, force = false } = {},
+) {
+	const forceArgs = force ? ["-f"] : [];
+	if (signingKey === null) {
+		const kind = annotate ? ["-a", "-m", `Release ${tag}`] : [];
+		git(root, ["tag", ...forceArgs, ...kind, tag]);
+		return;
+	}
+	git(root, [
+		"-c",
+		"gpg.format=ssh",
+		"-c",
+		`user.signingkey=${signingKey.privateKey}`,
+		"tag",
+		"-s",
+		...forceArgs,
+		"-m",
+		`Release ${tag}`,
+		tag,
+	]);
+}
+
 /**
  * Build a throwaway git repo shaped like Toolkit, with one vendorable
- * package ("widget") committed and tagged. Returns { repoUrl, root, tag, files }.
+ * package ("widget") committed and tagged. The tag is signed with
+ * `testSigningKey()` unless other `tagOptions` are given.
+ * Returns { repoUrl, root, tag, files, packageName }.
  */
 export function createFixtureRepo({
-	tag = "v0.1.0",
+	tag = "v1.0.0",
 	packageName = "widget",
+	...tagOptions
 } = {}) {
-	const root = mkdtempSync(join(tmpdir(), "toolkit-sync-fixture-"));
+	const root = mkTempDir("toolkit-sync-fixture-");
 	git(root, ["init", "-q", "-b", "main"]);
 	git(root, ["config", "user.email", "test@example.com"]);
 	git(root, ["config", "user.name", "Test"]);
@@ -43,21 +125,35 @@ export function createFixtureRepo({
 
 	git(root, ["add", "-A"]);
 	git(root, ["commit", "-q", "-m", "initial"]);
-	git(root, ["tag", tag]);
+	tagRelease(root, tag, tagOptions);
 
 	return { repoUrl: root, root, tag, files, packageName };
 }
 
-export function mkTempDir(prefix = "toolkit-sync-") {
-	return mkdtempSync(join(tmpdir(), prefix));
-}
-
 /** Force `tag` in `root` onto a new commit, after `mutate(root)` changes the working tree. */
-export function moveTag(root, tag, mutate) {
+export function moveTag(root, tag, mutate, tagOptions = {}) {
 	mutate(root);
 	git(root, ["add", "-A"]);
 	git(root, ["commit", "-q", "-m", "update"]);
-	git(root, ["tag", "-f", tag]);
+	tagRelease(root, tag, { ...tagOptions, force: true });
+}
+
+const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
+
+/**
+ * Vendor a copy of toolkit-sync into a temporary directory, the way a
+ * consumer does, with `anchor` as its Trust anchor (`null` for none).
+ * Returns the path of the copied `cli.mjs`.
+ */
+export function installCli({
+	anchor = allowedSignersLine(testSigningKey()),
+} = {}) {
+	const root = mkTempDir("toolkit-sync-vendored-");
+	mkdirSync(join(root, "src"));
+	for (const name of readdirSync(srcDir))
+		copyFileSync(join(srcDir, name), join(root, "src", name));
+	if (anchor !== null) writeFileSync(join(root, "allowed_signers"), anchor);
+	return join(root, "src", "cli.mjs");
 }
 
 export { writeFile };

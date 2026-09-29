@@ -11,8 +11,10 @@ import {
 	PIN_FILE_NAME,
 	readPins,
 	setPin,
+	setSigner,
 	setSyncedFiles,
 } from "./pin-file.mjs";
+import { FIRST_SIGNED_VERSION, verifyReleaseTag } from "./signature.mjs";
 
 export const DEFAULT_REPO_URL =
 	"https://github.com/ClabonConsultingLtd/Toolkit.git";
@@ -28,20 +30,26 @@ commands:
                                        overwrites local edits
 
 options:
-  --repo <url>   Toolkit repository (default: ${DEFAULT_REPO_URL})
-  --cwd <dir>    consumer repo root holding ${PIN_FILE_NAME} (default: .)
-  --dest <dir>   vendored package directory (default: the pin's recorded
-                 dest, else <cwd>/<package>)
-  -h, --help     show this help`;
+  --repo <url>       Toolkit repository (default: ${DEFAULT_REPO_URL})
+  --cwd <dir>        consumer repo root holding ${PIN_FILE_NAME} (default: .)
+  --dest <dir>       vendored package directory (default: the pin's recorded
+                     dest, else <cwd>/<package>)
+  --allow-unsigned   accept a Legacy tag (below v${FIRST_SIGNED_VERSION}) without a
+                     signature, with a warning
+  -h, --help         show this help
+
+Every tag must be a Signed release tag that verifies against the Trust
+anchor (allowed_signers, vendored beside src/). Needs git 2.34+ and ssh-keygen.`;
 
 class UsageError extends Error {}
 
 function parseArgs(argv) {
 	const positional = [];
-	const flags = { force: false, help: false };
+	const flags = { force: false, help: false, allowUnsigned: false };
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		if (arg === "--force") flags.force = true;
+		else if (arg === "--allow-unsigned") flags.allowUnsigned = true;
 		else if (arg === "--help" || arg === "-h") flags.help = true;
 		else if (arg === "--repo") flags.repo = argv[++i];
 		else if (arg === "--dest") flags.dest = argv[++i];
@@ -78,6 +86,18 @@ function toRecordedDest(cwd, dir) {
 	return rel.split(sep).join("/");
 }
 
+/** Verify the fetched tag; returns the signer principal, or undefined for an allowed Legacy tag. */
+function verifiedSigner(cacheDir, tag, flags) {
+	return verifyReleaseTag(cacheDir, tag, { allowUnsigned: flags.allowUnsigned })
+		.signer;
+}
+
+/** Record a verified signer the pin file lacks, as an older pin file does. */
+function recordSigner(pinFilePath, packageName, pin, signer) {
+	if (signer !== undefined && pin.signer !== signer)
+		setSigner(pinFilePath, packageName, signer);
+}
+
 function displayDest(cwd, destDir) {
 	const rel = relative(cwd, destDir);
 	return rel && !rel.startsWith("..") ? rel.split(sep).join("/") : destDir;
@@ -92,11 +112,15 @@ function runPin([packageName, tag], flags) {
 	const dest = flags.dest ? toRecordedDest(cwd, flags.dest) : undefined;
 	const sha = resolveTagToSha(repoUrl, tag);
 	fetchPinnedTag(cacheDir, repoUrl, tag, sha);
+	const signer = verifiedSigner(cacheDir, tag, flags);
 	resolveManifestedFiles(cacheDir, sha, packageName);
-	const pins = setPin(pinFilePath, packageName, tag, sha, { dest });
+	const pins = setPin(pinFilePath, packageName, tag, sha, { dest, signer });
 	const recorded = pins[packageName].dest;
 	const destNote = recorded ? `, dest ${recorded}` : "";
-	console.log(`pinned ${packageName} to ${tag} (${sha}${destNote})`);
+	const signerNote = signer ? `, signed by ${signer}` : "";
+	console.log(
+		`pinned ${packageName} to ${tag} (${sha}${destNote}${signerNote})`,
+	);
 }
 
 function diffOptions(pin) {
@@ -109,6 +133,8 @@ function runCheck(_positional, flags) {
 	let anyDiverged = false;
 	for (const [packageName, pin] of Object.entries(pins)) {
 		const sha = fetchPinnedTag(cacheDir, repoUrl, pin.tag, pin.sha);
+		const signer = verifiedSigner(cacheDir, pin.tag, flags);
+		recordSigner(pinFilePath, packageName, pin, signer);
 		const destDir = destDirFor(cwd, flags, packageName, pin);
 		const where = displayDest(cwd, destDir);
 		const { diverged } = diffPackage(
@@ -168,6 +194,8 @@ function runSync(positional, flags) {
 		if (!pin)
 			throw new Error(`no pin recorded for "${packageName}"; run "pin" first`);
 		const sha = fetchPinnedTag(cacheDir, repoUrl, pin.tag, pin.sha);
+		const signer = verifiedSigner(cacheDir, pin.tag, flags);
+		recordSigner(pinFilePath, packageName, pin, signer);
 		const destDir = destDirFor(cwd, flags, packageName, pin);
 		if (!flags.force) {
 			const { diverged } = diffPackage(
