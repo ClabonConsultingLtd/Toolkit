@@ -69,7 +69,7 @@ def main():
         ]
         for attempt in range(1, x.retries + 2):
             try:
-                r = subprocess.run(
+                r = subprocess.run(  # noqa: S603 -- cmd[0] is the operator-supplied --runner, this tool's purpose is to invoke it
                     cmd, capture_output=True, text=True, timeout=x.timeout
                 )
             except subprocess.TimeoutExpired:
