@@ -1,0 +1,14 @@
+# Dependabot snippet for the security Gates. Merge the github-actions entry
+# into .github/dependabot.yml; if you already have one for "/", keep yours.
+# Dependabot updates the Caller workflow's pinned SHA and its version comment
+# together when Toolkit publishes a release.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Wait a week before proposing a new release, so a bad one can be pulled
+    # before it reaches you.
+    cooldown:
+      default-days: 7

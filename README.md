@@ -3,7 +3,7 @@
 [![Verify](https://github.com/ClabonConsultingLtd/Toolkit/actions/workflows/verify.yml/badge.svg)](https://github.com/ClabonConsultingLtd/Toolkit/actions/workflows/verify.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Safety-first developer tooling for agent workflows, Claude Code context optimisation, image generation, and image-to-3D conversion.
+Safety-first developer tooling for agent workflows, Claude Code context optimisation, image generation, image-to-3D conversion, and security Gates in CI.
 
 Toolkit is a collection of small, reusable packages—not a framework that takes over a repository. Every package keeps its paths, policies, credentials, and runtime state explicit.
 
@@ -17,6 +17,7 @@ Toolkit is a collection of small, reusable packages—not a framework that takes
 | Generate a batch of images | [`image-generation`](packages/image-generation/README.md) | A caller-chosen runner gains retries, quota stops, logs, and resumable state. |
 | Turn reference images into GLBs | [`image-to-3d`](packages/image-to-3d/README.md) | Explicit queues become auditable image-to-model batches through a Gradio-compatible service. |
 | Track a vendored Toolkit package's version | [`toolkit-sync`](packages/toolkit-sync/README.md) | A consuming repo pins a release, detects drift, and re-syncs updates instead of an untracked copy-paste. |
+| Run security Gates in a repository's CI | [`security-gates`](packages/security-gates/README.md) | Secrets, dependency and static analysis Gates fail CI on findings, from a reusable workflow pinned by SHA; accepted findings need a reason and an expiry. |
 
 ## Quick starts
 

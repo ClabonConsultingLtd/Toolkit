@@ -1,0 +1,19 @@
+# Example .gitleaksignore for the secrets Gate. Copy it to the repository root
+# as .gitleaksignore; the Gate reads no other location.
+#
+# Each entry is a finding's fingerprint, as the Gate's job summary lists it.
+# The comment directly above an entry gives its reason and expiry, and covers
+# the consecutive entries below it, up to a blank line. The Gate fails when an
+# entry has no reason, no expiry, a date that isn't YYYY-MM-DD, or a past
+# expiry, and warns 14 days ahead. A Suppression is valid through its expiry
+# date.
+#
+# Rotate a real secret first: a Suppression doesn't make a leaked secret safe.
+
+# reason: revoked test token in an old commit, history rewrite not worth it expires: 2027-03-31
+0123456789abcdef0123456789abcdef01234567:config/settings.env:generic-api-key:4
+
+# One comment can cover several entries, up to the next blank line.
+# reason: placeholder keys in API documentation examples expires: 2027-03-31
+docs/api.md:generic-api-key:42
+docs/api.md:generic-api-key:57
