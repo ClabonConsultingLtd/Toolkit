@@ -8,7 +8,7 @@ This guide sets up a repository on a fresh Windows machine to use three Toolkit 
 
 It then walks through the complete feature workflow using Matt Pocock's skills: `/grill-with-docs` → `/to-spec` → `/to-tickets` → implementation. Both issue trackers are covered: **GitHub issues** and **local Markdown files in `.scratch/`**.
 
-Out of scope: Codex; the Paseo-scheduled skills (`orchestrate-tickets`, `triage-tickets`, `report-tickets`), which have Claude entrypoints but run on Paseo schedules; the bounded model handoff; [`security-gates`](../../packages/security-gates/README.md), which adds security scanning to CI and is set up separately; and the image packages.
+Out of scope: Codex; the Paseo-scheduled skills (`orchestrate-tickets`, `triage-tickets`, `report-tickets`), which have [their own guide](claude-paseo-setup.md); the bounded model handoff; [`security-gates`](../../packages/security-gates/README.md), which adds security scanning to CI and is set up separately; and the image packages.
 
 Commands run in **Git Bash** unless a step says **PowerShell**. Agent instructions live in `AGENTS.md`, not `CLAUDE.md`: Claude Code reads `AGENTS.md` when a repository has no `CLAUDE.md`, and other coding agents read the same file, so one set of instructions serves them all. The guide needs a Toolkit release that includes `packages/setup-wizard`, which provides the launcher template and the wizard. That release is signed, like every release from `v0.14.0` on, and `toolkit-sync` refuses tags it can't verify.
 

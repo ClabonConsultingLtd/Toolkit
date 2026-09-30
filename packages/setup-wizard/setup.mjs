@@ -62,7 +62,7 @@ export function parseArgs(argv) {
 	return options;
 }
 
-function terminalIo(yes) {
+export function terminalIo(yes) {
 	const interactive = process.stdin.isTTY && !yes;
 	let rl;
 	const prompt = async (question) => {

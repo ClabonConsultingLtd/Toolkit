@@ -62,3 +62,13 @@ The wizard is safe to run again. It keeps files you've changed and existing `pac
 - Reviewing and committing the changes.
 
 The guide's [feature workflow](../../docs/guides/claude-windows-setup.md#9-the-feature-workflow) takes it from there.
+
+## Paseo setup
+
+`paseo-setup.mjs` configures a repository, already set up with `setup.mjs`, to run `orchestrate-tickets` (and optionally `triage-tickets` and `report-tickets`) on [Paseo](https://paseo.sh) schedules with a Claude controller. Run it in the stable checkout the schedules will use:
+
+```bash
+node /c/src/Toolkit/packages/setup-wizard/paseo-setup.mjs
+```
+
+It enables Paseo's tools for agents; writes `toolkit-intake.json` with a `claude/<model>` controller, and `paseo.json` to install dependencies in new worktrees; links the three skills into `.claude/skills` (junctions on Windows); creates the labels; saves the intake policy; and creates the `ticket-intake`, `triage` and `report-tickets` schedules, paused. On Windows, where `paseo` can't take a multi-line prompt as an argument, it writes the prompts to `.toolkit/paseo-setup/` and prints a request for a Claude agent in Paseo to create the schedules. Re-running it keeps existing files and schedules, and refreshes an out-of-date intake prompt. `--help` lists its options; the [Paseo guide](../../docs/guides/claude-paseo-setup.md) explains each step.

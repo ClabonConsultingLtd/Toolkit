@@ -30,7 +30,7 @@ const PACKAGES = [
 const IGNORE_LINES = [".toolkit/*", "!.toolkit/overlays/"];
 const OLD_IGNORE_LINES = [".toolkit/", "/.toolkit/", ".toolkit", "/.toolkit"];
 const TEMPLATES = join(import.meta.dirname, "..", "templates");
-const WINDOWS = process.platform === "win32";
+export const WINDOWS = process.platform === "win32";
 
 // How to put each tool on PATH, for "not on PATH" messages.
 const PATH_HINTS = WINDOWS
@@ -40,6 +40,8 @@ const PATH_HINTS = WINDOWS
 				"If it is installed, add %USERPROFILE%\\.local\\bin to your user PATH.",
 			pnpm: "If it is installed, add the folder npm prefix -g prints (normally %APPDATA%\\npm) to your user PATH.",
 			gh: "If it is installed, add C:\\Program Files\\GitHub CLI to your user PATH.",
+			paseo:
+				"If Paseo Desktop is installed, add C:\\Program Files\\Paseo\\resources\\bin to your user PATH.",
 		}
 	: {};
 
@@ -129,24 +131,23 @@ export function detectTestCommand(root) {
  * sometimes claude or gh) resolve only through a shell, so the command line
  * is passed as one string of simple, space-free arguments.
  */
-function run(
+export function run(
 	command,
 	args,
-	{ cwd, inherit = false, shell = false, raw = false } = {},
+	{ cwd, inherit = false, shell = false, raw = false, input } = {},
 ) {
 	const useShell = shell && WINDOWS;
+	const stdio = inherit ? "inherit" : "pipe";
+	const options = {
+		cwd,
+		encoding: "utf8",
+		...(input === undefined
+			? { stdio }
+			: { input, stdio: ["pipe", stdio, stdio] }),
+	};
 	const result = useShell
-		? spawnSync([command, ...args].join(" "), {
-				cwd,
-				encoding: "utf8",
-				stdio: inherit ? "inherit" : "pipe",
-				shell: true,
-			})
-		: spawnSync(command, args, {
-				cwd,
-				encoding: "utf8",
-				stdio: inherit ? "inherit" : "pipe",
-			});
+		? spawnSync([command, ...args].join(" "), { ...options, shell: true })
+		: spawnSync(command, args, options);
 	return {
 		ok: !result.error && result.status === 0,
 		stdout: raw ? (result.stdout ?? "") : (result.stdout?.trim() ?? ""),

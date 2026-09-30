@@ -91,6 +91,7 @@ Use `uv sync` from either Python package directory when installing its dependenc
 ## Guides
 
 - [Toolkit with Claude Code on Windows](docs/guides/claude-windows-setup.md): set up a repository from a fresh machine with `toolkit-sync`, token optimisation and the ticket workflow.
+- [Paseo-scheduled tickets with a Claude controller](docs/guides/claude-paseo-setup.md): run `orchestrate-tickets`, and optionally triage and reports, on Paseo schedules.
 
 ## Project standards
 
