@@ -17,5 +17,5 @@ The public keys, vendored with toolkit-sync itself, that decide whose signatures
 _Avoid_: keyring, allowed signers (that's the file format, not the concept)
 
 **Legacy tag**:
-A release tag from before release tags were signed. It can never be signed, and it's accepted only when the consumer explicitly allows it.
+A release tag from before release tags were signed. The set is closed: toolkit-sync lists each one with its commit and tag object. It can never be signed, and it's accepted only when the consumer explicitly allows it and the fetched tag matches the list exactly.
 _Avoid_: unsigned release, old tag
