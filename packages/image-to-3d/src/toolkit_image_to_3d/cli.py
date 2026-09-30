@@ -32,6 +32,18 @@ def atomic_json_write(path: Path, data: Any) -> None:
     temporary.replace(path)
 
 
+def redact(text: str | None, secret: str | None) -> str | None:
+    """Replace every occurrence of secret in text with [REDACTED].
+
+    Covers the secret bare or inside a ``Bearer`` header, since both are
+    just occurrences of the same substring. A missing or empty secret
+    leaves text unchanged, so dry runs never attempt to replace "".
+    """
+    if not text or not secret:
+        return text
+    return text.replace(secret, "[REDACTED]")
+
+
 def quota_error(error: str | None) -> bool:
     """Whether retrying immediately is unlikely to succeed."""
     text = (error or "").lower()
@@ -177,7 +189,7 @@ def convert(
         except (
             Exception
         ) as exc:  # The service reports its own transient errors as exceptions.
-            last_error = str(exc)
+            last_error = redact(str(exc), token)
             if quota_error(last_error):
                 break
             if attempt < retries:
