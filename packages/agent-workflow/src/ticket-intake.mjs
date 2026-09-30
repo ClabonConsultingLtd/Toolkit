@@ -334,6 +334,7 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 						batchFile,
 						request,
 						(options.github ?? github)(policy.repository),
+						{ returnToTriage: true },
 					);
 					if (selection.tickets.length) {
 						const state = newBatch({ ...request, tickets: selection.tickets });

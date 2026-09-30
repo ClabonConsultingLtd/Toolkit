@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fallbackDependencies } from "../src/orchestration-github.mjs";
 import { selectNext } from "../src/ticket-selection.mjs";
+import { approved } from "./approval-fixtures.mjs";
 
 test("accepts Markdown list declarations and local issue URLs", () => {
 	assert.deepEqual(
@@ -58,6 +59,7 @@ test("skips malformed candidate metadata and continues selection", (t) => {
 		},
 		hasImplementationPr: () => false,
 		subTickets: () => [],
+		approval: () => approved(),
 	};
 	const result = selectNext(
 		join(dir, "batch.json"),

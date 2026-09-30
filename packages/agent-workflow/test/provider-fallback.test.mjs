@@ -18,6 +18,7 @@ import {
 	recordClaudeLimit,
 	resolveCodexFallback,
 } from "../src/provider-fallback.mjs";
+import { approved } from "./approval-fixtures.mjs";
 
 const claudeModels = [
 	{ id: "claude-sonnet-5", label: "Sonnet 5", thinkingOptionIds: ["medium"] },
@@ -243,6 +244,7 @@ test("one shared cooldown changes new reservations in separate repositories and 
 			}),
 			hasImplementationPr: () => false,
 			subTickets: () => [],
+			approval: () => approved(),
 			snapshot: () => ({
 				7: {
 					number: "7",

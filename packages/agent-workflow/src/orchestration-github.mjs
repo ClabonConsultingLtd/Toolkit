@@ -87,6 +87,113 @@ export function recommendation(body = "") {
 	);
 	return match ? { model: match[1].trim(), effort: match[2].trim() } : null;
 }
+// Only text written by these GitHub author associations can define a task.
+export const TRUSTED_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"];
+export const EDITED_AFTER_READY = "edited after ready-for-agent";
+export const NO_TRUSTED_BRIEF = "no trusted agent brief";
+const BRIEF_HEADING = /^#{1,6}[^\S\n]*Agent Brief\b/im;
+const APPROVAL_QUERY = `query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+	repository(owner: $owner, name: $name) {
+		issue(number: $number) {
+			url
+			authorAssociation
+			lastEditedAt
+			comments(first: 100, after: $endCursor) {
+				pageInfo { hasNextPage endCursor }
+				nodes { url authorAssociation createdAt lastEditedAt body }
+			}
+		}
+	}
+}`;
+
+const time = (value) => (value ? Date.parse(value) : Number.NaN);
+const latest = (values) =>
+	values
+		.filter(Boolean)
+		.sort((a, b) => time(a) - time(b))
+		.at(-1) ?? null;
+
+// The newest "Agent Brief" comment by a trusted author defines the task. An
+// issue a trusted author opened is its own brief when no such comment exists.
+// Brief-like comments from anyone else are context only.
+export function trustedBrief(approval) {
+	const comment = approval.comments
+		.filter(
+			(c) =>
+				TRUSTED_ASSOCIATIONS.includes(c.authorAssociation) &&
+				BRIEF_HEADING.test(c.body ?? ""),
+		)
+		.sort((a, b) => time(a.createdAt) - time(b.createdAt))
+		.at(-1);
+	if (comment)
+		return {
+			source: "comment",
+			url: comment.url ?? null,
+			lastEditedAt: comment.lastEditedAt ?? null,
+		};
+	if (TRUSTED_ASSOCIATIONS.includes(approval.authorAssociation))
+		return {
+			source: "issue",
+			url: approval.url ?? null,
+			lastEditedAt: approval.bodyEditedAt ?? null,
+		};
+	return null;
+}
+
+// Refuses a ticket whose approved text changed after the latest
+// ready-for-agent label, or that has no trusted brief. Fails closed when the
+// label time is unknown.
+export function approvalRefusal(approval) {
+	const ready = approval.readyLabeledAt;
+	if (!ready || Number.isNaN(time(ready)))
+		return {
+			reason: "cannot verify when ready-for-agent was applied",
+			detail: "no ready-for-agent label event found",
+		};
+	const brief = trustedBrief(approval);
+	const after = (value) => time(value) > time(ready);
+	const edits = [];
+	if (after(approval.bodyEditedAt))
+		edits.push(`issue body edited at ${approval.bodyEditedAt}`);
+	if (after(approval.titleEditedAt))
+		edits.push(`title changed at ${approval.titleEditedAt}`);
+	if (brief?.source === "comment" && after(brief.lastEditedAt))
+		edits.push(`agent brief edited at ${brief.lastEditedAt}`);
+	if (edits.length)
+		return {
+			reason: EDITED_AFTER_READY,
+			detail: `${edits.join("; ")}, after ready-for-agent was applied at ${ready}`,
+		};
+	if (!brief)
+		return {
+			reason: NO_TRUSTED_BRIEF,
+			detail:
+				"no Agent Brief comment from an owner, member or collaborator, and the issue author is none of these",
+		};
+	return null;
+}
+
+// Checks a ticket's approval before it starts. With returnToTriage, an edited
+// ticket is moved back to needs-triage with a comment; beforeWrite runs first.
+export function checkApproval(
+	api,
+	number,
+	{ returnToTriage = false, beforeWrite = () => {} } = {},
+) {
+	const approval = api.approval(number);
+	const refusal = approvalRefusal(approval);
+	if (!refusal) return { refusal: null, brief: trustedBrief(approval) };
+	if (refusal.reason === EDITED_AFTER_READY) {
+		refusal.returnedToTriage = false;
+		if (returnToTriage) {
+			beforeWrite();
+			api.returnToTriage(number, refusal.detail);
+			refusal.returnedToTriage = true;
+		}
+	}
+	return { refusal, brief: null };
+}
+
 export function github(repository, exec = gh) {
 	const json = (args) => JSON.parse(exec(args));
 	function issue(number, withDependencies = true) {
@@ -208,9 +315,87 @@ export function github(repository, exec = gh) {
 			"number,state,mergedAt,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,url,isDraft,statusCheckRollup,mergeable,mergeStateStatus",
 		]);
 	}
+	// Trust inputs for one issue: author associations, edit times, and when
+	// ready-for-agent was last applied. REST updated_at is not used because
+	// labels and comments also bump it.
+	function approval(number) {
+		const n = issueNumber(number);
+		const [owner, name] = repository.split("/");
+		let pages, events;
+		try {
+			pages = json([
+				"api",
+				"graphql",
+				"--paginate",
+				"--slurp",
+				"-f",
+				`owner=${owner}`,
+				"-f",
+				`name=${name}`,
+				"-F",
+				`number=${n}`,
+				"-f",
+				`query=${APPROVAL_QUERY}`,
+			]);
+			events = json([
+				"api",
+				"--paginate",
+				"--slurp",
+				`repos/${repository}/issues/${n}/events?per_page=100`,
+			]).flat();
+		} catch (error) {
+			throw new Error(
+				`issue #${n}: cannot inspect approval history: ${error.message}`,
+				{ cause: error },
+			);
+		}
+		const issues = pages.map((page) => page?.data?.repository?.issue);
+		if (!issues.length || issues.some((item) => !item?.comments))
+			throw new Error(`issue #${n}: approval history response is invalid`);
+		return {
+			url: issues[0].url ?? null,
+			authorAssociation: issues[0].authorAssociation ?? null,
+			bodyEditedAt: issues[0].lastEditedAt ?? null,
+			titleEditedAt: latest(
+				events.filter((e) => e.event === "renamed").map((e) => e.created_at),
+			),
+			readyLabeledAt: latest(
+				events
+					.filter(
+						(e) => e.event === "labeled" && e.label?.name === "ready-for-agent",
+					)
+					.map((e) => e.created_at),
+			),
+			comments: issues.flatMap((item) => item.comments.nodes ?? []),
+		};
+	}
 	return {
 		issue,
 		pr,
+		approval,
+		returnToTriage(number, detail) {
+			const n = issueNumber(number);
+			exec([
+				"issue",
+				"edit",
+				n,
+				"--repo",
+				repository,
+				"--remove-label",
+				"ready-for-agent",
+				"--add-label",
+				"needs-triage",
+			]);
+			exec([
+				"issue",
+				"comment",
+				n,
+				"--repo",
+				repository,
+				"--body",
+				`The orchestration controller did not start this ticket because its text changed after it was approved (${detail}). It is back in \`needs-triage\`. Review the current text, then apply \`ready-for-agent\` again to approve it.`,
+			]);
+		},
 		requiredStatusChecks(branch) {
 			let data;
 			try {
@@ -456,6 +641,7 @@ export function requireReady(state, ticket, issues) {
 	const issue = issues[ticket.number];
 	if (issue.state !== "OPEN" || !issue.labels.includes("ready-for-agent"))
 		throw new Error("issue is not open and ready-for-agent");
+	if (issue.approvalRefusal) throw new Error(issue.approvalRefusal);
 	if (issue.subTickets?.length)
 		throw new Error(
 			`issue is a parent spec; implement its sub-tickets ${issue.subTickets.map((n) => `#${n}`).join(", ")}`,
