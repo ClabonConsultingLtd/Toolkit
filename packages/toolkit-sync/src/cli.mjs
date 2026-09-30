@@ -104,7 +104,10 @@ function verifiedSigner(cacheDir, tag, flags) {
 		.signer;
 }
 
-/** Record a verified signer the pin file lacks, as an older pin file does. */
+/**
+ * Record a verified signer the pin file lacks, as an older pin file does.
+ * Only a `sync` that has passed its refusal checks calls this; `check` writes nothing.
+ */
 function recordSigner(pinFilePath, packageName, pin, signer) {
 	if (signer !== undefined && pin.signer !== signer)
 		setSigner(pinFilePath, packageName, signer);
@@ -176,8 +179,7 @@ function runCheck(_positional, flags) {
 	let anyDiverged = false;
 	for (const [packageName, pin] of Object.entries(pins)) {
 		const sha = fetchPinnedTag(cacheDir, repoUrl, pin.tag, pin.sha);
-		const signer = verifiedSigner(cacheDir, pin.tag, flags);
-		recordSigner(pinFilePath, packageName, pin, signer);
+		verifiedSigner(cacheDir, pin.tag, flags);
 		const destDir = destDirFor(cwd, flags, packageName, pin);
 		const where = displayDest(cwd, destDir);
 		const { diverged } = diffPackage(
@@ -249,7 +251,6 @@ function runSync(positional, flags) {
 			throw new Error(`no pin recorded for "${packageName}"; run "pin" first`);
 		const sha = fetchPinnedTag(cacheDir, repoUrl, pin.tag, pin.sha);
 		const signer = verifiedSigner(cacheDir, pin.tag, flags);
-		recordSigner(pinFilePath, packageName, pin, signer);
 		const destDir = destDirFor(cwd, flags, packageName, pin);
 		let refused = false;
 		const change = trustAnchorChange(
@@ -292,6 +293,7 @@ function runSync(positional, flags) {
 		const { files, hashes } = syncPackage(cacheDir, sha, packageName, destDir);
 		const removed = removeStaleFiles(destDir, pin.syncedFiles, files);
 		setSyncedFiles(pinFilePath, packageName, files, { sha, hashes });
+		recordSigner(pinFilePath, packageName, pin, signer);
 		const removedNote =
 			removed.length > 0 ? `, removed ${removed.length} stale file(s)` : "";
 		console.log(

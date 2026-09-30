@@ -51,8 +51,8 @@ per pinned package:
 
 A pin file written by an older `toolkit-sync` without these fields still
 works: `dest` falls back to the default, the first `sync` records a
-baseline, and the next `check` or `sync` that verifies the tag records its
-`signer`.
+baseline, and the next `sync` that writes the package records its `signer`.
+`check` and a refused `sync` still verify the tag but don't record it.
 
 ## Release tag verification
 
@@ -200,8 +200,8 @@ vendored files; run `sync` next.
 
 **`check`** fetches and verifies every pinned package's tag and diffs the
 local files against its pinned SHA, scoped to that package's manifested
-surface. It writes nothing except a missing `signer`, and exits non-zero if
-any pinned package has diverged. For toolkit-sync it also lists the Trust
+surface. It writes nothing, not even a missing `signer`, and exits non-zero
+if any pinned package has diverged. For toolkit-sync it also lists the Trust
 anchor entries a `sync` would add or remove. Each
 difference is labelled:
 
