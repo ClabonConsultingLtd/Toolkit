@@ -159,7 +159,8 @@ export function copyLegacyTag(tag, { retag } = {}) {
 	]);
 	if (retag) {
 		const commit = git(root, ["rev-parse", `refs/tags/${tag}^{commit}`]);
-		const kind = retag === "annotated" ? ["-a", "-m", `Release ${tag}`] : [];
+		const annotationArgs =
+			retag === "annotated" ? ["-a", "-m", `Release ${tag}`] : [];
 		git(root, [
 			"-c",
 			"user.name=Test",
@@ -167,7 +168,7 @@ export function copyLegacyTag(tag, { retag } = {}) {
 			"user.email=test@example.com",
 			"tag",
 			"-f",
-			...kind,
+			...annotationArgs,
 			tag,
 			commit.trim(),
 		]);

@@ -97,8 +97,9 @@ only when the fetched tag matches its entry exactly. Any other tag below
 v0.14.0, such as a new `v0.13.5` or a Legacy tag name re-created on another
 commit or tag object, is refused as not a known Legacy tag, even with the
 flag. `--allow-unsigned` never applies to a tag at or above v0.14.0: an
-unsigned tag there is always an error. A repo pinned to a Legacy tag needs
-`--allow-unsigned` on every command until it moves to a Signed release tag.
+unsigned tag there is always an error. A consumer repository pinned to a
+Legacy tag needs `--allow-unsigned` on every command until it moves to a
+Signed release tag.
 
 ### Planned key rotation
 
