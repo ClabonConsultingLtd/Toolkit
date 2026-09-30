@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -477,19 +477,305 @@ test("a vendored copy without its Trust anchor fails closed", () => {
 	assert.match(result.stderr, /no Trust anchor at .*allowed_signers/);
 });
 
-test("a pin file without a signer keeps working, and the next verified command adds it", () => {
+/** The pin file's exact bytes, to prove a command left it alone. */
+function pinFileBytes(cwd) {
+	return readFileSync(join(cwd, "toolkit-pins.json"));
+}
+
+/** Every file under `dir`, as `{ relPath: content }`. */
+function snapshotDir(dir) {
+	const files = {};
+	for (const entry of readdirSync(dir, {
+		recursive: true,
+		withFileTypes: true,
+	}))
+		if (entry.isFile()) {
+			const full = join(entry.parentPath, entry.name);
+			files[full.slice(dir.length + 1)] = readFileSync(full, "utf8");
+		}
+	return files;
+}
+
+/** Drop `signer` from a pin, as a pin file written by an older toolkit-sync has none. */
+function dropSigner(cwd, packageName) {
+	const { signer: _signer, ...pin } = readPin(cwd, packageName);
+	writePin(cwd, packageName, pin);
+}
+
+test("a pin file without a signer keeps working: check verifies but writes nothing, and a successful sync records the signer", () => {
 	const { repoUrl, root, tag, packageName } = createFixtureRepo();
 	const cwd = mkTempDir();
 	const common = ["--repo", repoUrl, "--cwd", cwd];
 	writePin(cwd, packageName, { tag, sha: shaOf(root, tag) });
+	const before = pinFileBytes(cwd);
 
 	const checked = run(["check", ...common]);
 	assert.equal(checked.status, 1);
 	assert.match(checked.stdout, /missing-local: README\.md/);
-	assert.equal(readPin(cwd, packageName).signer, "toolkit-release");
+	assert.deepEqual(pinFileBytes(cwd), before);
 
-	writePin(cwd, packageName, { tag, sha: shaOf(root, tag) });
 	const synced = run(["sync", ...common]);
 	assert.equal(synced.status, 0, synced.stderr);
 	assert.equal(readPin(cwd, packageName).signer, "toolkit-release");
+
+	dropSigner(cwd, packageName);
+	const synced2 = pinFileBytes(cwd);
+	const clean = run(["check", ...common]);
+	assert.equal(clean.status, 0, clean.stdout);
+	assert.deepEqual(pinFileBytes(cwd), synced2);
+});
+
+test("a sync refused for local edits doesn't record a missing signer", () => {
+	const { repoUrl, tag, packageName } = createFixtureRepo();
+	const cwd = mkTempDir();
+	const common = ["--repo", repoUrl, "--cwd", cwd];
+	run(["pin", packageName, tag, ...common]);
+	run(["sync", packageName, ...common]);
+	writeFileSync(join(cwd, packageName, "README.md"), "# local\n");
+	dropSigner(cwd, packageName);
+	const before = pinFileBytes(cwd);
+
+	const refused = run(["sync", packageName, ...common]);
+	assert.equal(refused.status, 1, refused.stdout);
+	assert.match(refused.stdout, /refusing to overwrite/);
+	assert.deepEqual(pinFileBytes(cwd), before);
+});
+
+const anchorPackage = "toolkit-sync";
+const releaseKey = testSigningKey();
+const backupKey = createSigningKey();
+const releaseLine = allowedSignersLine(releaseKey);
+const backupLine = allowedSignersLine(backupKey, {
+	principal: "backup-release",
+});
+
+function fingerprintOf(key) {
+	return spawnSync("ssh-keygen", ["-lf", `${key.privateKey}.pub`], {
+		encoding: "utf8",
+	}).stdout.split(" ")[1];
+}
+
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+
+function anchorLine(action, principal, key) {
+	return new RegExp(
+		`${action}: ${principal} ${escapeRegExp(fingerprintOf(key))}`,
+	);
+}
+
+/** Pin and sync a toolkit-sync-shaped package whose anchor is `anchor`, then move its tag to `next`. */
+function vendoredAnchor(anchor, next) {
+	const { repoUrl, root, tag } = createFixtureRepo({
+		packageName: anchorPackage,
+		anchor,
+	});
+	const cwd = mkTempDir();
+	const common = ["--repo", repoUrl, "--cwd", cwd];
+	run(["pin", anchorPackage, tag, ...common]);
+	const first = run([
+		"sync",
+		anchorPackage,
+		"--accept-trust-anchor-change",
+		...common,
+	]);
+	assert.equal(first.status, 0, first.stdout + first.stderr);
+	moveTag(root, tag, (repoRoot) => {
+		writeFile(repoRoot, `packages/${anchorPackage}/allowed_signers`, next);
+		writeFile(repoRoot, `packages/${anchorPackage}/README.md`, "# v2\n");
+	});
+	run(["pin", anchorPackage, tag, ...common]);
+	const dest = join(cwd, anchorPackage);
+	return { cwd, common, dest, tag };
+}
+
+test("sync with no Trust anchor at the destination needs --accept-trust-anchor-change, and --force doesn't bypass it", () => {
+	const { repoUrl, tag } = createFixtureRepo({
+		packageName: anchorPackage,
+		anchor: releaseLine,
+	});
+	const cwd = mkTempDir();
+	const common = ["--repo", repoUrl, "--cwd", cwd];
+	run(["pin", anchorPackage, tag, ...common]);
+
+	for (const extra of [[], ["--force"]]) {
+		const refused = run(["sync", anchorPackage, ...extra, ...common]);
+		assert.equal(refused.status, 1, `${extra}: ${refused.stdout}`);
+		assert.match(
+			refused.stdout,
+			anchorLine("added", "toolkit-release", releaseKey),
+		);
+		assert.match(refused.stdout, /refusing to sync/);
+		assert.match(refused.stdout, /--accept-trust-anchor-change/);
+		assert.equal(existsSync(join(cwd, anchorPackage)), false);
+		assert.equal(readPin(cwd, anchorPackage).syncedFiles, undefined);
+	}
+
+	const accepted = run([
+		"sync",
+		anchorPackage,
+		"--accept-trust-anchor-change",
+		...common,
+	]);
+	assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
+	assert.match(
+		accepted.stdout,
+		anchorLine("added", "toolkit-release", releaseKey),
+	);
+	assert.equal(
+		readFileSync(join(cwd, anchorPackage, "allowed_signers"), "utf8"),
+		releaseLine,
+	);
+});
+
+test("sync refuses a release that adds a Trust anchor key until --accept-trust-anchor-change, even with --force", () => {
+	const { cwd, common, dest } = vendoredAnchor(
+		releaseLine,
+		`${releaseLine}${backupLine}`,
+	);
+	const pinBefore = readPin(cwd, anchorPackage);
+
+	for (const extra of [[], ["--force"]]) {
+		const refused = run(["sync", anchorPackage, ...extra, ...common]);
+		assert.equal(refused.status, 1, `${extra}: ${refused.stdout}`);
+		assert.match(refused.stdout, /Trust anchor/);
+		assert.match(
+			refused.stdout,
+			anchorLine("added", "backup-release", backupKey),
+		);
+		assert.doesNotMatch(refused.stdout, /removed:/);
+		assert.match(refused.stdout, /refusing to sync/);
+		assert.match(refused.stdout, /--accept-trust-anchor-change/);
+		assert.equal(
+			readFileSync(join(dest, "allowed_signers"), "utf8"),
+			releaseLine,
+		);
+		assert.equal(readFileSync(join(dest, "README.md"), "utf8"), "# widget\n");
+		assert.deepEqual(readPin(cwd, anchorPackage), pinBefore);
+	}
+
+	const accepted = run([
+		"sync",
+		anchorPackage,
+		"--accept-trust-anchor-change",
+		...common,
+	]);
+	assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
+	assert.match(
+		accepted.stdout,
+		anchorLine("added", "backup-release", backupKey),
+	);
+	assert.equal(
+		readFileSync(join(dest, "allowed_signers"), "utf8"),
+		`${releaseLine}${backupLine}`,
+	);
+	assert.equal(readFileSync(join(dest, "README.md"), "utf8"), "# v2\n");
+});
+
+test("a sync refused for an added Trust anchor key, from a pin without a signer, changes neither the package nor the pin file", () => {
+	const { cwd, common, dest } = vendoredAnchor(
+		releaseLine,
+		`${releaseLine}${backupLine}`,
+	);
+	dropSigner(cwd, anchorPackage);
+	const pinBefore = pinFileBytes(cwd);
+	const destBefore = snapshotDir(dest);
+
+	for (const extra of [[], ["--force"]]) {
+		const refused = run(["sync", anchorPackage, ...extra, ...common]);
+		assert.equal(refused.status, 1, `${extra}: ${refused.stdout}`);
+		assert.match(refused.stdout, /refusing to sync/);
+		assert.deepEqual(pinFileBytes(cwd), pinBefore);
+		assert.deepEqual(snapshotDir(dest), destBefore);
+	}
+
+	const checked = run(["check", ...common]);
+	assert.equal(checked.status, 1, checked.stdout);
+	assert.deepEqual(pinFileBytes(cwd), pinBefore);
+
+	const accepted = run([
+		"sync",
+		anchorPackage,
+		"--accept-trust-anchor-change",
+		...common,
+	]);
+	assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
+	assert.equal(readPin(cwd, anchorPackage).signer, "toolkit-release");
+});
+
+test("sync prints a Trust anchor key removal and proceeds without the flag", () => {
+	const { common, dest } = vendoredAnchor(
+		`${releaseLine}${backupLine}`,
+		releaseLine,
+	);
+	const synced = run(["sync", anchorPackage, ...common]);
+	assert.equal(synced.status, 0, synced.stdout + synced.stderr);
+	assert.match(
+		synced.stdout,
+		anchorLine("removed", "backup-release", backupKey),
+	);
+	assert.doesNotMatch(synced.stdout, /added:/);
+	assert.equal(
+		readFileSync(join(dest, "allowed_signers"), "utf8"),
+		releaseLine,
+	);
+});
+
+test("sync treats a formatting-only Trust anchor change as no change", () => {
+	const { common, dest } = vendoredAnchor(
+		releaseLine,
+		`# release key\n\n${releaseLine.replace(/ /g, "  ")}`,
+	);
+	const synced = run(["sync", anchorPackage, ...common]);
+	assert.equal(synced.status, 0, synced.stdout + synced.stderr);
+	assert.doesNotMatch(synced.stdout, /Trust anchor/);
+	assert.match(
+		readFileSync(join(dest, "allowed_signers"), "utf8"),
+		/^# release key/,
+	);
+});
+
+test("check reports added and removed Trust anchor keys, writes nothing, and fails on an addition", () => {
+	const renamed = allowedSignersLine(backupKey, { principal: "renamed" });
+	const { cwd, common, dest } = vendoredAnchor(
+		`${releaseLine}${backupLine}`,
+		`${releaseLine}${renamed}`,
+	);
+	const pinBefore = readPin(cwd, anchorPackage);
+	const checked = run(["check", ...common]);
+	assert.equal(checked.status, 1, checked.stdout);
+	assert.match(checked.stdout, anchorLine("added", "renamed", backupKey));
+	assert.match(
+		checked.stdout,
+		anchorLine("removed", "backup-release", backupKey),
+	);
+	assert.match(checked.stdout, /--accept-trust-anchor-change/);
+	assert.equal(
+		readFileSync(join(dest, "allowed_signers"), "utf8"),
+		`${releaseLine}${backupLine}`,
+	);
+	assert.deepEqual(readPin(cwd, anchorPackage), pinBefore);
+
+	const removalOnly = vendoredAnchor(
+		`${releaseLine}${backupLine}`,
+		releaseLine,
+	);
+	const removal = run(["check", ...removalOnly.common]);
+	assert.match(
+		removal.stdout,
+		anchorLine("removed", "backup-release", backupKey),
+	);
+	assert.doesNotMatch(removal.stdout, /added:|--accept-trust-anchor-change/);
+});
+
+test("sync prints control characters in an added Trust anchor entry escaped", () => {
+	const hostile = `evil\u001b[2J namespaces="git" ${backupKey.publicKey}\n`;
+	const { common } = vendoredAnchor(releaseLine, `${releaseLine}${hostile}`);
+	const refused = run(["sync", anchorPackage, ...common]);
+	assert.equal(refused.status, 1, refused.stdout);
+	assert.equal(refused.stdout.includes("\u001b"), false);
+	assert.match(refused.stdout, /added: evil\\x1b\[2J SHA256:/);
+});
+
+test("usage lists --accept-trust-anchor-change", () => {
+	assert.match(run(["--help"]).stdout, /--accept-trust-anchor-change/);
 });
