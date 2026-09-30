@@ -73,9 +73,18 @@ The steps assume `toolkit-sync` is vendored at `tools/toolkit-sync` and this pac
 
 9. **Merge.** The push to `main` runs the full-history secrets scan. If it fails, suppress or fix what it found, as in step 7.
 
-If your organisation restricts which actions and reusable workflows can run, allow `ClabonConsultingLtd/Toolkit/.github/workflows/security-gates.yml`, and the actions it uses: `actions/checkout`, `actions/setup-node`, `actions/upload-artifact`, `actions/download-artifact` and, for `code-scanning`, `github/codeql-action/upload-sarif`.
-
 Only CI can confirm steps 6 to 9: the Gates install their scanners on the runner, and required checks, Dependabot and code scanning are repository settings.
+
+## Restricting allowed actions
+
+Restricting which actions and reusable workflows are allowed to run is recommended hardening for your own repository.
+
+If you do, your allow list needs:
+
+- `ClabonConsultingLtd/Toolkit/.github/workflows/security-gates.yml@*`, the reusable workflow itself.
+- Every action it uses. They're all GitHub-owned today, so "Allow actions created by GitHub" covers them: `actions/checkout`, `actions/setup-node`, `actions/upload-artifact`, `actions/download-artifact` and, for `code-scanning`, `github/codeql-action/upload-sarif`.
+
+GitHub checks your own repository's Actions settings when your Caller workflow calls the reusable workflow, so you also need to allow whatever third-party actions your own workflows use.
 
 ## Inputs
 
