@@ -95,12 +95,14 @@ export function tagRelease(
 /**
  * Build a throwaway git repo shaped like Toolkit, with one vendorable
  * package ("widget") committed and tagged. The tag is signed with
- * `testSigningKey()` unless other `tagOptions` are given.
+ * `testSigningKey()` unless other `tagOptions` are given. `anchor`, if set,
+ * is written as the package's manifested `allowed_signers`.
  * Returns { repoUrl, root, tag, files, packageName }.
  */
 export function createFixtureRepo({
 	tag = "v1.0.0",
 	packageName = "widget",
+	anchor,
 	...tagOptions
 } = {}) {
 	const root = mkTempDir("toolkit-sync-fixture-");
@@ -108,9 +110,11 @@ export function createFixtureRepo({
 	git(root, ["config", "user.email", "test@example.com"]);
 	git(root, ["config", "user.name", "Test"]);
 
+	const include = ["README.md", "src/**"];
+	if (anchor !== undefined) include.push("allowed_signers");
 	const files = {
 		[`packages/${packageName}/toolkit-manifest.json`]: `${JSON.stringify(
-			{ include: ["README.md", "src/**"] },
+			{ include },
 			null,
 			"\t",
 		)}\n`,
@@ -120,6 +124,8 @@ export function createFixtureRepo({
 			"// excluded from the manifest\n",
 		[`packages/${packageName}/package.json`]: '{"name":"widget"}\n',
 	};
+	if (anchor !== undefined)
+		files[`packages/${packageName}/allowed_signers`] = anchor;
 	for (const [path, content] of Object.entries(files))
 		writeFile(root, path, content);
 

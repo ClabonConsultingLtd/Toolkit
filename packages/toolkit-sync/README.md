@@ -71,8 +71,9 @@ The Trust anchor is the `allowed_signers` file in this package, vendored with
 it. It trusts the release key under the principal `toolkit-release` for the
 `git` namespace. Nothing in toolkit-sync writes it except a verified `sync` of
 the `toolkit-sync` package itself, so it only changes through a release
-signed by a key it already trusts. Don't edit it by hand, except to recover
-from a key compromise (below).
+signed by a key it already trusts, and a `sync` that adds a key needs
+`--accept-trust-anchor-change` (below). Don't edit it by hand, except to
+recover from a key compromise (below).
 
 A copy of toolkit-sync from before v0.14.0 doesn't verify anything, so the
 upgrade to the first verifying copy is trusted on first use. Check that
@@ -93,6 +94,34 @@ v0.14.0: an unsigned tag there is always an error. A repo pinned to a Legacy
 tag needs `--allow-unsigned` on every command until it moves to a Signed
 release tag.
 
+### Trust anchor changes and `--accept-trust-anchor-change`
+
+A release's tag is verified against the Trust anchor already vendored, so a
+new anchor can't vouch for its own tag. But once synced, a key added upstream
+is trusted for every later sync. So when `sync` would write toolkit-sync's
+`allowed_signers`, it first compares the vendored copy with the release's.
+It compares entries (a principal, its options and a public key), not raw
+lines, so whitespace, comments, key comments and the order of lines,
+principals and options don't count. It prints every added and removed entry
+as principal, SHA256 fingerprint (from `ssh-keygen -lf`) and options:
+
+```text
+toolkit-sync: v0.16.0 changes the Trust anchor (allowed_signers), the keys trusted to sign Toolkit releases
+  added: toolkit-release SHA256:... namespaces="git"
+  removed: toolkit-release SHA256:... namespaces="git",valid-before="20270101"
+```
+
+- If any entry is added, including a known key under a new principal or with
+  new options, `sync` writes nothing for that package and exits non-zero
+  unless it gets `--accept-trust-anchor-change`. `--force` doesn't stand in
+  for it. Confirm each added fingerprint through a channel other than the
+  release itself before passing the flag.
+- If entries are only removed, `sync` prints them and proceeds.
+- If the destination has no `allowed_signers` yet, every entry counts as
+  added, so the first `sync` of toolkit-sync needs the flag.
+- `check` prints the same change without writing anything, and an added
+  entry makes it exit non-zero.
+
 ### Planned key rotation
 
 A new key enters the Trust anchor through a release signed by the old one.
@@ -105,7 +134,8 @@ toolkit-release namespaces="git" ssh-ed25519 AAAA...new
 ```
 
 Consumers `sync` the `toolkit-sync` package to that release, which the old
-key verifies. Later releases are signed with the new key. Tags the old key
+key verifies. The new key is an added entry, so that `sync` needs
+`--accept-trust-anchor-change`. Later releases are signed with the new key. Tags the old key
 signed before its `valid-before` date still verify, and a signature it makes
 after that date doesn't.
 
@@ -138,7 +168,7 @@ simply not listing them.
 ```bash
 node src/cli.mjs pin <package> <tag> [--dest <dir>] [--allow-unsigned] [--repo <url>] [--cwd <dir>]
 node src/cli.mjs check [--allow-unsigned] [--repo <url>] [--cwd <dir>] [--dest <dir>]
-node src/cli.mjs sync [package] [--force] [--allow-unsigned] [--repo <url>] [--cwd <dir>] [--dest <dir>]
+node src/cli.mjs sync [package] [--force] [--accept-trust-anchor-change] [--allow-unsigned] [--repo <url>] [--cwd <dir>] [--dest <dir>]
 node src/cli.mjs --help
 ```
 
@@ -158,6 +188,8 @@ unknown one, prints usage and exits 1.
   inside `--cwd`.
 - `--allow-unsigned` accepts a Legacy tag without a signature, with a
   warning. It has no effect on a tag at or above v0.14.0.
+- `--accept-trust-anchor-change` lets `sync` write a Trust anchor that adds a
+  key; see [Trust anchor changes](#trust-anchor-changes-and---accept-trust-anchor-change).
 
 **`pin <package> <tag>`** resolves `<tag>` to a commit SHA on the Toolkit
 repo via a local shallow fetch (`git ls-remote` plus `git fetch --depth 1`)
@@ -169,7 +201,8 @@ vendored files; run `sync` next.
 **`check`** fetches and verifies every pinned package's tag and diffs the
 local files against its pinned SHA, scoped to that package's manifested
 surface. It writes nothing except a missing `signer`, and exits non-zero if
-any pinned package has diverged. Each
+any pinned package has diverged. For toolkit-sync it also lists the Trust
+anchor entries a `sync` would add or remove. Each
 difference is labelled:
 
 - `missing-local`: not vendored yet; `sync` writes it.
@@ -188,7 +221,8 @@ SHA, removes files
 no longer manifested, and records the new baseline. It refuses to
 overwrite a `local-edit` or `modified` file and lists them — pass `--force`
 to overwrite anyway. Missing files and upstream-only changes are written
-without `--force`.
+without `--force`. A release that adds a Trust anchor key also needs
+`--accept-trust-anchor-change`.
 
 With no baseline recorded, `sync` cannot tell a local edit from an
 upstream change, so every differing file blocks it. Review the listed files
@@ -201,7 +235,9 @@ local edits stop a sync.
 1. Branch from the consumer repo's up-to-date default branch.
 2. `pin <package> <new-tag>` (add `--dest <dir>` once, if not recorded).
 3. `check`, and review every `local-edit` / `modified` file before
-   deciding whether to upstream it or overwrite it with `--force`.
+   deciding whether to upstream it or overwrite it with `--force`. Review
+   any Trust anchor key the release adds before passing
+   `--accept-trust-anchor-change`.
 4. `sync <package>`, then run the vendored package's tests and the
    consumer's own checks.
 5. Refresh installed skill copies or symlinks that point at the old
