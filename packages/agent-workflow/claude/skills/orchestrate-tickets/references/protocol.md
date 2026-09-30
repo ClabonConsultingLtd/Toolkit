@@ -16,8 +16,8 @@ Input is JSON from a file, or stdin with `-`; output is JSON. Pass arguments as 
 | record-claude-limit | error, failureKey, optional agentId | Record an explicit Claude usage-limit failure once per stable failure identity; no batch lease required. |
 | acquire | none | acquired:false if busy; otherwise token and expiresAt. |
 | renew / release | none | Extend ten-minute lease / release. Release accepts the saved owner's matching token even after expiry, but cannot clear a successor's lease. |
-| sync | none | Reconcile GitHub and return issues, launchable IDs, slots, resumable (provider-limit blocks past reset), pauseSchedule, and `baseUpdates` (open linked PRs whose merge state is conflicting or behind, with ticket status, agentId and reason). |
-| reserve | number, models (Claude catalog), codexModels (Codex catalog during cooldown) | Recheck readiness/dependencies, resolve provider/model/effort, persist branch/launchKey and reserve slot. |
+| sync | none | Reconcile GitHub and return issues, launchable IDs, slots, resumable (provider-limit blocks past reset), pauseSchedule, and `baseUpdates` (open linked PRs whose merge state is conflicting or behind, with ticket status, agentId and reason). Tickets that could start are blocked for readiness without a trusted brief, and returned to `needs-triage` with a comment when edited after `ready-for-agent`. |
+| reserve | number, models (Claude catalog), codexModels (Codex catalog during cooldown) | Recheck readiness, dependencies and approval, resolve provider/model/effort, persist branch/launchKey and reserve slot. Returns `brief` (`source` `comment` or `issue`, and `url`) naming the trusted brief that defines the task. |
 | attach | number, workspaceId and/or agentId; workerActive:true for a confirmed externally restarted saved agent | Persist identifiers immediately after each Paseo creation, or restore capacity accounting without leaving blocked. Existing different IDs are rejected. |
 | link-pr | number, pr | Fetch and verify same-repository branch/base before attaching PR. |
 | review | number, evidence | Record completed worker output; begin Codex review. |

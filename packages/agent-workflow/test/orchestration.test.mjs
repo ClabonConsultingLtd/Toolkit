@@ -33,6 +33,7 @@ import {
 	requireReady,
 	resolveRuntime,
 } from "../src/orchestration-github.mjs";
+import { approved } from "./approval-fixtures.mjs";
 
 const manifest = () => ({
 	repository: "example/project",
@@ -57,6 +58,7 @@ const issue = (n, deps = []) => ({
 	dependencies: deps.map(String),
 	recommendation: { model: "Sonnet", effort: "medium" },
 });
+const approval = () => approved();
 const snapshot = () => ({
 	7: issue(7, [2]),
 	8: issue(8, [7]),
@@ -389,7 +391,7 @@ test("CLI withholds provider-limit resume while the shared Claude cooldown is ac
 	const cooldown = join(path, "..", "cooldown.json");
 	const options = {
 		fallbackStatePath: cooldown,
-		github: () => ({ snapshot, pr: pull }),
+		github: () => ({ approval, snapshot, pr: pull }),
 	};
 	execute("sync", path, { token }, options);
 	execute("reserve", path, { token, number: 9, models }, options);
@@ -555,7 +557,7 @@ test("completion requires matching merged PR and retries partial label/closure w
 });
 test("CLI persists reservations across restarts and rejects competing lease owners", (t) => {
 	const { path, token } = fixture(t),
-		options = { github: () => ({ snapshot, pr: pull }) };
+		options = { github: () => ({ approval, snapshot, pr: pull }) };
 	assert.equal(execute("acquire", path).acquired, false);
 	execute("sync", path, { token }, options);
 	execute("reserve", path, { token, number: 7, models }, options);
@@ -582,6 +584,7 @@ test("CLI does not complete open PR; rejects failing checks and invalidates chan
 		pr = pull(),
 		options = {
 			github: () => ({
+				approval,
 				snapshot,
 				pr: () => pr,
 				finalize: () => {
@@ -634,6 +637,7 @@ test("ready tolerates a required check that has not reported yet; controller mer
 	const pr = pull();
 	const options = {
 		github: () => ({
+			approval,
 			snapshot,
 			pr: () => pr,
 			requiredStatusChecks: () => {
@@ -736,7 +740,7 @@ test("repository local gate and requiredChecks apply at controller merge, not re
 	pr.statusCheckRollup = [
 		{ name: "ci", status: "COMPLETED", conclusion: "SUCCESS" },
 	];
-	const options = { github: () => ({ snapshot, pr: () => pr }) };
+	const options = { github: () => ({ approval, snapshot, pr: () => pr }) };
 	execute("reserve", path, { token, number: 7, models }, options);
 	execute(
 		"attach",
@@ -781,6 +785,7 @@ test("controller merge fails closed without configured or readable required chec
 	const pr = pull();
 	const options = {
 		github: () => ({
+			approval,
 			snapshot,
 			pr: () => pr,
 			requiredStatusChecks: () => {
@@ -808,6 +813,7 @@ test("controller merge fails closed without configured or readable required chec
 		/required checks not configured and branch protection is unavailable/,
 	);
 	options.github = () => ({
+		approval,
 		snapshot,
 		pr: () => pr,
 		requiredStatusChecks: () => {
@@ -825,6 +831,7 @@ test("controller merge fails closed without configured or readable required chec
 	);
 	assert.equal(execute("status", path).tickets[7].status, "awaiting_merge");
 	options.github = () => ({
+		approval,
 		snapshot,
 		pr: () => pr,
 		requiredStatusChecks: () => ["ci"],
@@ -882,6 +889,7 @@ test("completion releases dependent ticket on same sync and schedule identity ca
 		pr = pull();
 	const options = {
 		github: () => ({
+			approval,
 			snapshot: () => issues,
 			pr: () => pr,
 			finalize: (_s, ticket) => {
@@ -919,7 +927,12 @@ test("merge state gates ready and merge-ready; base updates keep fix cycles", (t
 	api.pr(17);
 	assert.match(fields, /mergeable,mergeStateStatus/);
 	const options = {
-		github: () => ({ snapshot, pr: () => pr, requiredStatusChecks: () => [] }),
+		github: () => ({
+			approval,
+			snapshot,
+			pr: () => pr,
+			requiredStatusChecks: () => [],
+		}),
 	};
 	execute("reserve", path, { token, number: 7, models }, options);
 	execute(
@@ -1043,7 +1056,12 @@ test("ready succeeds on a draft PR with checks skipped for draft; merge-ready st
 		{ name: "e2e", status: "COMPLETED", conclusion: "SKIPPED" },
 	];
 	const options = {
-		github: () => ({ snapshot, pr: () => pr, requiredStatusChecks: () => [] }),
+		github: () => ({
+			approval,
+			snapshot,
+			pr: () => pr,
+			requiredStatusChecks: () => [],
+		}),
 	};
 	execute("reserve", path, { token, number: 7, models }, options);
 	execute(
@@ -1104,7 +1122,7 @@ test("cleanup runs the checkout's hook against the ticket worktree and only reco
 	const path = join(dir, "state.json");
 	execute("init", path, { ...manifest(), cwd: checkout });
 	const { token } = execute("acquire", path);
-	const options = { github: () => ({ snapshot, pr: () => pull() }) };
+	const options = { github: () => ({ approval, snapshot, pr: () => pull() }) };
 	const cleanup = (extra = {}, opts = {}) =>
 		execute(
 			"cleanup",
