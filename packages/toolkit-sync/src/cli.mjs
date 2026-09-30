@@ -34,8 +34,8 @@ options:
   --cwd <dir>        consumer repo root holding ${PIN_FILE_NAME} (default: .)
   --dest <dir>       vendored package directory (default: the pin's recorded
                      dest, else <cwd>/<package>)
-  --allow-unsigned   accept a Legacy tag (below v${FIRST_SIGNED_VERSION}) without a
-                     signature, with a warning
+  --allow-unsigned   accept a known Legacy tag (below v${FIRST_SIGNED_VERSION})
+                     without a signature, with a warning
   -h, --help         show this help
 
 Every tag must be a Signed release tag that verifies against the Trust

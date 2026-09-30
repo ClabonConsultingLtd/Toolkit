@@ -88,10 +88,17 @@ Tags from before signing began (below v0.14.0, the fixed
 `FIRST_SIGNED_VERSION` in `src/signature.mjs`) are Legacy tags. They can
 never be signed, so `pin`, `check` and `sync` refuse them unless the command
 gets `--allow-unsigned`, which accepts a Legacy tag with a warning and without
-verification. `--allow-unsigned` never applies to a tag at or above
-v0.14.0: an unsigned tag there is always an error. A repo pinned to a Legacy
-tag needs `--allow-unsigned` on every command until it moves to a Signed
-release tag.
+verification.
+
+The Legacy tags are a closed set. `LEGACY_TAGS`, next to
+`FIRST_SIGNED_VERSION`, lists each one with its commit and tag object (none
+for the lightweight `v0.1.0` and `v0.2.0`). `--allow-unsigned` accepts a tag
+only when the fetched tag matches its entry exactly. Any other tag below
+v0.14.0, such as a new `v0.13.5` or a Legacy tag name re-created on another
+commit or tag object, is refused as not a known Legacy tag, even with the
+flag. `--allow-unsigned` never applies to a tag at or above v0.14.0: an
+unsigned tag there is always an error. A repo pinned to a Legacy tag needs
+`--allow-unsigned` on every command until it moves to a Signed release tag.
 
 ### Planned key rotation
 
@@ -156,8 +163,8 @@ unknown one, prints usage and exits 1.
   resolved against the current directory. For `pin` it records the
   directory in the pin file, so later commands need no `--dest`; it must be
   inside `--cwd`.
-- `--allow-unsigned` accepts a Legacy tag without a signature, with a
-  warning. It has no effect on a tag at or above v0.14.0.
+- `--allow-unsigned` accepts a known Legacy tag without a signature, with a
+  warning. It has no effect on any other tag.
 
 **`pin <package> <tag>`** resolves `<tag>` to a commit SHA on the Toolkit
 repo via a local shallow fetch (`git ls-remote` plus `git fetch --depth 1`)

@@ -138,6 +138,43 @@ export function moveTag(root, tag, mutate, tagOptions = {}) {
 	tagRelease(root, tag, { ...tagOptions, force: true });
 }
 
+/** The Toolkit repository these tests run in. Its tags are the real Legacy tags. */
+export const toolkitRepo = fileURLToPath(new URL("../../../", import.meta.url));
+
+/**
+ * Build a bare repo holding a copy of Toolkit's real Legacy tag `tag`.
+ * `retag` replaces it on the same commit: "annotated" with a new tag object,
+ * "lightweight" with none. Returns { repoUrl, root, tag }.
+ */
+export function copyLegacyTag(tag, { retag } = {}) {
+	const root = mkTempDir("toolkit-sync-legacy-");
+	git(root, ["init", "-q", "--bare"]);
+	git(root, [
+		"fetch",
+		"-q",
+		"--depth",
+		"1",
+		toolkitRepo,
+		`+refs/tags/${tag}:refs/tags/${tag}`,
+	]);
+	if (retag) {
+		const commit = git(root, ["rev-parse", `refs/tags/${tag}^{commit}`]);
+		const kind = retag === "annotated" ? ["-a", "-m", `Release ${tag}`] : [];
+		git(root, [
+			"-c",
+			"user.name=Test",
+			"-c",
+			"user.email=test@example.com",
+			"tag",
+			"-f",
+			...kind,
+			tag,
+			commit.trim(),
+		]);
+	}
+	return { repoUrl: root, root, tag };
+}
+
 const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
 
 /**

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
 	allowedSignersLine,
+	copyLegacyTag,
 	createFixtureRepo,
 	createSigningKey,
 	installCli,
@@ -372,12 +373,9 @@ test("a tag signed by an unknown key fails pin, check and sync", () => {
 	}
 });
 
-test("a Legacy tag fails without --allow-unsigned and passes with it plus a warning", () => {
-	const { repoUrl, tag, packageName } = createFixtureRepo({
-		tag: "v0.13.0",
-		signingKey: null,
-		annotate: true,
-	});
+test("a known Legacy tag fails without --allow-unsigned and passes with it plus a warning", () => {
+	const { repoUrl, tag } = copyLegacyTag("v0.13.0");
+	const packageName = "toolkit-sync";
 	const cwd = mkTempDir();
 	const common = ["--repo", repoUrl, "--cwd", cwd];
 
@@ -402,6 +400,31 @@ test("a Legacy tag fails without --allow-unsigned and passes with it plus a warn
 		assert.equal(result.status, 1, `${command}: ${result.stdout}`);
 		assert.match(result.stderr, /is a Legacy tag/);
 	}
+});
+
+test("--allow-unsigned doesn't help a tag below the first signed version that isn't a known Legacy tag", () => {
+	const { repoUrl, tag, packageName } = createFixtureRepo({
+		tag: "v0.13.5",
+		signingKey: null,
+		annotate: true,
+	});
+	const cwd = mkTempDir();
+	for (const flags of [[], ["--allow-unsigned"]]) {
+		const result = run([
+			"pin",
+			packageName,
+			tag,
+			...flags,
+			"--repo",
+			repoUrl,
+			"--cwd",
+			cwd,
+		]);
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /"v0\.13\.5" is not a known Legacy tag/);
+		assert.doesNotMatch(result.stderr, /--allow-unsigned|warning/);
+	}
+	assert.equal(existsSync(join(cwd, "toolkit-pins.json")), false);
 });
 
 test("--allow-unsigned doesn't help an unsigned tag at or above the first signed version", () => {
