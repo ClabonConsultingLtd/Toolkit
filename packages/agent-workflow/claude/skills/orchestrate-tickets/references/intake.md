@@ -173,7 +173,9 @@ the run to:
    read-only `select-next` preview with the valid catalog. For an issue skipped
    solely because its recommendation is absent, malformed or unsupported,
    re-read that issue and correct only its Implementation recommendation using
-   its existing requirements and a supported model/effort. Leave issues needing
+   its existing requirements and a supported model/effort. That body edit
+   postdates `ready-for-agent`, so the next check returns the issue to
+   `needs-triage`; report it for a maintainer to re-approve. Leave issues needing
    a product decision unchanged and report them. Never edit a ticket to
    compensate for a malformed catalog. Immediately before `tick`, re-fetch the
    saved Paseo schedule by ID. Refuse admission if the fetch fails, its ID/name
@@ -243,7 +245,9 @@ the fallback in the run report. Never change a running worker's mode.
   batch creation, the next tick recovers that batch rather than creating more.
   The tick's `status` distinguishes `admitted`, `recovered`, `replayed`, `empty`,
   `capacity-full`, and `paused`; `capacity` is the current shared limit snapshot,
-  and `skipped` explains excluded candidates or a capacity wait.
+  and `skipped` explains excluded candidates or a capacity wait. Like
+  `init-next`, a tick returns a ticket edited after approval to `needs-triage`
+  with a comment and skips one without a trusted brief.
 - `schedule-prompt`: print the canonical schedule prompt for CHECKOUT from
   `toolkit-intake.json` (or the saved policy). With `--check FILE|-`, compare a
   live prompt, given as raw text or Paseo schedule JSON, ignoring line endings
