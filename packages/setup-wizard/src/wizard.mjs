@@ -48,6 +48,9 @@ export function notOnPath(tool, install) {
 	return `${tool} is not on PATH. ${install}${hint} Then open a new terminal and re-run the wizard.`;
 }
 
+const RELEASE_KEY_URL =
+	"https://github.com/ClabonConsultingLtd/Toolkit/issues/154";
+
 export const LABELS = {
 	"needs-triage": "d4c5f9",
 	"needs-info": "fbca04",
@@ -178,20 +181,22 @@ export function gitSupportsSshSignatures(versionText) {
 	return major > 2 || (major === 2 && minor >= 34);
 }
 
-/** SHA256 fingerprint of the first key in an allowed_signers file, if readable. */
-function anchorFingerprint(path) {
-	if (!existsSync(path)) return undefined;
-	const line = readFileSync(path, "utf8")
+/** SHA256 fingerprints of the keys in an allowed_signers file. */
+function anchorFingerprints(path) {
+	if (!existsSync(path)) return [];
+	const keys = readFileSync(path, "utf8")
 		.split("\n")
-		.find((entry) => /\bssh-\S+ \S+/.test(entry));
-	const key = line && /\b(ssh-\S+ \S+)/.exec(line)[1];
-	if (!key) return undefined;
+		.map((line) => /\b(ssh-\S+ \S+)/.exec(line)?.[1])
+		.filter(Boolean);
 	const dir = mkdtempSync(join(tmpdir(), "setup-anchor-"));
 	try {
-		writeFileSync(join(dir, "key.pub"), `${key}\n`);
-		return /SHA256:\S+/.exec(
-			run("ssh-keygen", ["-lf", join(dir, "key.pub")]).stdout,
-		)?.[0];
+		return keys
+			.map((key, n) => {
+				const file = join(dir, `key${n}.pub`);
+				writeFileSync(file, `${key}\n`);
+				return /SHA256:\S+/.exec(run("ssh-keygen", ["-lf", file]).stdout)?.[0];
+			})
+			.filter(Boolean);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -342,29 +347,40 @@ export async function runSetup(options, io) {
 		});
 		if (!result.ok)
 			throw new Error(
-				`toolkit-sync ${args[0]} failed; see the output above. It verifies each release tag's SSH signature, which needs git 2.34+ and ssh-keygen on PATH, and a release tag from v0.14.0 on.`,
+				`toolkit-sync ${args[0]} failed; see the output above. It verifies each release tag's SSH signature, which needs git 2.34+ and ssh-keygen on PATH, and a release tag from v0.14.0 on. If the release adds a key to the Trust anchor, confirm the key with Toolkit's maintainers, then re-run with --accept-trust-anchor-change.`,
 			);
 	};
 	// A repository that already vendors a verifying toolkit-sync checks the new
-	// release against the key it already trusts. Only a first setup trusts the
-	// clone's copy, and its key is shown so it can be checked once.
+	// release against the key it already trusts. A first setup has no key yet:
+	// it trusts the clone's, so a person confirms its fingerprint first.
 	const vendored = join(root, destRoot, "toolkit-sync");
 	const upgrading = existsSync(join(vendored, "allowed_signers"));
 	const cli = upgrading
 		? join(vendored, "src", "cli.mjs")
 		: join(toolkitRoot, "packages", "toolkit-sync", "src", "cli.mjs");
+	let acceptAnchor = options.acceptTrustAnchorChange === true;
 	if (!upgrading) {
-		const fingerprint = anchorFingerprint(
+		const fingerprints = anchorFingerprints(
 			join(toolkitRoot, "packages", "toolkit-sync", "allowed_signers"),
 		);
-		if (fingerprint) {
-			summary.fingerprint = fingerprint;
+		summary.fingerprints = fingerprints;
+		for (const fingerprint of fingerprints)
 			io.log(`Release signing key: ${fingerprint}`);
-		}
+		acceptAnchor ||= await io.confirm(
+			`Does ${fingerprints.join(" and ")} match the release key published at ${RELEASE_KEY_URL}?`,
+			false,
+		);
+		if (!acceptAnchor)
+			throw new Error(
+				`Compare the release signing key above with ${RELEASE_KEY_URL}, then re-run and confirm it (with --yes, pass --accept-trust-anchor-change). Nothing was vendored.`,
+			);
 	}
 	for (const name of PACKAGES)
 		toolkitSync(cli, ["pin", name, tag, "--dest", `${destRoot}/${name}`]);
-	toolkitSync(cli, ["sync"]);
+	toolkitSync(cli, [
+		"sync",
+		...(acceptAnchor ? ["--accept-trust-anchor-change"] : []),
+	]);
 	toolkitSync(join(root, destRoot, "toolkit-sync", "src", "cli.mjs"), [
 		"check",
 	]);
@@ -509,14 +525,9 @@ export async function runSetup(options, io) {
 }
 
 export function nextSteps(result) {
-	const steps = [];
-	if (result.fingerprint)
-		steps.push(
-			`Once, check the release signing key ${result.fingerprint} matches the one published at https://github.com/ClabonConsultingLtd/Toolkit/issues/154. toolkit-sync trusts it from now on.`,
-		);
-	steps.push(
+	const steps = [
 		"Review permissions.allow in .claude/settings.json and add the test, lint and build commands tickets need.",
-	);
+	];
 	if (!result.skills)
 		steps.push(
 			"Install Matt Pocock's skills: claude plugin install mattpocock-skills --scope project.",

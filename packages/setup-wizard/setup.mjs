@@ -19,7 +19,10 @@ Options:
   --yes                        Accept every default; never prompt
   --no-branch                  Don't offer to create chore/toolkit-setup
   --labels / --no-labels       Create (or skip) the GitHub triage labels
-  --skills / --no-skills       Run (or skip) the Matt Pocock skills installer
+  --skills / --no-skills       Install (or skip) Matt Pocock's skills plugin
+  --accept-trust-anchor-change Trust the release signing key without asking (first
+                               setup), or a key a new release adds (re-run). Check
+                               the fingerprint with Toolkit's maintainers first.
   --help                       Show this help`;
 
 export function parseArgs(argv) {
@@ -37,6 +40,7 @@ export function parseArgs(argv) {
 		"--no-labels": ["labels", false],
 		"--skills": ["skills", true],
 		"--no-skills": ["skills", false],
+		"--accept-trust-anchor-change": ["acceptTrustAnchorChange", true],
 	};
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];

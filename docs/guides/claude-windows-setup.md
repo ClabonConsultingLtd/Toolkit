@@ -167,7 +167,7 @@ Check the release's signature against the release key in the clone:
 git -C Toolkit -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=packages/toolkit-sync/allowed_signers verify-tag "$TAG"
 ```
 
-It should print `Good "git" signature for toolkit-release with ED25519 key SHA256:cKZJXbRUVW+hizwqKikJj/iJKGdslbs3+OSpT7x0xOo`. The key file came from the same download it's checking, so compare that fingerprint once with the copy published in [Toolkit issue #154](https://github.com/ClabonConsultingLtd/Toolkit/issues/154). From here on, `toolkit-sync` checks every release against the key your repository vendors, and only a release signed by that key can change it.
+It should print `Good "git" signature for toolkit-release with ED25519 key SHA256:cKZJXbRUVW+hizwqKikJj/iJKGdslbs3+OSpT7x0xOo`. The key file came from the same download it's checking, so compare that fingerprint with the copy published in [Toolkit issue #154](https://github.com/ClabonConsultingLtd/Toolkit/issues/154) before you continue. Section 4 asks you to confirm it to `toolkit-sync`. From here on, `toolkit-sync` checks every release against the key your repository vendors, and only a release signed by that key can change it.
 
 ## 3. Prepare your repository
 
@@ -214,12 +214,14 @@ node "$TS" pin agent-workflow "$TAG" --dest tools/agent-workflow
 node "$TS" pin claude-token-optimisation "$TAG" --dest tools/claude-token-optimisation
 ```
 
-This writes `toolkit-pins.json`, including each tag's verified `signer`. Nothing is copied yet. Copy the files, then check them with the repository's own vendored copy:
+This writes `toolkit-pins.json`. Nothing is copied yet. Copy the files, then check them with the repository's own vendored copy:
 
 ```bash
-node "$TS" sync
+node "$TS" sync --accept-trust-anchor-change
 node tools/toolkit-sync/src/cli.mjs check
 ```
+
+`sync` prints the release signing key it's about to vendor (`added: toolkit-release SHA256:...`). Your repository has no trusted key yet, so `toolkit-sync` won't write one without `--accept-trust-anchor-change`. Pass it only when that fingerprint is the one you checked in section 2. Each pin records the verified `signer` when `sync` writes the package.
 
 `check` should report all three packages as up to date with your tag. It exits non-zero if a vendored file differs from the pinned release, or if a tag's signature doesn't verify. `pin`, `check` and `sync` all verify the tag against `tools/toolkit-sync/allowed_signers`, the release key vendored with `toolkit-sync`. Don't edit that file; the [`toolkit-sync` README](../../packages/toolkit-sync/README.md#release-tag-verification) explains how the key is rotated. Run it in CI if you want to catch accidental edits. From now on, use `node tools/toolkit-sync/src/cli.mjs`; you don't need the clone's copy again.
 
@@ -663,6 +665,8 @@ Alternatively, re-run the [setup wizard](../../packages/setup-wizard/README.md) 
 
 Either way, your repository's vendored `toolkit-sync` verifies the new release against the key it already trusts, not the one in the clone. A release signed by any other key is refused.
 
+A release can also add a key, for example when the release key is rotated. `check` then lists `added:` entries, and `sync` stops for `toolkit-sync` until you pass `--accept-trust-anchor-change` (to `sync`, or to the wizard). Confirm each added fingerprint with Toolkit's maintainers, through a channel other than the release itself, before you pass it. `--force` doesn't bypass this.
+
 To do it by hand:
 
 ```bash
@@ -746,6 +750,8 @@ The runner found no `claude` on the `PATH` it inherited. If you started it from 
 - `git --version` is 2.34 or later, and `ssh-keygen` is on `PATH` (see [Checking PATH](#checking-path)).
 - The tag is `v0.14.0` or later. Earlier tags were never signed; `toolkit-sync` accepts them only with `--allow-unsigned`, and this guide needs a later release anyway.
 - `tools/toolkit-sync/allowed_signers` hasn't been edited. If it has, restore it with `git checkout -- tools/toolkit-sync/allowed_signers`.
+
+If `sync` instead reports that the release changes the Trust anchor (`added: toolkit-release SHA256:...`), the tag verified but the release adds a key. See [section 10](#10-upgrading-toolkit).
 
 ### Hooks don't run
 

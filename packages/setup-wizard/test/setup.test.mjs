@@ -50,7 +50,11 @@ function createSigningKey() {
 
 // A tagged Toolkit-shaped repository built from this working tree, so the
 // test exercises the current packages without network access or real tags.
-function fixtureToolkit({ signed = true, key = testSigningKey() } = {}) {
+function fixtureToolkit({
+	signed = true,
+	key = testSigningKey(),
+	extraKeys = [],
+} = {}) {
 	const root = mkdtempSync(join(tmpdir(), "setup-toolkit-"));
 	for (const name of [
 		"toolkit-sync",
@@ -64,7 +68,9 @@ function fixtureToolkit({ signed = true, key = testSigningKey() } = {}) {
 		});
 	writeFileSync(
 		join(root, "packages", "toolkit-sync", "allowed_signers"),
-		`toolkit-release namespaces="git" ${key.publicKey}\n`,
+		[key, ...extraKeys]
+			.map((entry) => `toolkit-release namespaces="git" ${entry.publicKey}\n`)
+			.join(""),
 	);
 	git(root, ["init", "-q", "-b", "main"]);
 	git(root, ["config", "user.name", "Test"]);
@@ -122,13 +128,14 @@ test("sets up a repository for both trackers and is idempotent", async () => {
 		tag: TAG,
 		tracker: "both",
 		yes: true,
+		acceptTrustAnchorChange: true,
 		skills: false,
 		labels: false,
 	};
 
 	const result = await runSetup(options, quietIo());
 	assert.equal(result.tracker, "both");
-	assert.match(result.fingerprint, /^SHA256:/);
+	assert.match(result.fingerprints[0], /^SHA256:/);
 	assert.equal(
 		git(target, ["branch", "--show-current"]).trim(),
 		"chore/toolkit-setup",
@@ -237,7 +244,7 @@ test("sets up a repository for both trackers and is idempotent", async () => {
 		".gitignore",
 	].map((file) => readFileSync(join(target, file), "utf8"));
 	const again = await runSetup(options, quietIo());
-	assert.equal(again.fingerprint, undefined, "re-runs trust the vendored key");
+	assert.equal(again.fingerprints, undefined, "re-runs trust the vendored key");
 	assert.deepEqual(again.kept, []);
 	assert.deepEqual(
 		["AGENTS.md", ".claude/settings.json", "package.json", ".gitignore"].map(
@@ -260,6 +267,7 @@ test("local tracker omits GitHub configuration and warns about CLAUDE.md", async
 			tag: TAG,
 			tracker: "local",
 			yes: true,
+			acceptTrustAnchorChange: true,
 			skills: false,
 			branch: false,
 		},
@@ -296,6 +304,7 @@ test("replaces a bare .toolkit/ ignore so overlays can be committed", async () =
 			tag: TAG,
 			tracker: "local",
 			yes: true,
+			acceptTrustAnchorChange: true,
 			skills: false,
 			branch: false,
 		},
@@ -334,6 +343,7 @@ test("stops when the release tag is not signed", async () => {
 				tag: TAG,
 				tracker: "local",
 				yes: true,
+				acceptTrustAnchorChange: true,
 				skills: false,
 			},
 			quietIo(),
@@ -351,6 +361,7 @@ test("a re-run verifies the release with the key the repository already trusts",
 		tag: TAG,
 		tracker: "local",
 		yes: true,
+		acceptTrustAnchorChange: true,
 		skills: false,
 		branch: false,
 	};
@@ -364,6 +375,73 @@ test("a re-run verifies the release with the key the repository already trusts",
 	);
 });
 
+test("a first setup stops until the release key is confirmed", async () => {
+	const toolkit = fixtureToolkit();
+	const target = consumer();
+	await assert.rejects(
+		runSetup(
+			{
+				target,
+				toolkitRoot: toolkit,
+				repo: toolkit,
+				tag: TAG,
+				tracker: "local",
+				yes: true,
+				skills: false,
+			},
+			quietIo(),
+		),
+		/Compare the release signing key.*Nothing was vendored/,
+	);
+	assert.equal(existsSync(join(target, "toolkit-pins.json")), false);
+});
+
+test("a release that adds a Trust anchor key needs --accept-trust-anchor-change", async () => {
+	const target = consumer();
+	const first = fixtureToolkit();
+	const options = {
+		target,
+		tag: TAG,
+		tracker: "local",
+		yes: true,
+		skills: false,
+		branch: false,
+	};
+	await runSetup(
+		{
+			...options,
+			toolkitRoot: first,
+			repo: first,
+			acceptTrustAnchorChange: true,
+		},
+		quietIo(),
+	);
+
+	// Signed by the trusted key, but its allowed_signers adds a second key.
+	const added = createSigningKey();
+	const next = fixtureToolkit({ extraKeys: [added] });
+	await assert.rejects(
+		runSetup({ ...options, toolkitRoot: next, repo: next }, quietIo()),
+		/toolkit-sync sync failed.*--accept-trust-anchor-change/,
+	);
+	const anchor = join(target, "tools/toolkit-sync/allowed_signers");
+	assert.doesNotMatch(
+		readFileSync(anchor, "utf8"),
+		new RegExp(added.publicKey.split(" ")[1].replace(/[+/]/g, "\\$&")),
+	);
+
+	await runSetup(
+		{
+			...options,
+			toolkitRoot: next,
+			repo: next,
+			acceptTrustAnchorChange: true,
+		},
+		quietIo(),
+	);
+	assert.ok(readFileSync(anchor, "utf8").includes(added.publicKey));
+});
+
 test("rejects a tag the Toolkit clone does not have", async () => {
 	const toolkit = fixtureToolkit();
 	await assert.rejects(
@@ -374,6 +452,7 @@ test("rejects a tag the Toolkit clone does not have", async () => {
 				tag: "v0.0.1",
 				tracker: "local",
 				yes: true,
+				acceptTrustAnchorChange: true,
 			},
 			quietIo(),
 		),
@@ -390,6 +469,10 @@ test("parseArgs reads options and rejects unknown ones", () => {
 			yes: true,
 			skills: false,
 		},
+	);
+	assert.equal(
+		parseArgs(["--accept-trust-anchor-change"]).acceptTrustAnchorChange,
+		true,
 	);
 	assert.throws(
 		() => parseArgs(["--tracker", "jira"]),

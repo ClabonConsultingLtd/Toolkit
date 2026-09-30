@@ -36,16 +36,17 @@ It asks which issue tracker you use, whether to create a `chore/toolkit-setup` b
 | `--tag vX.Y.Z` | Toolkit release to install (default: the tag the clone has checked out) |
 | `--dest-root DIR` | Where packages are vendored (default: `tools`) |
 | `--repo URL` | Toolkit repository `toolkit-sync` fetches from |
-| `--yes` | Accept every default without prompting (tracker `local`; skills and labels installed) |
+| `--yes` | Accept every default without prompting (tracker `local`; skills and labels installed). It doesn't confirm the release key; see `--accept-trust-anchor-change`. |
 | `--no-branch` | Stay on the current branch |
 | `--labels` / `--no-labels` | Create or skip the GitHub triage labels |
 | `--skills` / `--no-skills` | Install or skip Matt Pocock's skills plugin |
+| `--accept-trust-anchor-change` | Confirm the release signing key without being asked (needed with `--yes` on a first setup), or accept a key a new release adds. Check the fingerprint first. |
 
 ## What it does
 
 1. Checks for Node.js 24+, Git 2.34+ (for signature checks), pnpm, Claude Code and (for GitHub) a signed-in `gh`. If a tool isn't on `PATH`, it says where the tool is normally installed; see [Checking PATH](../../docs/guides/claude-windows-setup.md#checking-path). Runs `git init` if the target isn't a repository, after asking.
 2. Adds `.toolkit/*` and `!.toolkit/overlays/` to `.gitignore`, replacing a bare `.toolkit/` line so committed [overlays](../toolkit-sync/README.md#project-specific-rules-for-a-vendored-skill) stay visible. Adds `tools/** -text` to `.gitattributes`.
-3. Pins and syncs `toolkit-sync`, `agent-workflow` and `claude-token-optimisation` into `tools/`, then runs `check` with the vendored copy. `toolkit-sync` verifies the release tag's SSH signature at every step. On a first setup the clone's `toolkit-sync` and release key do the pinning, and the wizard prints the key's fingerprint so you can check it once against [issue #154](https://github.com/ClabonConsultingLtd/Toolkit/issues/154). On a re-run, the repository's vendored `toolkit-sync` verifies the new release against the key the repository already trusts. Copies the `toolkit-upgrade` skill into `.claude/skills/`.
+3. Pins and syncs `toolkit-sync`, `agent-workflow` and `claude-token-optimisation` into `tools/`, then runs `check` with the vendored copy. `toolkit-sync` verifies the release tag's SSH signature at every step. On a first setup the clone's `toolkit-sync` and release key do the pinning. The wizard first prints the key's fingerprint and asks you to confirm it matches [issue #154](https://github.com/ClabonConsultingLtd/Toolkit/issues/154), and it stops before vendoring anything if you don't. With `--yes`, pass `--accept-trust-anchor-change` to confirm it instead. On a re-run, the repository's vendored `toolkit-sync` verifies the new release against the key the repository already trusts. If the release adds a key, the sync stops until you confirm the key with Toolkit's maintainers and re-run with `--accept-trust-anchor-change`. Copies the `toolkit-upgrade` skill into `.claude/skills/`.
 4. Installs Matt Pocock's skills as a project-scope Claude Code plugin (`claude plugin install mattpocock-skills --scope project`), which adds an `enabledPlugins` entry to `.claude/settings.json`.
 5. Runs the token-optimisation installer and merges its settings fragment into `.claude/settings.json`, along with `permissions.allow` rules for Git, your `test` script and, for GitHub, `gh issue`. It then deletes the fragment.
 6. Adds a `## Context use` section to `AGENTS.md`, and warns if a `CLAUDE.md` would stop Claude reading it.
@@ -56,7 +57,6 @@ The wizard is safe to run again. It keeps files you've changed and existing `pac
 
 ## What it leaves to you
 
-- Checking the release key fingerprint the wizard prints against [issue #154](https://github.com/ClabonConsultingLtd/Toolkit/issues/154), once.
 - Adding your lint and build commands to `permissions.allow`, so unattended tickets can run them.
 - Running `/mattpocock-skills:setup-matt-pocock-skills` in Claude Code. It edits the `AGENTS.md` the wizard created; choose your issue tracker and keep the default triage labels.
 - Reviewing and committing the changes.
