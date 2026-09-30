@@ -13,6 +13,7 @@ import test from "node:test";
 import { atomicWrite } from "../src/orchestration.mjs";
 import { execute } from "../src/orchestration-cli.mjs";
 import { capacity, intakeCommand, intakePath } from "../src/ticket-intake.mjs";
+import { approved } from "./approval-fixtures.mjs";
 
 function fixture(t) {
 	const cwd = mkdtempSync(join(tmpdir(), "intake-"));
@@ -46,6 +47,7 @@ function fixture(t) {
 		}),
 		hasImplementationPr: () => false,
 		subTickets: () => [],
+		approval: () => approved(),
 		snapshot: (state) =>
 			Object.fromEntries(
 				Object.keys(state.tickets).map((n) => [n, api.issue(n)]),

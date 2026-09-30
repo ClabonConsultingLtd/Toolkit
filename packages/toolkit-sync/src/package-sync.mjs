@@ -9,6 +9,11 @@ import {
 import { dirname, join } from "node:path";
 import { hasBlob, listTree, readBlob } from "./git.mjs";
 import { matchManifest, parseManifest } from "./manifest.mjs";
+import {
+	diffTrustAnchor,
+	TRUST_ANCHOR_FILE,
+	TRUST_ANCHOR_PACKAGE,
+} from "./trust-anchor.mjs";
 
 function manifestPathFor(packageName) {
 	return `packages/${packageName}/toolkit-manifest.json`;
@@ -101,6 +106,39 @@ export function diffPackage(
 		});
 	}
 	return { diverged, files };
+}
+
+/**
+ * The Trust anchor change that syncing `packageName` at `sha` into `destDir`
+ * would make, as `{ added, removed }` from `diffTrustAnchor`, or undefined if
+ * the sync doesn't touch a Trust anchor. A destination with no anchor counts
+ * as every entry added. An anchor that `previousFiles` (the pin's
+ * `syncedFiles`) lists but the release no longer manifests is deleted by the
+ * sync, so all its entries count as removed.
+ */
+export function trustAnchorChange(
+	cacheDir,
+	sha,
+	packageName,
+	destDir,
+	{ exec, previousFiles } = {},
+) {
+	if (packageName !== TRUST_ANCHOR_PACKAGE) return undefined;
+	const files = resolveManifestedFiles(cacheDir, sha, packageName, { exec });
+	let newText = null;
+	if (files.includes(TRUST_ANCHOR_FILE))
+		newText = readBlob(
+			cacheDir,
+			sha,
+			`packages/${packageName}/${TRUST_ANCHOR_FILE}`,
+			{ exec },
+		).toString("utf8");
+	else if (!previousFiles?.includes(TRUST_ANCHOR_FILE)) return undefined;
+	const localPath = join(destDir, TRUST_ANCHOR_FILE);
+	const oldText = existsSync(localPath)
+		? readFileSync(localPath, "utf8")
+		: null;
+	return diffTrustAnchor(oldText, newText);
 }
 
 /**

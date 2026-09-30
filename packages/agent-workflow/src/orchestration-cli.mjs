@@ -23,6 +23,7 @@ import {
 	requirePassingChecks,
 } from "./orchestration-checks.mjs";
 import {
+	checkApproval,
 	github,
 	requireReady,
 	resolveWorkerRuntime,
@@ -197,6 +198,7 @@ export function execute(command, path, input = {}, options = {}) {
 					path,
 					{ ...input, fallbackStatePath: options.fallbackStatePath },
 					makeGitHub(input.repository),
+					{ returnToTriage: true },
 				);
 				if (!selection.tickets.length)
 					return { output: { initialized: false, ...selection } };
@@ -238,6 +240,26 @@ export function execute(command, path, input = {}, options = {}) {
 							reason: issues[ticket.number].dependencyError,
 						});
 				checkCycles(issues);
+				// Recheck approval for every ticket that could start: an edit after
+				// ready-for-agent returns it to needs-triage, and a missing trusted
+				// brief keeps it blocked for readiness until one exists.
+				for (const t of Object.values(state.tickets)) {
+					const issue = issues[t.number];
+					if (
+						(t.status !== "queued" &&
+							!["readiness", "dependency"].includes(t.blockKind)) ||
+						issue.state !== "OPEN" ||
+						!issue.labels.includes("ready-for-agent")
+					)
+						continue;
+					const { refusal, brief } = checkApproval(api, t.number, {
+						returnToTriage: true,
+						beforeWrite: () => assertLease(state, input.token),
+					});
+					if (refusal)
+						issue.approvalRefusal = `${refusal.reason}: ${refusal.detail}${refusal.returnedToTriage ? "; returned to needs-triage" : ""}`;
+					else issue.brief = brief;
+				}
 				const baseUpdates = [];
 				for (const t of Object.values(state.tickets)) {
 					t.dependencies = issues[t.number].dependencies;
@@ -291,7 +313,10 @@ export function execute(command, path, input = {}, options = {}) {
 					const runtime = resolveWorkerRuntime(issue.recommendation, input, {
 						statePath: options.fallbackStatePath,
 					});
-					output = changeTicket(state, input.number, "reserve", runtime);
+					output = {
+						...changeTicket(state, input.number, "reserve", runtime),
+						brief: issue.brief,
+					};
 				} else {
 					output = { ...disposition(state), issues, baseUpdates };
 					output.resumable = output.resumable.filter(

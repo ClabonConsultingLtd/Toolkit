@@ -7,6 +7,10 @@ updates:
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
+    # Wait a week before proposing a new release, so a bad one can be pulled
+    # before it reaches you.
+    cooldown:
+      default-days: 7
   - package-ecosystem: uv
     directories:
       - /packages/image-generation
@@ -16,6 +20,10 @@ updates:
     groups:
       uv-minor-and-patch:
         update-types: [minor, patch]
+    # Wait a week before proposing a new release, so a bad one can be pulled
+    # before it reaches you.
+    cooldown:
+      default-days: 7
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -23,3 +31,7 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    # Wait a week before proposing a new release, so a bad one can be pulled
+    # before it reaches you.
+    cooldown:
+      default-days: 7

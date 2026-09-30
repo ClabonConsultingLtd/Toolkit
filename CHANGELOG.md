@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.0 - 2026-09-30
+
+- #164: feat(agent-workflow): treat ticket text as untrusted and refuse unapproved edits
+
 ## 0.14.0 - 2026-09-29
 
 - #156: Sign release tags and make toolkit-sync verify them

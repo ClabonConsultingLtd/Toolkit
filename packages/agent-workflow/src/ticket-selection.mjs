@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { normalizeSpecLabels } from "./intake-config.mjs";
 import { issueNumber, newBatch } from "./orchestration.mjs";
 import {
+	checkApproval,
 	normalizeClaudeModels,
 	resolveWorkerRuntime,
 } from "./orchestration-github.mjs";
@@ -140,7 +141,9 @@ export function assertUnclaimed(file, input) {
 			`tickets already belong to another batch: ${conflicts.join(", ")}`,
 		);
 }
-export function selectNext(file, input, api) {
+// returnToTriage lets a committing selection (init-next, intake tick) move a
+// ticket edited after approval back to needs-triage; a preview never writes.
+export function selectNext(file, input, api, { returnToTriage = false } = {}) {
 	if (!Number.isSafeInteger(input.count) || input.count < 1)
 		throw new Error("count must be a positive integer");
 	if (input.tickets !== undefined)
@@ -241,6 +244,11 @@ export function selectNext(file, input, api) {
 						if (typeof implementationPr === "object")
 							skipped.push({ number, reason, pr: implementationPr });
 						else skipped.push({ number, reason });
+						continue;
+					}
+					const { refusal } = checkApproval(api, number, { returnToTriage });
+					if (refusal) {
+						skipped.push({ number, ...refusal });
 						continue;
 					}
 					try {

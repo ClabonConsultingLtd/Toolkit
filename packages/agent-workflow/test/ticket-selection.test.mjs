@@ -14,6 +14,7 @@ import test from "node:test";
 import { execute } from "../src/orchestration-cli.mjs";
 import { github } from "../src/orchestration-github.mjs";
 import { selectNext, withSelectionLock } from "../src/ticket-selection.mjs";
+import { approvalResponse, approved } from "./approval-fixtures.mjs";
 
 function fixture(t) {
 	const dir = mkdtempSync(join(tmpdir(), "ticket-selection-"));
@@ -53,6 +54,7 @@ function fixture(t) {
 		issue: (n) => structuredClone(items[n]),
 		hasImplementationPr: () => false,
 		subTickets: () => [],
+		approval: () => approved(),
 	};
 	return { dir, path, input, items, api, options: { github: () => api } };
 }
@@ -383,6 +385,8 @@ function restSelection(t, pulls, failPull = false) {
 	const calls = [];
 	const api = github("example/project", (args) => {
 		calls.push(args);
+		const approvalData = approvalResponse(args);
+		if (approvalData) return approvalData;
 		const path = args.at(-1);
 		if (path.includes("/issues?state=all")) return "";
 		if (path.includes("/issues?"))

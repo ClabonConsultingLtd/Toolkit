@@ -23,8 +23,9 @@ numbers; concurrency remains 1–3 and is independent of batch size.
 
 `select-next` is a read-only preview. `init-next` repeats discovery under a shared
 selection lock, persists the resulting ticket list, and returns `initialized`,
-`tickets`, `shortfall`, and `skipped` entries with reasons. No GitHub mutations,
-agent launches or schedule creation happen inside either helper command.
+`tickets`, `shortfall`, and `skipped` entries with reasons. No agent launches or
+schedule creation happen inside either helper command. The only GitHub mutation
+is `init-next` returning a ticket edited after approval to `needs-triage` (below).
 
 Eligibility and order:
 
@@ -50,6 +51,16 @@ Eligibility and order:
   If PR identity or GitHub data cannot be verified, selection stops with an
   actionable error rather than admitting possible duplicate work. An unlinked
   PR cannot be inferred reliably, so retain explicit issue references in worker PRs.
+- Require a trusted agent brief: the newest comment headed `## Agent Brief`
+  whose author's `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR`,
+  or, without one, an issue opened by such an author. Otherwise the reason is
+  `no trusted agent brief`.
+- Refuse a ticket whose body, title or trusted brief was edited after
+  `ready-for-agent` was last applied (from the issue's label events), with
+  reason `edited after ready-for-agent`. `init-next` and the intake `tick` also
+  remove `ready-for-agent`, add `needs-triage` and comment why
+  (`returnedToTriage: true`); the preview only reports it. If the label time
+  cannot be read, the ticket is refused rather than trusted.
 - Require a Claude recommendation supported by the discovered model catalog.
   Missing or unsupported recommendations are reported and skipped.
 - GitHub/authentication errors and unreadable batch state abort selection rather

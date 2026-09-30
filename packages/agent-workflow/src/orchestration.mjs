@@ -152,13 +152,15 @@ export function reconcile(state, issues) {
 			const reason =
 				issue.state === "CLOSED"
 					? "Issue closed without verified PR merge"
-					: !issue.labels.includes("ready-for-agent")
-						? "Issue is not ready-for-agent"
-						: children.length
-							? `Parent spec; implemented through sub-tickets ${children.map((n) => `#${n}`).join(", ")}`
-							: deps.length
-								? `Waiting for ${deps.map((n) => `#${n}`).join(", ")}`
-								: null;
+					: issue.approvalRefusal
+						? issue.approvalRefusal
+						: !issue.labels.includes("ready-for-agent")
+							? "Issue is not ready-for-agent"
+							: children.length
+								? `Parent spec; implemented through sub-tickets ${children.map((n) => `#${n}`).join(", ")}`
+								: deps.length
+									? `Waiting for ${deps.map((n) => `#${n}`).join(", ")}`
+									: null;
 			ticket.status = reason ? "blocked" : "queued";
 			ticket.reason = reason;
 			ticket.blockKind =
