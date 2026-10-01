@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.0 - 2026-09-30
+
+- #168: toolkit-sync: require --accept-trust-anchor-change to add a Trust anchor key
+- #166: Add a seven-day Dependabot cooldown and document Actions allowlisting
+- #167: toolkit-sync: accept only known Legacy tags under --allow-unsigned
+- #169: image-to-3d: redact the service token from error output
+
 ## 0.15.0 - 2026-09-30
 
 - #164: feat(agent-workflow): treat ticket text as untrusted and refuse unapproved edits
