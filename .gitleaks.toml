@@ -7,3 +7,10 @@ useDefault = true
 [[allowlists]]
 description = "security-gates test fixtures"
 paths = ['''^packages/security-gates/test/fixtures/''']
+
+# The SHA256 fingerprint of Toolkit's public release signing key, which the
+# user guides quote so readers can check it against issue #154. It identifies
+# a public key and grants no access.
+[[allowlists]]
+description = "Toolkit release signing key fingerprint"
+regexes = ['''cKZJXbRUVW\+hizwqKikJj/iJKGdslbs3\+OSpT7x0xOo''']

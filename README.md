@@ -17,9 +17,18 @@ Toolkit is a collection of small, reusable packages—not a framework that takes
 | Generate a batch of images | [`image-generation`](packages/image-generation/README.md) | A caller-chosen runner gains retries, quota stops, logs, and resumable state. |
 | Turn reference images into GLBs | [`image-to-3d`](packages/image-to-3d/README.md) | Explicit queues become auditable image-to-model batches through a Gradio-compatible service. |
 | Track a vendored Toolkit package's version | [`toolkit-sync`](packages/toolkit-sync/README.md) | A consuming repo pins a release, detects drift, and re-syncs updates instead of an untracked copy-paste. |
+| Set up a repository for Claude Code | [`setup-wizard`](packages/setup-wizard/README.md) | One command vendors the packages, installs token optimisation, and configures the Claude ticket runner. |
 | Run security Gates in a repository's CI | [`security-gates`](packages/security-gates/README.md) | Secrets, dependency and static analysis Gates fail CI on findings, from a reusable workflow pinned by SHA; accepted findings need a reason and an expiry. |
 
 ## Quick starts
+
+### Set up a repository for Claude Code
+
+```bash
+node path/to/Toolkit/packages/setup-wizard/setup.mjs path/to/your-repository
+```
+
+The [Windows guide](docs/guides/claude-windows-setup.md) covers the same setup step by step, from a fresh machine through the `/grill-with-docs` → `/to-spec` → `/to-tickets` workflow.
 
 ### Claude Code context optimisation
 
@@ -78,6 +87,11 @@ Use `uv sync` from either Python package directory when installing its dependenc
 - Hooks fail open: an optimisation failure must not stop ordinary work.
 - Model handoffs require an explicit enable switch and may edit only task-declared files.
 - Image batches verify output before recording success and stop on quota or rate-limit signals.
+
+## Guides
+
+- [Toolkit with Claude Code on Windows](docs/guides/claude-windows-setup.md): set up a repository from a fresh machine with `toolkit-sync`, token optimisation and the ticket workflow.
+- [Paseo-scheduled tickets with a Claude controller](docs/guides/claude-paseo-setup.md): run `orchestrate-tickets`, and optionally triage and reports, on Paseo schedules.
 
 ## Project standards
 

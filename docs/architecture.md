@@ -4,7 +4,7 @@ Toolkit is a collection of independent packages, not a framework imposed on cons
 
 ## Package boundaries
 
-`claude-token-optimisation` owns Claude Code agent and hook assets. `agent-workflow` owns bounded model handoff and ticket-launch concepts. `image-generation` owns prompt-batch execution and resumable state. `image-to-3d` owns image-to-model queue processing.
+`claude-token-optimisation` owns Claude Code agent and hook assets. `agent-workflow` owns bounded model handoff and ticket-launch concepts. `image-generation` owns prompt-batch execution and resumable state. `image-to-3d` owns image-to-model queue processing. `toolkit-sync` owns pinning and syncing vendored packages. `setup-wizard` owns first-time setup of a consuming repository; it runs from a Toolkit clone, calls the other packages' command-line entry points, and is never vendored.
 
 Packages may share small, dependency-free utilities only when the shared contract is demonstrably stable. No package imports another merely because the same repository contains it.
 
