@@ -140,6 +140,7 @@ The intake settings live in `toolkit-intake.json` at the repository root, and ar
 - `requiredChecks` are the check names a PR must pass before it can merge. Without it, the controller falls back to branch protection, which GitHub doesn't offer for private repositories on every plan.
 - `cron` and `timezone` set when the controller runs: every 30 minutes, 08:00 to 19:30 UTC, by default.
 - `excludeTickets` lists issue numbers never to start. `specLabels` lists labels that mark spec or umbrella issues, which are skipped. Issues with sub-issues are always skipped.
+- `fileOverlapCheck` is on unless you set it to `false`. It holds back a ticket whose declared files overlap a ticket that is still in progress (see step 7 below).
 
 The [agent-workflow README](../../packages/agent-workflow/README.md#repository-intake-settings) documents every field, including `localVerificationCommand` and `cleanupCommand`.
 
@@ -245,6 +246,7 @@ Use the [feature workflow](claude-windows-setup.md#9-the-feature-workflow) to wr
 4. **`ready-for-agent` was applied last.** Finish editing the issue, the title and the brief first. Editing any of them after the label means the controller refuses the ticket, moves it back to `needs-triage` and says why in a comment. Re-apply the label to approve the new text.
 5. **Its blockers are closed.** Blockers come from GitHub's issue dependencies, or a `Blocked by: #12` line.
 6. **It isn't a spec.** Issues with sub-issues, or with a label from `specLabels`, are skipped. `/to-tickets` links tickets to the spec as sub-issues, so the spec is skipped automatically.
+7. **Its files don't overlap work in progress.** List the paths a ticket changes in a `## Files` (or `## Touches`) section, one per line; a directory ending in `/` or a glob such as `src/core/**` covers everything under it. A ticket whose files overlap an unfinished ticket's waits for a later run, so two tickets don't conflict over the same files. A ``- **Files:** `src/a.mjs`, `src/b.mjs` `` line in the Implementation recommendation list also works. Without either, backticked paths containing `/` in `## Acceptance criteria` are used. A ticket with neither is admitted as before, and the run reports it under `blindAdmissions`. Older tickets rarely have either, so add a `## Files` section to your planning template.
 
 ## 8. Run and watch the schedules
 

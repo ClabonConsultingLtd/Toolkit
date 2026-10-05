@@ -63,6 +63,21 @@ Eligibility and order:
   cannot be read, the ticket is refused rather than trusted.
 - Require a Claude recommendation supported by the discovered model catalog.
   Missing or unsupported recommendations are reported and skipped.
+- Keep apart tickets that change the same files. A ticket's declared files are
+  the paths in its body's `## Files` or `## Touches` section (or a `Files:` /
+  `Touches:` line); without one, backticked paths containing `/` in its
+  `## Acceptance criteria`. A trailing `/` or a glob covers that directory.
+  A ticket whose declared files overlap those of an unfinished ticket in any
+  saved batch, or of one already selected in this run, is skipped with reason
+  `files overlap in-flight #N` and `skipped[].overlaps` listing the paths. It
+  keeps `ready-for-agent`, so a later run admits it in ticket order once the
+  other ticket completes. A ticket with no declaration is admitted as before
+  and listed in `blindAdmissions`; report those in the run summary. An
+  in-flight ticket without a declaration never blocks a candidate; one that
+  cannot be read from GitHub is treated the same way and listed in
+  `unreadInFlight`. Report both lists in the run summary.
+  `fileOverlapCheck: false` (request field or tracked `toolkit-intake.json`)
+  turns the check off; it is on by default.
 - GitHub/authentication errors and unreadable batch state abort selection rather
   than treating unknown work as eligible. Review skipped reasons in the summary.
 

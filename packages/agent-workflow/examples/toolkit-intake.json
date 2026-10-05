@@ -9,5 +9,6 @@
 	"timezone": "UTC",
 	"excludeTickets": [],
 	"specLabels": [],
+	"fileOverlapCheck": true,
 	"codexWorkerFullAccess": false
 }
