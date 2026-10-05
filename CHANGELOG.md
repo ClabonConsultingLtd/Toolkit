@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.0 - 2026-10-05
+
+- #173: orchestrate-tickets: keep tickets that touch the same files out of the same batch
+- #171: Add Claude Code user guides and a setup wizard
+
 ## 0.16.0 - 2026-09-30
 
 - #168: toolkit-sync: require --accept-trust-anchor-change to add a Trust anchor key
