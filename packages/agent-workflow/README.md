@@ -182,7 +182,10 @@ repository root and commit it. The file sets the repository, base branch, shared
 ticket limit (`count`), controller model, optional schedule cron/timezone,
 required check names, an optional `localVerificationCommand`, ticket numbers
 that must always be excluded, and optional `specLabels` naming labels that mark
-spec/umbrella issues selection must skip (issues with sub-issues are always skipped). The command is a relative `.mjs` path inside the
+spec/umbrella issues selection must skip (issues with sub-issues are always skipped),
+and `fileOverlapCheck` (default `true`; set `false` to turn it off), which keeps
+a ticket whose declared files overlap an unfinished ticket's out of the batch.
+The command is a relative `.mjs` path inside the
 stable checkout; it receives the PR number and current head SHA and must exit
 zero only for a complete local pass. The merge helper runs it, and enforces
 `requiredChecks`, at `merge-ready` only, immediately before a controller merge;

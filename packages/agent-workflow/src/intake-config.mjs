@@ -12,6 +12,7 @@ const fields = new Set([
 	"excludeTickets",
 	"requiredChecks",
 	"specLabels",
+	"fileOverlapCheck",
 	"localVerificationCommand",
 	"cleanupCommand",
 	"schedulePromptAppend",
@@ -67,6 +68,15 @@ export function normalizeSpecLabels(value, source = "intake request") {
 	)
 		throw new Error(`${source}: specLabels must contain non-empty label names`);
 	return [...new Set(value)];
+}
+
+// Keeps tickets whose declared files overlap in-flight work out of a batch.
+// On unless a repository turns it off.
+export function normalizeFileOverlapCheck(value, source = "intake request") {
+	if (value === undefined) return true;
+	if (typeof value !== "boolean")
+		throw new Error(`${source}: fileOverlapCheck must be a boolean`);
+	return value;
 }
 
 export function normalizeExcludeTickets(value, source = "intake request") {
@@ -165,6 +175,10 @@ export function readRepositoryIntakeConfig(cwd) {
 		throw new Error(
 			"invalid toolkit-intake.json: controllerThinkingOptionId must be a nonempty string",
 		);
+	normalizeFileOverlapCheck(
+		config.fileOverlapCheck,
+		"invalid toolkit-intake.json",
+	);
 	const excludeTickets = normalizeExcludeTickets(
 		config.excludeTickets ?? [],
 		"invalid toolkit-intake.json",

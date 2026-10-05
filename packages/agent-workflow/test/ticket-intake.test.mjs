@@ -451,6 +451,31 @@ test("tracked specLabels are saved and skip umbrella issues at intake", (t) => {
 	);
 	assert.throws(() => intakeCommand("sync-config", f.cwd), /specLabels/);
 });
+test("tracked fileOverlapCheck is saved, defaults on and reports blind admission", (t) => {
+	const f = fixture(t);
+	const issue = f.api.issue;
+	f.api.issue = (n) => ({
+		...issue(n),
+		body: ["1", "2"].includes(String(n)) ? "## Files\n- src/a.mjs" : "",
+	});
+	const tick = intakeCommand("tick", f.cwd, { models: f.models }, f.options);
+	assert.deepEqual(tick.tickets, ["1", "3", "4"]);
+	assert.deepEqual(tick.blindAdmissions, ["3", "4"]);
+	assert.equal(tick.skipped[0].reason, "files overlap in-flight #1");
+	writeFileSync(
+		join(f.cwd, "toolkit-intake.json"),
+		JSON.stringify({ version: 1, ...f.input, fileOverlapCheck: false }),
+	);
+	assert.equal(intakeCommand("sync-config", f.cwd).fileOverlapCheck, false);
+	writeFileSync(
+		join(f.cwd, "toolkit-intake.json"),
+		JSON.stringify({ version: 1, ...f.input, fileOverlapCheck: "off" }),
+	);
+	assert.throws(
+		() => intakeCommand("sync-config", f.cwd),
+		/fileOverlapCheck must be a boolean/,
+	);
+});
 test("capacity-full tick can retry after a slot frees within the hour", (t) => {
 	const f = fixture(t);
 	intakeCommand("configure", f.cwd, { ...f.input, count: 1 });

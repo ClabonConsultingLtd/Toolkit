@@ -26,6 +26,8 @@ ticket worktree to remove what it started (see the orchestration skill's
 `cleanup` command),
 `codexWorkerFullAccess` (see [Codex sandbox preflight](#codex-sandbox-preflight)),
 `selfAuthoredMerge: "comment-review"` (see controller step on approval and merging),
+`fileOverlapCheck` (default `true`; `false` admits tickets without comparing
+their declared files, see [selection.md](selection.md)),
 `controllerProvider` (`"claude/<model>"` or `"codex/<model>"`, default
 `"codex/gpt-6-sol"`) and `controllerThinkingOptionId` (default `"medium"`) naming
 the provider that should run this recurring schedule itself, independent of
@@ -183,7 +185,8 @@ the run to:
    from that live result with `models` and `codexModels` during a cooldown,
    and optional `excludeTickets` for work outside saved batches. This
    atomically admits up to `min(N, available capacity)` eligible tickets using the
-   same readiness/dependency/model/PR exclusions as [selection.md](selection.md).
+   same readiness/dependency/model/PR and file-overlap exclusions as
+   [selection.md](selection.md).
 3. If initialized, process the returned batch using the normal orchestration
    workflow. Its `managedByIntake: true` flag means **do not create a per-batch
    schedule** and **do not pause the shared intake schedule when it completes**.
@@ -196,7 +199,8 @@ the run to:
    Close/relabel only the exact issue after verifying its linked PR merge. If a
    catalog validation fails, correct the input and retry in the same UTC hour;
    a nonempty admission must replay and cannot be refilled. Report new
-   selections, active count, PR links and blockers. Say whether this was a new
+   selections, tickets held back for overlapping files, `blindAdmissions`
+   (tickets admitted without a file declaration), active count, PR links and blockers. Say whether this was a new
    admission, an empty evaluation, a capacity wait, a replay, or a
    reconciliation-only run; report the actual Paseo schedule state and next run.
 

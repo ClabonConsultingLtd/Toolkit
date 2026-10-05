@@ -5,6 +5,7 @@ import {
 	DEFAULT_CONTROLLER_THINKING_OPTION_ID,
 	normalizeControllerProvider,
 	normalizeExcludeTickets,
+	normalizeFileOverlapCheck,
 	normalizeRequiredChecks,
 	normalizeSpecLabels,
 	readRepositoryIntakeConfig,
@@ -135,6 +136,11 @@ function configuredPolicy(anchor, cwd, policy, input) {
 		...(input.specLabels === undefined
 			? {}
 			: { specLabels: normalizeSpecLabels(input.specLabels) }),
+		...(input.fileOverlapCheck === undefined
+			? {}
+			: {
+					fileOverlapCheck: normalizeFileOverlapCheck(input.fileOverlapCheck),
+				}),
 		scheduleName: `ticket-intake:${input.repository}`,
 		scheduleId: policy?.scheduleId ?? null,
 		paused: policy?.paused ?? false,

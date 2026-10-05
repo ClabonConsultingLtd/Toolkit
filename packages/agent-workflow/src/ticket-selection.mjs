@@ -9,7 +9,10 @@ import {
 } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { normalizeSpecLabels } from "./intake-config.mjs";
+import {
+	normalizeFileOverlapCheck,
+	normalizeSpecLabels,
+} from "./intake-config.mjs";
 import { issueNumber, newBatch } from "./orchestration.mjs";
 import {
 	checkApproval,
@@ -20,6 +23,7 @@ import {
 	normalizeCodexModels,
 	readClaudeCooldown,
 } from "./provider-fallback.mjs";
+import { declaredFiles, overlappingPaths } from "./ticket-files.mjs";
 
 const SELECTION_LOCK_TTL_MS = 30 * 60_000;
 
@@ -165,11 +169,24 @@ export function selectNext(file, input, api, { returnToTriage = false } = {}) {
 	)
 		throw new Error("excludeTickets must be an array");
 	const specLabels = normalizeSpecLabels(input.specLabels ?? []);
+	const fileOverlapCheck = normalizeFileOverlapCheck(input.fileOverlapCheck);
 	const claimed = claimedTickets(file, input.repository);
+	// Unfinished tickets in saved batches; their declared files keep
+	// overlapping candidates queued until they complete.
+	const inFlight = [...claimed];
 	for (const n of input.excludeTickets ?? []) claimed.add(issueNumber(n));
 	const selected = [],
 		skipped = [],
-		cache = new Map();
+		blindAdmissions = [],
+		cache = new Map(),
+		files = new Map();
+	const filesOf = (n) => {
+		if (!files.has(n)) {
+			if (!cache.has(n)) cache.set(n, api.issue(n, false));
+			files.set(n, declaredFiles(cache.get(n).body));
+		}
+		return files.get(n);
+	};
 	const candidates = api
 		.listReady()
 		.sort(
@@ -182,10 +199,9 @@ export function selectNext(file, input, api, { returnToTriage = false } = {}) {
 		const number = issueNumber(candidate.number);
 		if (seen.has(number)) continue;
 		seen.add(number);
-		let reason;
+		let reason, issue;
 		if (claimed.has(number)) reason = "already selected or active";
 		else {
-			let issue;
 			try {
 				issue = api.issue(number);
 			} catch (error) {
@@ -263,6 +279,27 @@ export function selectNext(file, input, api, { returnToTriage = false } = {}) {
 				}
 			}
 		}
+		if (!reason && fileOverlapCheck) {
+			const mine = filesOf(number);
+			if (mine === null) blindAdmissions.push(number);
+			else {
+				const overlaps = [];
+				for (const other of [...inFlight, ...selected]) {
+					const theirs = filesOf(other);
+					const paths = theirs ? overlappingPaths(mine, theirs) : [];
+					if (paths.length) overlaps.push({ ticket: other, paths });
+				}
+				if (overlaps.length) {
+					// Left ready-for-agent, so a later run admits it in ticket order.
+					skipped.push({
+						number,
+						reason: `files overlap in-flight ${overlaps.map((o) => `#${o.ticket}`).join(", ")}`,
+						overlaps,
+					});
+					continue;
+				}
+			}
+		}
 		if (reason) skipped.push({ number, reason });
 		else selected.push(number);
 		if (selected.length === input.count) break;
@@ -274,5 +311,7 @@ export function selectNext(file, input, api, { returnToTriage = false } = {}) {
 		order: "oldest-created-first",
 		selectionMode: "fixed",
 		shortfall: input.count - selected.length,
+		fileOverlapCheck,
+		...(fileOverlapCheck && { blindAdmissions }),
 	};
 }

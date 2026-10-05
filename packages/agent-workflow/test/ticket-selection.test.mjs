@@ -222,6 +222,57 @@ test("parent specs are skipped in favour of their sub-tickets", (t) => {
 		},
 	]);
 });
+test("tickets whose declared files overlap in-flight work stay queued", (t) => {
+	const f = fixture(t);
+	f.input.count = 3;
+	f.api.listReady = () =>
+		[1, 2, 3, 4, 5].map((n) => ({ number: n, created_at: "2026-01-01" }));
+	writeFileSync(
+		join(f.dir, "earlier.json"),
+		JSON.stringify({
+			...f.input,
+			version: 1,
+			batchId: "earlier",
+			tickets: { 11: { number: "11", status: "implementing" } },
+		}),
+	);
+	f.items[11].body = "## Files\n- `src/core/`";
+	f.items[1].body = "## Files\n- `src/core/state.mjs`";
+	f.items[2].body = "## Touches\nsrc/cli.mjs";
+	f.items[3].body = "## Acceptance criteria\n- [ ] `src/cli.mjs` prints help";
+	f.items[5].body = "## Files\n- docs/guide.md";
+	const result = selectNext(f.path, f.input, f.api);
+	assert.deepEqual(result.tickets, ["2", "4", "5"]);
+	assert.deepEqual(result.blindAdmissions, ["4"]);
+	assert.equal(result.fileOverlapCheck, true);
+	assert.deepEqual(
+		result.skipped.filter((s) => s.overlaps),
+		[
+			{
+				number: "1",
+				reason: "files overlap in-flight #11",
+				overlaps: [{ ticket: "11", paths: ["src/core/state.mjs"] }],
+			},
+			{
+				number: "3",
+				reason: "files overlap in-flight #2",
+				overlaps: [{ ticket: "2", paths: ["src/cli.mjs"] }],
+			},
+		],
+	);
+	const off = selectNext(
+		f.path,
+		{ ...f.input, fileOverlapCheck: false },
+		f.api,
+	);
+	assert.deepEqual(off.tickets, ["1", "2", "3"]);
+	assert.equal(off.fileOverlapCheck, false);
+	assert.equal(off.blindAdmissions, undefined);
+	assert.throws(
+		() => selectNext(f.path, { ...f.input, fileOverlapCheck: "no" }, f.api),
+		/fileOverlapCheck must be a boolean/,
+	);
+});
 test("configured spec labels skip umbrella issues", (t) => {
 	const f = fixture(t);
 	f.items[1].labels.push("spec");
