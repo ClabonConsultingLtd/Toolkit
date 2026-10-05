@@ -178,11 +178,22 @@ export function selectNext(file, input, api, { returnToTriage = false } = {}) {
 	const selected = [],
 		skipped = [],
 		blindAdmissions = [],
+		unreadInFlight = [],
 		cache = new Map(),
 		files = new Map();
 	const filesOf = (n) => {
 		if (!files.has(n)) {
-			if (!cache.has(n)) cache.set(n, api.issue(n, false));
+			// An unreadable in-flight ticket counts as undeclared, which never
+			// blocks, rather than failing the whole selection.
+			if (!cache.has(n)) {
+				try {
+					cache.set(n, api.issue(n, false));
+				} catch {
+					unreadInFlight.push(n);
+					files.set(n, null);
+					return null;
+				}
+			}
 			files.set(n, declaredFiles(cache.get(n).body));
 		}
 		return files.get(n);
@@ -312,6 +323,6 @@ export function selectNext(file, input, api, { returnToTriage = false } = {}) {
 		selectionMode: "fixed",
 		shortfall: input.count - selected.length,
 		fileOverlapCheck,
-		...(fileOverlapCheck && { blindAdmissions }),
+		...(fileOverlapCheck && { blindAdmissions, unreadInFlight }),
 	};
 }

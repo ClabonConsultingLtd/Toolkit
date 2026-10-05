@@ -24,6 +24,15 @@ test("reads a Files or Touches section, list items and backticks", () => {
 		"b/c.md",
 	]);
 });
+test("accepts a Files line written as a list item", () => {
+	assert.deepEqual(
+		paths(
+			"## Implementation recommendation\n- **Claude:** `Sonnet / medium`\n- **Files:** `a/b.ts`, `c/d.ts`\n",
+		),
+		["a/b.ts", "c/d.ts"],
+	);
+	assert.deepEqual(paths("* Touches: src/x.mjs"), ["src/x.mjs"]);
+});
 test("a None declaration is declared and empty, not blind", () => {
 	assert.deepEqual(paths("## Files\nNone"), []);
 });

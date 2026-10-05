@@ -8,7 +8,8 @@ const SECTION = (heading) =>
 		"im",
 	);
 const FILES_SECTION = SECTION("Files|Touches");
-const FILES_LINE = /^\s*(?:\*\*)?(?:Files|Touches):(?:\*\*)?[^\S\n]*(.+)$/im;
+const FILES_LINE =
+	/^\s*(?:[-*+]\s+)?(?:\*\*)?(?:Files|Touches):(?:\*\*)?[^\S\n]*(.+)$/im;
 const CRITERIA_SECTION = SECTION("Acceptance criteria");
 const PATH = /^[\w@.*?[\]{}/-]+$/;
 

@@ -73,7 +73,9 @@ Eligibility and order:
   keeps `ready-for-agent`, so a later run admits it in ticket order once the
   other ticket completes. A ticket with no declaration is admitted as before
   and listed in `blindAdmissions`; report those in the run summary. An
-  in-flight ticket without a declaration never blocks a candidate.
+  in-flight ticket without a declaration never blocks a candidate; one that
+  cannot be read from GitHub is treated the same way and listed in
+  `unreadInFlight`. Report both lists in the run summary.
   `fileOverlapCheck: false` (request field or tracked `toolkit-intake.json`)
   turns the check off; it is on by default.
 - GitHub/authentication errors and unreadable batch state abort selection rather

@@ -244,6 +244,7 @@ test("tickets whose declared files overlap in-flight work stay queued", (t) => {
 	const result = selectNext(f.path, f.input, f.api);
 	assert.deepEqual(result.tickets, ["2", "4", "5"]);
 	assert.deepEqual(result.blindAdmissions, ["4"]);
+	assert.deepEqual(result.unreadInFlight, []);
 	assert.equal(result.fileOverlapCheck, true);
 	assert.deepEqual(
 		result.skipped.filter((s) => s.overlaps),
@@ -260,6 +261,15 @@ test("tickets whose declared files overlap in-flight work stay queued", (t) => {
 			},
 		],
 	);
+	const issue = f.api.issue;
+	f.api.issue = (n, ...rest) => {
+		if (n === "11") throw new Error("HTTP 502");
+		return issue(n, ...rest);
+	};
+	const unread = selectNext(f.path, f.input, f.api);
+	assert.deepEqual(unread.tickets, ["1", "2", "4"]);
+	assert.deepEqual(unread.unreadInFlight, ["11"]);
+	f.api.issue = issue;
 	const off = selectNext(
 		f.path,
 		{ ...f.input, fileOverlapCheck: false },
