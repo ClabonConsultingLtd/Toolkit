@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.1 - 2026-10-06
+
+- #178: Override source-map-js to the patched release
+
 ## 0.17.0 - 2026-10-05
 
 - #173: orchestrate-tickets: keep tickets that touch the same files out of the same batch
