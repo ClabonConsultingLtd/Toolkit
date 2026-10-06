@@ -8,6 +8,7 @@ import {
 	normalizeFileOverlapCheck,
 	normalizeRequiredChecks,
 	normalizeSpecLabels,
+	normalizeWorkerHosts,
 	readRepositoryIntakeConfig,
 } from "./intake-config.mjs";
 import { ACTIVE, atomicWrite, newBatch } from "./orchestration.mjs";
@@ -42,28 +43,47 @@ export function isInProgress(ticket) {
 		!!ticket.launchUncertain
 	);
 }
+// `count` limits tickets on the controller's own host; each configured worker
+// host has its own limit, counted from the tickets placed there (`host`).
 export function capacity(batchFile, repository, replacement) {
 	const policy = readIntake(batchFile);
 	if (policy && policy.repository.toLowerCase() !== repository.toLowerCase())
 		throw new Error("intake policy belongs to another repository");
-	let active = 0,
-		queued = 0;
+	const local = { limit: policy?.count ?? null, active: 0, queued: 0 };
+	const hosts = Object.fromEntries(
+		(policy?.workerHosts ?? []).map((h) => [
+			h.id,
+			{ limit: h.count, active: 0, queued: 0 },
+		]),
+	);
 	for (const record of batchStates(batchFile, repository)) {
 		const state =
 			replacement && resolve(record.path) === resolve(batchFile)
 				? replacement
 				: record.state;
 		for (const ticket of Object.values(state.tickets)) {
-			if (isInProgress(ticket)) active++;
-			else if (ticket.status === "queued") queued++;
+			// A ticket on a host since removed from the config is still reported
+			// under that host, with no limit, rather than counted as local work.
+			if (ticket.host && !hosts[ticket.host])
+				hosts[ticket.host] = { limit: null, active: 0, queued: 0 };
+			const bucket = ticket.host ? hosts[ticket.host] : local;
+			if (isInProgress(ticket)) bucket.active++;
+			else if (ticket.status === "queued") bucket.queued++;
 		}
 	}
+	const slots = (b) => ({
+		...b,
+		executionSlots: b.limit === null ? null : Math.max(0, b.limit - b.active),
+		admissionSlots:
+			b.limit === null ? null : Math.max(0, b.limit - b.active - b.queued),
+	});
 	return {
-		limit: policy?.count ?? null,
-		active,
-		queued,
-		executionSlots: policy ? Math.max(0, policy.count - active) : null,
-		admissionSlots: policy ? Math.max(0, policy.count - active - queued) : null,
+		...slots(local),
+		...(Object.keys(hosts).length && {
+			hosts: Object.fromEntries(
+				Object.entries(hosts).map(([id, b]) => [id, slots(b)]),
+			),
+		}),
 	};
 }
 export function enforceCapacity(batchFile, state, previousActive) {
@@ -76,6 +96,11 @@ export function enforceCapacity(batchFile, state, previousActive) {
 		throw new Error(
 			"repository intake execution limit reached; wait for an active slot",
 		);
+	for (const [id, host] of Object.entries(summary.hosts ?? {}))
+		if (host.limit !== null && host.active > host.limit)
+			throw new Error(
+				`worker host ${id} execution limit reached; wait for an active slot`,
+			);
 }
 function readHourlyBatch(batchFile, repository, hour) {
 	const existing = JSON.parse(readFileSync(batchFile, "utf8"));
@@ -103,11 +128,20 @@ function configuredPolicy(anchor, cwd, policy, input) {
 		policy.repository.toLowerCase() !== input.repository.toLowerCase()
 	)
 		throw new Error("intake already configured for another repository");
+	const workerHosts =
+		input.workerHosts === undefined
+			? undefined
+			: normalizeWorkerHosts(input.workerHosts);
 	const current = capacity(anchor, input.repository);
 	if (current.active > input.count)
 		throw new Error(
 			"requested limit is below current active work; wait before lowering it",
 		);
+	for (const host of workerHosts ?? [])
+		if ((current.hosts?.[host.id]?.active ?? 0) > host.count)
+			throw new Error(
+				`requested limit for worker host ${host.id} is below its current active work; wait before lowering it`,
+			);
 	return {
 		version: 1,
 		repository: input.repository,
@@ -141,6 +175,7 @@ function configuredPolicy(anchor, cwd, policy, input) {
 			: {
 					fileOverlapCheck: normalizeFileOverlapCheck(input.fileOverlapCheck),
 				}),
+		...(workerHosts === undefined ? {} : { workerHosts }),
 		scheduleName: `ticket-intake:${input.repository}`,
 		scheduleId: policy?.scheduleId ?? null,
 		paused: policy?.paused ?? false,
@@ -305,7 +340,13 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				};
 			} else {
 				const budget = capacity(anchor, policy.repository);
-				const count = Math.min(policy.count, budget.admissionSlots);
+				const localCount = Math.min(policy.count, budget.admissionSlots);
+				const hosts = (policy.workerHosts ?? []).map((h) => ({
+					id: h.id,
+					slots: budget.hosts[h.id].admissionSlots,
+					excludeLabels: h.excludeLabels,
+				}));
+				const count = localCount + hosts.reduce((sum, h) => sum + h.slots, 0);
 				if (count === 0)
 					policy.lastTick = {
 						hour,
@@ -335,6 +376,9 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 							...(policy.excludeTickets ?? []),
 							...dynamicExclusions,
 						],
+						...(hosts.length && {
+							placement: { local: localCount, hosts },
+						}),
 					};
 					const selection = selectNext(
 						batchFile,
@@ -344,6 +388,8 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 					);
 					if (selection.tickets.length) {
 						const state = newBatch({ ...request, tickets: selection.tickets });
+						for (const [n, host] of Object.entries(selection.placement ?? {}))
+							if (host !== "local") state.tickets[n].host = host;
 						state.selection = {
 							mode: "hourly",
 							intakeHour: hour,

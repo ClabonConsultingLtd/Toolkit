@@ -20,6 +20,7 @@ const fields = new Set([
 	"selfAuthoredMerge",
 	"controllerProvider",
 	"controllerThinkingOptionId",
+	"workerHosts",
 ]);
 
 // The controller's own scheduled runtime: which provider/model runs the
@@ -56,9 +57,7 @@ export function normalizeRequiredChecks(value, source = "intake request") {
 	return value;
 }
 
-// Labels marking spec/umbrella issues that are implemented through other
-// tickets; selection skips them alongside issues with sub-issues.
-export function normalizeSpecLabels(value, source = "intake request") {
+function normalizeLabelList(value, source, field) {
 	if (
 		!Array.isArray(value) ||
 		value.some(
@@ -66,8 +65,89 @@ export function normalizeSpecLabels(value, source = "intake request") {
 				typeof name !== "string" || !name.trim() || name !== name.trim(),
 		)
 	)
-		throw new Error(`${source}: specLabels must contain non-empty label names`);
+		throw new Error(`${source}: ${field} must contain non-empty label names`);
 	return [...new Set(value)];
+}
+
+// Labels marking spec/umbrella issues that are implemented through other
+// tickets; selection skips them alongside issues with sub-issues.
+export function normalizeSpecLabels(value, source = "intake request") {
+	return normalizeLabelList(value, source, "specLabels");
+}
+
+const hostFields = new Set([
+	"id",
+	"paseoHost",
+	"cwd",
+	"count",
+	"excludeLabels",
+	"passwordEnv",
+]);
+
+// Other Paseo daemons the controller may place admitted tickets on, each with
+// its own active-ticket limit. A ticket carrying one of a host's excludeLabels
+// is never placed there, which is how a repository keeps work that needs
+// tooling only the controller's host has (an asset pipeline, a mounted
+// dataset) off a host without it.
+export function normalizeWorkerHosts(value, source = "intake request") {
+	if (value === undefined) return [];
+	if (!Array.isArray(value))
+		throw new Error(`${source}: workerHosts must be an array`);
+	const ids = new Set();
+	return value.map((host, index) => {
+		const name = `${source}: workerHosts[${index}]`;
+		if (!host || typeof host !== "object" || Array.isArray(host))
+			throw new Error(`${name} must be an object`);
+		for (const field of Object.keys(host))
+			if (!hostFields.has(field))
+				throw new Error(`${name}: unknown field ${field}`);
+		if (
+			typeof host.id !== "string" ||
+			!/^[a-z0-9][a-z0-9-]{0,31}$/.test(host.id) ||
+			host.id === "local"
+		)
+			throw new Error(`${name}.id must be a lowercase slug other than "local"`);
+		if (ids.has(host.id))
+			throw new Error(`${source}: duplicate workerHosts id ${host.id}`);
+		ids.add(host.id);
+		// The endpoint is committed with the config, so a password or pairing
+		// token in it would be too. The daemon password travels only through
+		// the environment variable passwordEnv names.
+		const endpoint =
+			typeof host.paseoHost === "string" ? host.paseoHost.trim() : "";
+		if (!endpoint || /[\s?#]/.test(endpoint))
+			throw new Error(
+				`${name}.paseoHost must be a daemon endpoint with no query, fragment or whitespace`,
+			);
+		if (
+			typeof host.cwd !== "string" ||
+			!host.cwd.startsWith("/") ||
+			host.cwd.split("/").includes("..")
+		)
+			throw new Error(`${name}.cwd must be an absolute path on that host`);
+		if (!Number.isSafeInteger(host.count) || host.count < 1)
+			throw new Error(`${name}.count must be a positive integer`);
+		if (
+			host.passwordEnv !== undefined &&
+			(typeof host.passwordEnv !== "string" ||
+				!/^[A-Z_][A-Z0-9_]*$/.test(host.passwordEnv))
+		)
+			throw new Error(
+				`${name}.passwordEnv must be an environment variable name`,
+			);
+		return {
+			id: host.id,
+			paseoHost: endpoint,
+			cwd: host.cwd,
+			count: host.count,
+			excludeLabels: normalizeLabelList(
+				host.excludeLabels ?? [],
+				name,
+				"excludeLabels",
+			),
+			...(host.passwordEnv ? { passwordEnv: host.passwordEnv } : {}),
+		};
+	});
 }
 
 // Keeps tickets whose declared files overlap in-flight work out of a batch.
@@ -194,10 +274,15 @@ export function readRepositoryIntakeConfig(cwd) {
 		config.specLabels === undefined
 			? undefined
 			: normalizeSpecLabels(config.specLabels, "invalid toolkit-intake.json");
+	const workerHosts =
+		config.workerHosts === undefined
+			? undefined
+			: normalizeWorkerHosts(config.workerHosts, "invalid toolkit-intake.json");
 	return {
 		...config,
 		excludeTickets,
 		...(specLabels === undefined ? {} : { specLabels }),
 		...(requiredChecks === undefined ? {} : { requiredChecks }),
+		...(workerHosts === undefined ? {} : { workerHosts }),
 	};
 }

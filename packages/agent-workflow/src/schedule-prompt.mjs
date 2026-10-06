@@ -69,6 +69,11 @@ export function schedulePrompt(checkout) {
 	const cleanup = settings.cleanupCommand
 		? ` Run \`node ${paths.orchestrateHelper} cleanup STATE.json\` with the lease token, ticket number and absolute \`worktreePath\` after each review, when a ticket is blocked, when a stopped or finished worker is reconciled, and after \`sync\` finalizes a merge; report any \`ok: false\` result as a warning.`
 		: "";
+	// Only when hosts are configured, so repositories without them keep an
+	// unchanged prompt and see no drift.
+	const workerHosts = settings.workerHosts?.length
+		? "12. Worker hosts are configured. `tick` returns a `placement` for each admitted ticket, the batch ticket carries `host`, and `reserve` returns `workerHost` (`id`, `paseoHost`, `cwd`, optional `passwordEnv`). Launch and inspect such a ticket only through that daemon with the Paseo CLI (`paseo --host <paseoHost> workspace create --isolation worktree --path <cwd> ...`, `paseo --host <paseoHost> agent run --workspace <id> ...`, then `inspect`, `logs`, `wait`, `send`), as the skill's Dispatch and review section describes, never through this daemon's MCP tools; never launch a ticket without `host` on a worker host. Export PASEO_PASSWORD from the variable `passwordEnv` names for those commands only; the endpoint, request files and the report never carry it. Run `cleanup` for such a ticket in two steps: first without `remoteResult` to get the command, run it in a terminal on that daemon, then again with `remoteResult: {ok, error?}`."
+		: null;
 	const lines = [
 		`Run the ticket intake controller for ${settings.repository} (schedule \`ticket-intake:${settings.repository}\`).`,
 		"",
@@ -93,6 +98,7 @@ export function schedulePrompt(checkout) {
 		`9. Approve or merge only where this prompt explicitly authorizes it, and only after \`merge-ready\` returns \`mergeReady: true\` for the exact linked PR head.${selfAuthored} Otherwise leave PRs awaiting a human merge.`,
 		"10. Keep this schedule running when capacity is full or nothing qualifies. Pause it only on explicit user request or a systemic error that prevents safe reconciliation, recording the reason. Report the run type, new selections, active count, PR links, blockers, prompt drift, and the live schedule state and next run.",
 		"11. This scheduled run can be archived as soon as its turn ends, which stops anything it still has running in the background. Run every subagent, review, verification, test run or timer in the foreground and collect its result within the same turn; never end the turn while any of them is in progress, and never call a tool meant only for an interactive session's self-paced dynamic loop (one that ends the current turn to schedule a future resumption). If background work cannot be avoided, wait for the automatic completion notification within the same turn. Never wait for a lease held by another run to expire: report its holder and expiry, finish this run cleanly, and let the next scheduled run reconcile. Launched workers are separate agents and keep running after this run ends.",
+		...(workerHosts ? [workerHosts] : []),
 	];
 	const append = settings.schedulePromptAppend;
 	if (append)

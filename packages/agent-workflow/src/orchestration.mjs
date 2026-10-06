@@ -181,14 +181,20 @@ export function disposition(state, now = Date.now()) {
 	const tickets = (state.ticketOrder ?? Object.keys(state.tickets)).map(
 		(n) => state.tickets[n],
 	);
+	// Batch concurrency covers the controller's own host. A ticket placed on a
+	// worker host (`host`) is capped by that host's intake limit instead, which
+	// sync and reserve enforce from the policy.
+	const local = tickets.filter((t) => !t.host);
 	const slots = Math.max(
 		0,
 		state.concurrency -
-			tickets.filter((t) => ACTIVE.has(t.status) || t.workerActive).length,
+			local.filter((t) => ACTIVE.has(t.status) || t.workerActive).length,
 	);
+	let localLaunchable = 0;
 	const launchable = tickets
-		.filter((t) => t.status === "queued")
-		.slice(0, slots)
+		.filter(
+			(t) => t.status === "queued" && (t.host || localLaunchable++ < slots),
+		)
 		.map((t) => t.number);
 	function canProgress(t, seen = new Set()) {
 		if (seen.has(t.number)) return false;
@@ -217,10 +223,11 @@ export function disposition(state, now = Date.now()) {
 		pauseSchedule:
 			tickets.every((t) => t.status === "completed") ||
 			!tickets.some((t) => canProgress(t)),
-		tickets: tickets.map(({ number, status, reason }) => ({
+		tickets: tickets.map(({ number, status, reason, host }) => ({
 			number,
 			status,
 			reason,
+			...(host && { host }),
 		})),
 	};
 }
@@ -316,7 +323,7 @@ export function changeTicket(
 		requireStatus("reviewing", "awaiting_merge");
 		requireText("reason");
 		if (!t.agentId) throw new Error("agent must be attached");
-		if (!ACTIVE.has(t.status) && disposition(state).slots === 0)
+		if (!ACTIVE.has(t.status) && !t.host && disposition(state).slots === 0)
 			throw new Error("no execution slot to update from base");
 		Object.assign(t, {
 			status: "implementing",
@@ -383,7 +390,12 @@ export function changeTicket(
 			throw new Error("explicit resetFixCycles required after repair limit");
 		if (data.resetFixCycles) t.fixCycles = 0;
 		const next = t.previousStatus ?? (t.agentId ? "reviewing" : "queued");
-		if (ACTIVE.has(next) && !t.workerActive && disposition(state).slots === 0)
+		if (
+			ACTIVE.has(next) &&
+			!t.workerActive &&
+			!t.host &&
+			disposition(state).slots === 0
+		)
 			throw new Error("no execution slot to resume");
 		t.status = next;
 		t.blockKind = null;

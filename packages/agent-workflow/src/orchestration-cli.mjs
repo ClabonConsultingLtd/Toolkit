@@ -72,6 +72,69 @@ function repositoryConfigFor(state) {
 		throw new Error("repository intake config belongs to another repository");
 	return config;
 }
+// A ticket placed on a worker host launches through that host's Paseo daemon.
+// The host must still be configured, and the issue must still be free of the
+// labels the host excludes, or the reservation is refused before any mutation.
+function workerHostFor(path, state, ticket, issue) {
+	if (!ticket.host) return null;
+	const hosts =
+		repositoryConfigFor(state)?.workerHosts ??
+		readIntake(path)?.workerHosts ??
+		[];
+	const host = hosts.find((h) => h.id === ticket.host);
+	if (!host)
+		throw new Error(
+			`worker host ${ticket.host} is no longer configured; block the ticket or restore the host`,
+		);
+	const excluded = host.excludeLabels.filter((l) => issue.labels.includes(l));
+	if (excluded.length)
+		throw new Error(
+			`worker host ${host.id} excludes label ${excluded.join(", ")}; block the ticket for a human`,
+		);
+	const { excludeLabels, count, ...launch } = host;
+	return launch;
+}
+// The worktree of a ticket on a worker host is on another machine, so the
+// controller cannot run the hook here. The first call returns the exact command
+// to run there, from that host's stable checkout as it would be locally; the
+// second, with `remoteResult`, records what happened. Like the local hook it
+// never changes the ticket's lifecycle state.
+function remoteCleanup(state, t, config, input) {
+	if (
+		typeof input.worktreePath !== "string" ||
+		!input.worktreePath.startsWith("/")
+	)
+		throw new Error("worktreePath must be an absolute path on the worker host");
+	const host = (config.workerHosts ?? []).find((h) => h.id === t.host);
+	if (!host) throw new Error(`worker host ${t.host} is no longer configured`);
+	if (input.remoteResult === undefined)
+		return {
+			output: {
+				ticket: t.number,
+				ran: false,
+				host: host.id,
+				paseoHost: host.paseoHost,
+				command: [
+					"node",
+					`${host.cwd}/${config.cleanupCommand}`,
+					input.worktreePath,
+					t.branch,
+					t.number,
+				],
+			},
+		};
+	const { ok, error } = input.remoteResult;
+	if (typeof ok !== "boolean")
+		throw new Error("remoteResult.ok must be a boolean");
+	const failure = ok
+		? {}
+		: { error: String(error ?? "remote cleanup failed").trim() };
+	t.cleanup = { at: new Date().toISOString(), ok, host: host.id, ...failure };
+	return {
+		state,
+		output: { ticket: t.number, ran: true, ok, host: host.id, ...failure },
+	};
+}
 function worktreeBranch(worktree) {
 	try {
 		return execFileSync("git", ["symbolic-ref", "--short", "-q", "HEAD"], {
@@ -98,6 +161,7 @@ function cleanup(path, input, options) {
 		const config = repositoryConfigFor(state);
 		if (!config?.cleanupCommand)
 			return { output: { ticket: t.number, ran: false } };
+		if (t.host) return remoteCleanup(state, t, config, input);
 		if (
 			typeof input.worktreePath !== "string" ||
 			!isAbsolute(input.worktreePath)
@@ -310,12 +374,14 @@ export function execute(command, path, input = {}, options = {}) {
 					const t = state.tickets[String(input.number).replace(/^#/, "")];
 					if (!t) throw new Error("ticket outside selected batch");
 					const issue = requireReady(state, t, issues);
+					const workerHost = workerHostFor(path, state, t, issue);
 					const runtime = resolveWorkerRuntime(issue.recommendation, input, {
 						statePath: options.fallbackStatePath,
 					});
 					output = {
 						...changeTicket(state, input.number, "reserve", runtime),
 						brief: issue.brief,
+						workerHost,
 					};
 				} else {
 					output = { ...disposition(state), issues, baseUpdates };
@@ -325,7 +391,16 @@ export function execute(command, path, input = {}, options = {}) {
 					const budget = capacity(path, state.repository, state);
 					if (budget.limit !== null) {
 						output.slots = Math.min(output.slots, budget.executionSlots);
-						output.launchable = output.launchable.slice(0, output.slots);
+						let local = 0;
+						const used = {};
+						output.launchable = output.launchable.filter((n) => {
+							const host = state.tickets[n].host;
+							if (!host) return local++ < output.slots;
+							const summary = budget.hosts?.[host];
+							if (!summary || summary.limit === null) return false;
+							used[host] = (used[host] ?? 0) + 1;
+							return used[host] <= summary.executionSlots;
+						});
 						output.repositoryCapacity = budget;
 					}
 				}

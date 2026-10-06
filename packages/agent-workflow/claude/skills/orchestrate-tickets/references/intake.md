@@ -12,7 +12,9 @@ Use one stable orchestration checkout per repository. All existing batch runners
 must use this installed helper version; older copies do not enforce the shared
 limit. Discover existing Paseo agents and schedules before configuring intake;
 unknown/untracked work must be reconciled or explicitly excluded, not duplicated.
-This is a local shared limit for managed tickets, not a distributed worker quota.
+This is a local shared limit for managed tickets on the controller's own host,
+not a distributed worker quota; [`workerHosts`](#worker-hosts) adds per-host
+limits that the same controller enforces.
 
 ## Configure once
 
@@ -28,6 +30,8 @@ ticket worktree to remove what it started (see the orchestration skill's
 `selfAuthoredMerge: "comment-review"` (see controller step on approval and merging),
 `fileOverlapCheck` (default `true`; `false` admits tickets without comparing
 their declared files, see [selection.md](selection.md)),
+`workerHosts`, other Paseo daemons the controller may place admitted tickets on
+(see [Worker hosts](#worker-hosts)),
 `controllerProvider` (`"claude/<model>"` or `"codex/<model>"`, default
 `"codex/gpt-6-sol"`) and `controllerThinkingOptionId` (default `"medium"`) naming
 the provider that should run this recurring schedule itself, independent of
@@ -184,9 +188,10 @@ the run to:
    differs, or its paused state is unknown. Pass `schedule: {id, name, paused}`
    from that live result with `models` and `codexModels` during a cooldown,
    and optional `excludeTickets` for work outside saved batches. This
-   atomically admits up to `min(N, available capacity)` eligible tickets using the
-   same readiness/dependency/model/PR and file-overlap exclusions as
-   [selection.md](selection.md).
+   atomically admits up to `min(N, available capacity)` eligible tickets, plus
+   each configured worker host's free slots, using the same
+   readiness/dependency/model/PR and file-overlap exclusions as
+   [selection.md](selection.md), and places each on `local` or a worker host.
 3. If initialized, process the returned batch using the normal orchestration
    workflow. Its `managedByIntake: true` flag means **do not create a per-batch
    schedule** and **do not pause the shared intake schedule when it completes**.
@@ -209,6 +214,40 @@ issues exist, or one batch finishes: a later run may admit more. Pause it on
 explicit user request or systemic errors preventing safe reconciliation, recording
 the reason.
 Do not pause it just because an individual ticket requires human input.
+
+## Worker hosts
+
+`workerHosts` lists other Paseo daemons the controller may place admitted
+tickets on, for example an always-on host that takes overflow. Each entry has
+`id` (a lowercase slug other than `local`), `paseoHost` (the endpoint for
+`paseo --host`, with no query or fragment, so a password or pairing token
+cannot be committed), `cwd` (the absolute path of that host's stable checkout,
+which its worktrees branch from), `count` (that host's own active-ticket
+limit), optional `excludeLabels` (a ticket carrying one of them is never placed
+there) and optional `passwordEnv` (the name of an environment variable holding
+that daemon's password, exported as `PASEO_PASSWORD` for the CLI calls only).
+
+The top-level `count` keeps limiting the controller's own host. A `tick`
+admits up to the local admission slots plus each host's, placing eligible
+tickets in order: local slots first, then hosts in config order, skipping a
+host whose `excludeLabels` match the issue. A ticket that no host with a free
+slot accepts is skipped with `no worker host with a free slot accepts its
+labels` and keeps `ready-for-agent`. The tick result's `placement` maps each
+admitted ticket to `local` or a host id, and the batch ticket carries `host`.
+`capacity` reports a `hosts` entry per host, and `sync` lists a host ticket in
+`launchable` while that host has an execution slot, independent of the batch
+concurrency that caps local tickets. `reserve` returns `workerHost` for a
+placed ticket and refuses one whose host has been removed from the config or
+whose issue has since gained an excluded label; block it for a human. Lowering
+a host's `count` below its active work is refused like the local limit.
+
+Launch, inspect and clean up a worker-host ticket through that daemon with the
+Paseo CLI as SKILL.md's Dispatch and review section describes. The Claude
+cooldown and the Codex sandbox preflight are judged on the controller's host
+and apply to worker-host launches too: a usage limit belongs to the account,
+and a worker host's sandbox is assumed to match. That daemon's agents are not
+visible to this daemon's `list_agents`; inspect them with
+`paseo --host <paseoHost> ls --json` when reconciling or excluding active work.
 
 ## Codex sandbox preflight
 

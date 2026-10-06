@@ -78,6 +78,11 @@ Eligibility and order:
   `unreadInFlight`. Report both lists in the run summary.
   `fileOverlapCheck: false` (request field or tracked `toolkit-intake.json`)
   turns the check off; it is on by default.
+- With `placement` in the request, which the intake `tick` builds from
+  `workerHosts`, each selected ticket is placed on `local` or a worker host as
+  [intake.md](intake.md#worker-hosts) describes, and the result's `placement`
+  maps ticket to host. `select-next` and `init-next` take no placement: every
+  ticket in those batches is local.
 - GitHub/authentication errors and unreadable batch state abort selection rather
   than treating unknown work as eligible. Review skipped reasons in the summary.
 
