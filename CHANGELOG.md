@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.0 - 2026-10-06
+
+- #177: orchestrate-tickets: place admitted tickets on configured worker hosts
+
 ## 0.17.1 - 2026-10-06
 
 - #178: Override source-map-js to the patched release

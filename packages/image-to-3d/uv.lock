@@ -232,7 +232,7 @@ wheels = [
 
 [[package]]
 name = "toolkit-image-to-3d"
-version = "0.17.1"
+version = "0.18.0"
 source = { editable = "." }
 dependencies = [
     { name = "gradio-client" },
