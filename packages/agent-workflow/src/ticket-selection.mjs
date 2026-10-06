@@ -170,6 +170,11 @@ export function selectNext(file, input, api, { returnToTriage = false } = {}) {
 		throw new Error("excludeTickets must be an array");
 	const specLabels = normalizeSpecLabels(input.specLabels ?? []);
 	const fileOverlapCheck = normalizeFileOverlapCheck(input.fileOverlapCheck);
+	// Worker hosts fill in config order only once the controller's own slots
+	// are taken, so an overflow host gets work the local limit cannot hold,
+	// and a ticket no host accepts waits for a later run.
+	const placement = input.placement ? placementPlan(input.placement) : null;
+	const placed = {};
 	const claimed = claimedTickets(file, input.repository);
 	// Unfinished tickets in saved batches; their declared files keep
 	// overlapping candidates queued until they complete.
@@ -311,6 +316,17 @@ export function selectNext(file, input, api, { returnToTriage = false } = {}) {
 				}
 			}
 		}
+		if (!reason && placement) {
+			const host = placement.place(issue.labels);
+			if (!host) {
+				skipped.push({
+					number,
+					reason: "no worker host with a free slot accepts its labels",
+				});
+				continue;
+			}
+			placed[number] = host;
+		}
 		if (reason) skipped.push({ number, reason });
 		else selected.push(number);
 		if (selected.length === input.count) break;
@@ -324,5 +340,40 @@ export function selectNext(file, input, api, { returnToTriage = false } = {}) {
 		shortfall: input.count - selected.length,
 		fileOverlapCheck,
 		...(fileOverlapCheck && { blindAdmissions, unreadInFlight }),
+		...(placement && { placement: placed }),
+	};
+}
+function placementPlan(input) {
+	const slot = (n) => Number.isSafeInteger(n) && n >= 0;
+	if (
+		!input ||
+		!slot(input.local) ||
+		!Array.isArray(input.hosts) ||
+		input.hosts.some(
+			(h) =>
+				!h ||
+				typeof h.id !== "string" ||
+				!slot(h.slots) ||
+				!Array.isArray(h.excludeLabels),
+		)
+	)
+		throw new Error("placement must give local slots and worker hosts");
+	let local = 0;
+	const hosts = input.hosts.map((h) => ({ ...h, used: 0 }));
+	return {
+		place(labels) {
+			if (local < input.local) {
+				local++;
+				return "local";
+			}
+			const host = hosts.find(
+				(h) =>
+					h.used < h.slots &&
+					!h.excludeLabels.some((label) => labels.includes(label)),
+			);
+			if (!host) return null;
+			host.used++;
+			return host.id;
+		},
 	};
 }

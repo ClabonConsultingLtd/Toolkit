@@ -213,6 +213,18 @@ tears down the default Compose project. The hook is a backstop: scripts that
 start containers should still tear them down in an exit trap
 (`docker compose -p <project> down --volumes --remove-orphans`).
 
+An optional `workerHosts` list names other Paseo daemons the controller may
+place admitted tickets on, each with its own `count`, the endpoint for
+`paseo --host` (`paseoHost`, with no query or fragment, so no password or
+pairing token is committed), the absolute path of that host's stable checkout
+(`cwd`), optional `excludeLabels` that keep a labelled ticket off that host,
+and an optional `passwordEnv` naming the environment variable that holds the
+daemon's password. The top-level `count` still limits the controller's own
+host; a tick fills local slots first and then each host in order, `tick`
+returns the `placement`, and `reserve` returns `workerHost`. The controller
+launches, inspects and cleans up such a ticket through that daemon with the
+Paseo CLI, as the skill describes; the helper itself never contacts a daemon.
+
 Run `node <skill>/scripts/intake.mjs configure CHECKOUT` to initialize the live
 policy from this file. Later changes are applied by `sync-config` or the next
 `tick`; an invalid file or limit lower than active work stops safely. The helper
@@ -479,7 +491,9 @@ The same N limits both new tickets per hour and active implementation/review wor
 across batches. Awaiting-merge PRs do not consume active slots; uncertain launches
 and permission-waiting workers do. Queued work reserves admission capacity. Worker
 reservations and resumptions enforce the shared cap, so overlapping batch schedules
-cannot exceed it. Existing per-batch concurrency still caps each batch at three.
+cannot exceed it. Existing per-batch concurrency still caps each batch at three
+local tickets; a ticket placed on a configured worker host is capped by that
+host's own `count` instead.
 
 The intake schedule defaults to every 30 minutes from 08:00 through 19:30 UTC,
 or it may use a deliberately chosen cron and timezone. Runs between UTC hour
