@@ -231,6 +231,36 @@ export function disposition(state, now = Date.now()) {
 		})),
 	};
 }
+// Replacing the saved agent is the one exception to attach's
+// never-rebind rule: the saved session is unusable and a continuation already
+// runs in the same workspace. The previous id stays in replacedAgents so the
+// operator can archive it; nothing here archives it.
+function checkReplacement(t, data) {
+	if (typeof data.agentId !== "string" || !data.agentId.trim())
+		throw new Error("agentId required");
+	if (typeof data.evidence !== "string" || !data.evidence.trim())
+		throw new Error("evidence required");
+	if (!t.agentId) throw new Error("no saved agent to replace");
+	if (t.agentId === data.agentId)
+		throw new Error("agent already bound; replacement needs a new agentId");
+	if (data.workspaceId && data.workspaceId !== t.workspaceId)
+		throw new Error("workspace already attached");
+}
+function bindReplacement(t, data, now) {
+	const at = new Date(now).toISOString();
+	t.replacedAgents = [
+		...(t.replacedAgents ?? []),
+		{
+			previousAgentId: t.agentId,
+			agentId: data.agentId,
+			at,
+			evidence: data.evidence,
+		},
+	];
+	t.agentId = data.agentId;
+	t.workerActive = true;
+	t.updatedAt = at;
+}
 export function changeTicket(
 	state,
 	number,
@@ -267,6 +297,14 @@ export function changeTicket(
 			launchKey: `${state.repository}:${state.batchId}:${t.number}`,
 			updatedAt: new Date(now).toISOString(),
 		});
+	} else if (action === "attach" && data.replaceAgentId === true) {
+		requireStatus("implementing", "blocked");
+		// Re-binding only describes a replacement that is already running; a
+		// stopped one would leave the ticket pointing at another idle agent.
+		if (data.workerActive !== true)
+			throw new Error("replaceAgentId requires workerActive:true");
+		checkReplacement(t, data);
+		bindReplacement(t, data, now);
 	} else if (action === "attach") {
 		requireStatus("implementing", "blocked");
 		if (data.workspaceId) {
@@ -377,6 +415,8 @@ export function changeTicket(
 		requireStatus("blocked");
 		if (t.launchUncertain)
 			throw new Error("reconcile the uncertain launch before resuming");
+		const replacing = data.agentId !== undefined;
+		if (replacing) checkReplacement(t, data);
 		if (t.blockKind === PROVIDER_LIMIT && data.evidence === undefined) {
 			if (!limitResumable(t, now))
 				throw new Error(
@@ -393,10 +433,12 @@ export function changeTicket(
 		if (
 			ACTIVE.has(next) &&
 			!t.workerActive &&
+			!replacing &&
 			!t.host &&
 			disposition(state).slots === 0
 		)
 			throw new Error("no execution slot to resume");
+		if (replacing) bindReplacement(t, data, now);
 		t.status = next;
 		t.blockKind = null;
 		t.reason = null;

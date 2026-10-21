@@ -308,6 +308,187 @@ test("uncertain launches require reconciliation before resume", () => {
 		/already/,
 	);
 });
+test("attach replaces a saved agent only with replaceAgentId, evidence and workerActive", () => {
+	const s = newBatch({ ...manifest(), tickets: [7, 8], concurrency: 1 });
+	worker(s, 7);
+	changeTicket(s, 7, "block", {
+		reason: "saved agent stopped on a permission refusal",
+		workerStopped: true,
+	});
+	const replace = { agentId: "b7", evidence: "saved session unusable" };
+	assert.throws(
+		() => changeTicket(s, 7, "attach", { ...replace, workerActive: true }),
+		/agent already attached/,
+	);
+	assert.throws(
+		() =>
+			changeTicket(s, 7, "attach", {
+				agentId: "b7",
+				replaceAgentId: true,
+				workerActive: true,
+			}),
+		/evidence required/,
+	);
+	assert.throws(
+		() => changeTicket(s, 7, "attach", { ...replace, replaceAgentId: true }),
+		/workerActive/,
+	);
+	assert.throws(
+		() =>
+			changeTicket(s, 7, "attach", {
+				...replace,
+				replaceAgentId: true,
+				workerActive: true,
+				workspaceId: "elsewhere",
+			}),
+		/workspace already attached/,
+	);
+	assert.throws(
+		() =>
+			changeTicket(s, 7, "attach", {
+				...replace,
+				agentId: "a7",
+				replaceAgentId: true,
+				workerActive: true,
+			}),
+		/already bound/,
+	);
+	assert.equal(s.tickets[7].agentId, "a7");
+	assert.equal(s.tickets[7].workerActive, false);
+
+	const replaced = changeTicket(
+		s,
+		7,
+		"attach",
+		{ ...replace, replaceAgentId: true, workerActive: true, workspaceId: "w7" },
+		5_000,
+	);
+	assert.equal(replaced.status, "blocked");
+	assert.equal(replaced.agentId, "b7");
+	assert.equal(replaced.workspaceId, "w7");
+	assert.equal(replaced.workerActive, true);
+	assert.deepEqual(replaced.replacedAgents, [
+		{
+			previousAgentId: "a7",
+			agentId: "b7",
+			at: new Date(5_000).toISOString(),
+			evidence: "saved session unusable",
+		},
+	]);
+	assert.equal(disposition(s).slots, 0);
+	changeTicket(s, 7, "resume", { evidence: "continuation running" });
+	assert.equal(s.tickets[7].status, "implementing");
+	assert.throws(
+		() => changeTicket(s, 7, "attach", { agentId: "a7" }),
+		/agent already attached/,
+	);
+});
+test("resume with agentId replaces the saved agent in the same call", () => {
+	const s = newBatch({ ...manifest(), tickets: [7, 8], concurrency: 1 });
+	worker(s, 7);
+	changeTicket(s, 7, "block", {
+		reason: "saved agent's provider login was revoked",
+		workerStopped: true,
+	});
+	assert.throws(
+		() =>
+			changeTicket(s, 7, "resume", {
+				agentId: "b7",
+				workspaceId: "elsewhere",
+				evidence: "fresh agent launched",
+			}),
+		/workspace already attached/,
+	);
+	assert.throws(
+		() =>
+			changeTicket(s, 7, "resume", {
+				agentId: "a7",
+				evidence: "fresh agent launched",
+			}),
+		/already bound/,
+	);
+	assert.equal(s.tickets[7].status, "blocked");
+	assert.equal(s.tickets[7].agentId, "a7");
+	// The replacement is already running, so it needs no free slot to resume.
+	worker(s, 8);
+	assert.equal(disposition(s).slots, 0);
+	const resumed = changeTicket(
+		s,
+		7,
+		"resume",
+		{ agentId: "b7", evidence: "fresh agent launched in w7" },
+		9_000,
+	);
+	assert.equal(resumed.status, "implementing");
+	assert.equal(resumed.agentId, "b7");
+	assert.equal(resumed.workerActive, true);
+	assert.deepEqual(resumed.replacedAgents, [
+		{
+			previousAgentId: "a7",
+			agentId: "b7",
+			at: new Date(9_000).toISOString(),
+			evidence: "fresh agent launched in w7",
+		},
+	]);
+});
+test("resume with agentId never skips the replacement evidence", () => {
+	const s = newBatch(manifest());
+	worker(s, 9);
+	changeTicket(s, 9, "block", {
+		reason: "limit",
+		blockKind: "provider-limit",
+		resetAt: "2000-01-01T00:00:00Z",
+		workerStopped: true,
+	});
+	assert.throws(
+		() => changeTicket(s, 9, "resume", { agentId: "b9" }),
+		/evidence required/,
+	);
+	assert.equal(s.tickets[9].status, "blocked");
+	assert.equal(s.tickets[9].agentId, "a9");
+});
+test("sync reports the replacement agent, not the one it replaced", (t) => {
+	const { path, token } = fixture(t);
+	const pr = pull();
+	const options = {
+		github: () => ({ approval, snapshot, pr: () => pr }),
+	};
+	execute("reserve", path, { token, number: 7, models }, options);
+	execute(
+		"attach",
+		path,
+		{ token, number: 7, workspaceId: "w", agentId: "a" },
+		options,
+	);
+	execute("link-pr", path, { token, number: 7, pr: 17 }, options);
+	execute(
+		"block",
+		path,
+		{ token, number: 7, reason: "daemon refused agent send" },
+		options,
+	);
+	execute(
+		"resume",
+		path,
+		{ token, number: 7, agentId: "b", evidence: "continuation agent in w" },
+		options,
+	);
+	pr.mergeStateStatus = "BEHIND";
+	const synced = execute("sync", path, { token }, options);
+	assert.equal(synced.baseUpdates.length, 1);
+	assert.equal(synced.baseUpdates[0].agentId, "b");
+	const saved = execute("status", path).tickets[7];
+	assert.equal(saved.status, "implementing");
+	assert.equal(saved.agentId, "b");
+	assert.equal(saved.workerActive, true);
+	assert.deepEqual(
+		saved.replacedAgents.map(({ previousAgentId, agentId }) => ({
+			previousAgentId,
+			agentId,
+		})),
+		[{ previousAgentId: "a", agentId: "b" }],
+	);
+});
 test("schedule pauses for human blocked chains, waits for merges, stops when complete", () => {
 	const s = newBatch(manifest());
 	reconcile(s, snapshot());
