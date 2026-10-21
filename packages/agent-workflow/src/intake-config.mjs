@@ -75,6 +75,14 @@ export function normalizeSpecLabels(value, source = "intake request") {
 	return normalizeLabelList(value, source, "specLabels");
 }
 
+// A worker host's daemon may run on POSIX or Windows, whichever this machine
+// is, so its paths are judged as text rather than with node:path: "/srv/x",
+// "C:\\x" and "C:/x" are each absolute on their own host. A drive-relative
+// "C:x" or rooted "\\x" depends on that host's current drive or directory.
+export function isHostAbsolutePath(path) {
+	return typeof path === "string" && /^(\/|[A-Za-z]:[\\/])/.test(path);
+}
+
 const hostFields = new Set([
 	"id",
 	"paseoHost",
@@ -119,12 +127,10 @@ export function normalizeWorkerHosts(value, source = "intake request") {
 			throw new Error(
 				`${name}.paseoHost must be a daemon endpoint with no query, fragment or whitespace`,
 			);
-		if (
-			typeof host.cwd !== "string" ||
-			!host.cwd.startsWith("/") ||
-			host.cwd.split("/").includes("..")
-		)
-			throw new Error(`${name}.cwd must be an absolute path on that host`);
+		if (!isHostAbsolutePath(host.cwd) || host.cwd.split(/[\\/]/).includes(".."))
+			throw new Error(
+				`${name}.cwd must be an absolute path on that host (/path or C:\\path), with no .. segment`,
+			);
 		if (!Number.isSafeInteger(host.count) || host.count < 1)
 			throw new Error(`${name}.count must be a positive integer`);
 		if (

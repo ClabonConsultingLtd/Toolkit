@@ -217,7 +217,9 @@ An optional `workerHosts` list names other Paseo daemons the controller may
 place admitted tickets on, each with its own `count`, the endpoint for
 `paseo --host` (`paseoHost`, with no query or fragment, so no password or
 pairing token is committed), the absolute path of that host's stable checkout
-(`cwd`), optional `excludeLabels` that keep a labelled ticket off that host,
+(`cwd`: `/path` on a POSIX host, `C:\path` or `C:/path` on a Windows host,
+with no `..` segment), optional `excludeLabels` that keep a labelled ticket
+off that host,
 and an optional `passwordEnv` naming the environment variable that holds the
 daemon's password. The top-level `count` still limits the controller's own
 host; a tick fills local slots first and then each host in order, `tick`

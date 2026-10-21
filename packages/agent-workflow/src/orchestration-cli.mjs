@@ -2,7 +2,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { readRepositoryIntakeConfig } from "./intake-config.mjs";
+import {
+	isHostAbsolutePath,
+	readRepositoryIntakeConfig,
+} from "./intake-config.mjs";
 import {
 	acquire,
 	assertLease,
@@ -100,10 +103,7 @@ function workerHostFor(path, state, ticket, issue) {
 // second, with `remoteResult`, records what happened. Like the local hook it
 // never changes the ticket's lifecycle state.
 function remoteCleanup(state, t, config, input) {
-	if (
-		typeof input.worktreePath !== "string" ||
-		!input.worktreePath.startsWith("/")
-	)
+	if (!isHostAbsolutePath(input.worktreePath))
 		throw new Error("worktreePath must be an absolute path on the worker host");
 	const host = (config.workerHosts ?? []).find((h) => h.id === t.host);
 	if (!host) throw new Error(`worker host ${t.host} is no longer configured`);
