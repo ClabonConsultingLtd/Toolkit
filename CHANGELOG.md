@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.19.0 - 2026-10-21
+
+- #187: agent-workflow: accept Windows absolute paths for worker host checkouts
+
 ## 0.18.0 - 2026-10-06
 
 - #177: orchestrate-tickets: place admitted tickets on configured worker hosts
