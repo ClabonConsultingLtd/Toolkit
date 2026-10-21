@@ -299,6 +299,22 @@ test("reserve refuses a host removed from the config or a newly excluded label",
 	assert.equal(summary.queued, 2);
 });
 
+test("workerHosts accept a Windows absolute cwd and still refuse relative or .. paths", () => {
+	for (const cwd of ["C:\\Users\\dev\\checkout", "c:/Users/dev/checkout"])
+		assert.equal(normalizeWorkerHosts([{ ...cloud, cwd }])[0].cwd, cwd);
+	const bad = (cwd) =>
+		assert.throws(
+			() => normalizeWorkerHosts([{ ...cloud, cwd }]),
+			/cwd must be an absolute path on that host/,
+		);
+	bad("checkout\\repo");
+	bad("C:checkout");
+	bad("\\Users\\dev\\checkout");
+	bad("C:\\Users\\dev\\..\\Windows");
+	bad("C:/Users/dev/../Windows");
+	bad("/srv/checkout\\..\\etc");
+});
+
 test("cleanup for a host ticket returns the remote command, then records the result", (t) => {
 	const f = fixture(t);
 	writeConfig(f.cwd, { cleanupCommand: "scripts/cleanup.mjs" });
@@ -354,6 +370,29 @@ test("cleanup for a host ticket returns the remote command, then records the res
 		ok: true,
 		host: "cloud",
 	});
+});
+
+test("cleanup for a ticket on a Windows worker host accepts its drive-letter worktree path", (t) => {
+	const f = fixture(t);
+	writeConfig(f.cwd, {
+		cleanupCommand: "scripts/cleanup.mjs",
+		workerHosts: [{ ...cloud, cwd: "C:\\Users\\dev\\checkout" }],
+	});
+	const tick = intakeCommand("tick", f.cwd, { models }, f.options);
+	const { token } = execute("acquire", tick.batchFile);
+	execute("reserve", tick.batchFile, { token, number: "3", models }, f.options);
+	const worktreePath = "C:\\Users\\dev\\.paseo\\worktrees\\x";
+	assert.deepEqual(
+		execute("cleanup", tick.batchFile, { token, number: "3", worktreePath })
+			.command,
+		[
+			"node",
+			"C:\\Users\\dev\\checkout/scripts/cleanup.mjs",
+			worktreePath,
+			`tickets/${tick.batchFile.match(/intake-\d+/)[0]}/3`,
+			"3",
+		],
+	);
 });
 
 test("batch disposition caps local tickets by concurrency and leaves host tickets launchable", () => {

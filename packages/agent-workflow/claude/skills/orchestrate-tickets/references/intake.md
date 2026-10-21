@@ -222,8 +222,9 @@ tickets on, for example an always-on host that takes overflow. Each entry has
 `id` (a lowercase slug other than `local`), `paseoHost` (the endpoint for
 `paseo --host`, with no query or fragment, so a password or pairing token
 cannot be committed), `cwd` (the absolute path of that host's stable checkout,
-which its worktrees branch from), `count` (that host's own active-ticket
-limit), optional `excludeLabels` (a ticket carrying one of them is never placed
+which its worktrees branch from: `/path` on a POSIX host, `C:\path` or
+`C:/path` on a Windows host, with no `..` segment), `count` (that host's own
+active-ticket limit), optional `excludeLabels` (a ticket carrying one of them is never placed
 there) and optional `passwordEnv` (the name of an environment variable holding
 that daemon's password, exported as `PASEO_PASSWORD` for the CLI calls only).
 
