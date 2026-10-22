@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.0 - 2026-10-22
+
+- #191: agent-workflow: let attach and resume bind a replacement agent
+
 ## 0.19.0 - 2026-10-21
 
 - #187: agent-workflow: accept Windows absolute paths for worker host checkouts
