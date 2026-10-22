@@ -1567,6 +1567,7 @@ test("complete needs a closed issue and releases dependents in sync and selectio
 		"9",
 	]);
 	assert.throws(() => execute("complete", path, request, options), /already/);
+});
 test("cleanup against an absent worktree records a durable warning instead of throwing", (t) => {
 	const dir = mkdtempSync(join(tmpdir(), "cleanup-absent-"));
 	t.after(() => rmSync(dir, { recursive: true, force: true }));

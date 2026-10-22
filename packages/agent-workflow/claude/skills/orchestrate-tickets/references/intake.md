@@ -80,8 +80,10 @@ or a reduction below active work stops the tick without overwriting the policy.
 The saved `excludeTickets` are always passed to selection, alongside any dynamic
 exclusions in the tick request. A hard-coded N in a schedule prompt can become
 stale; instruct the controller to read the saved policy instead.
-It refuses a limit below current active work; let that work finish before lowering
-N. Choose `cron` and `timezone` with the user; these fields default to every 30
+It refuses lowering N below current active work; let that work finish before
+lowering N. An unchanged N is accepted even when active work exceeds it (for
+example after workers were restarted outside the controller), so the controller
+can still reconcile that work; reservations keep enforcing the limit. Choose `cron` and `timezone` with the user; these fields default to every 30
 minutes from 08:00 through 19:30 UTC when omitted. Reconfiguring without them
 preserves the saved cadence. Every worker reservation/resume uses a shared lock
 and enforces this policy,
@@ -119,7 +121,7 @@ with `update_schedule`; scheduled runs only report drift. The prompt instructs
 the run to:
 
 1. If `toolkit-intake.json` exists, run `sync-config` before reading policy;
-   stop on invalid settings or a limit below active work. Then read saved policy
+   stop on invalid settings or a reduction below active work. Then read saved policy
    and fetch the current Paseo schedule by saved ID. Read only the fields the run
    needs: id, name, status/paused, cron, timezone, provider/model, mode and
    prompt. Do not read its run history, which grows with every run. Prefer

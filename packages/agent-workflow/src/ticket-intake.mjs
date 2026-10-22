@@ -133,15 +133,23 @@ function configuredPolicy(anchor, cwd, policy, input) {
 			? undefined
 			: normalizeWorkerHosts(input.workerHosts);
 	const current = capacity(anchor, input.repository);
-	if (current.active > input.count)
+	// Externally restarted workers can exceed an unchanged cap. Keep config
+	// synchronization available so the controller can reconcile those workers;
+	// reservations still enforce capacity. Reject actual reductions below usage.
+	if (current.active > input.count && (!policy || input.count < policy.count))
 		throw new Error(
 			"requested limit is below current active work; wait before lowering it",
 		);
-	for (const host of workerHosts ?? [])
-		if ((current.hosts?.[host.id]?.active ?? 0) > host.count)
+	for (const host of workerHosts ?? []) {
+		const previous = policy?.workerHosts?.find((saved) => saved.id === host.id);
+		if (
+			(current.hosts?.[host.id]?.active ?? 0) > host.count &&
+			(!previous || host.count < previous.count)
+		)
 			throw new Error(
 				`requested limit for worker host ${host.id} is below its current active work; wait before lowering it`,
 			);
+	}
 	return {
 		version: 1,
 		repository: input.repository,
