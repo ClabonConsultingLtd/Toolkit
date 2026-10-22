@@ -261,6 +261,26 @@ function bindReplacement(t, data, now) {
 	t.workerActive = true;
 	t.updatedAt = at;
 }
+// An uncertain launch is cleared only on operator evidence that no agent
+// exists for the launchKey. A saved or active agent is reconciled through
+// attach instead, so the ticket never disowns an agent that may still run.
+function resolveLaunch(t, data, now) {
+	if (data.launchResolved !== true)
+		throw new Error("launchResolved must be true when supplied");
+	if (typeof data.evidence !== "string" || !data.evidence.trim())
+		throw new Error("evidence required");
+	if (t.agentId)
+		throw new Error(
+			"saved agent must be reconciled with attach, not launchResolved",
+		);
+	if (t.workerActive)
+		throw new Error("launchResolved requires a stopped worker");
+	t.launchUncertain = false;
+	t.launchResolution = {
+		at: new Date(now).toISOString(),
+		evidence: data.evidence,
+	};
+}
 export function changeTicket(
 	state,
 	number,
@@ -335,7 +355,9 @@ export function changeTicket(
 			updatedAt: new Date(now).toISOString(),
 		});
 	} else if (action === "fix") {
-		requireStatus("reviewing");
+		// A re-review finding at an unchanged awaiting_merge head is a fix, not
+		// a base update: it counts a cycle and invalidates the reviewed head.
+		requireStatus("reviewing", "awaiting_merge");
 		requireText("reason");
 		if (t.fixCycles >= 2)
 			Object.assign(t, {
@@ -343,14 +365,20 @@ export function changeTicket(
 				previousStatus: "reviewing",
 				blockKind: "human",
 				repairLimitReached: true,
+				reviewedHead: null,
 				reason: data.reason,
 				updatedAt: new Date(now).toISOString(),
 			});
 		else {
+			// An awaiting_merge ticket holds no execution slot, so the worker it
+			// reserves needs a free one, as update-base does.
+			if (!ACTIVE.has(t.status) && !t.host && disposition(state).slots === 0)
+				throw new Error("no execution slot to fix");
 			t.fixCycles++;
 			Object.assign(t, {
 				status: "implementing",
 				workerActive: true,
+				reviewedHead: null,
 				reason: data.reason,
 				updatedAt: new Date(now).toISOString(),
 			});
@@ -411,6 +439,47 @@ export function changeTicket(
 		else delete t.resetAt;
 		// A permission wait or uncertain launch still consumes a slot until confirmed stopped.
 		if (data.workerStopped === true) t.workerActive = false;
+		if (data.launchResolved !== undefined) resolveLaunch(t, data, now);
+	} else if (action === "complete") {
+		// Closed duplicates and work finished outside a PR leave the batch here
+		// on operator evidence; a linked PR completes only through sync's
+		// verified merge.
+		if (t.status === "completed") throw new Error("ticket already completed");
+		requireText("evidence");
+		requireText("closeReason");
+		if (!/^[a-z][a-z0-9-]{0,39}$/.test(data.closeReason))
+			throw new Error("closeReason must be a short lowercase slug");
+		if (t.launchUncertain)
+			throw new Error("reconcile the uncertain launch before completing");
+		if (t.workerActive)
+			throw new Error("worker still active; block with workerStopped first");
+		if (t.pr)
+			throw new Error("linked PR must complete through a verified merge");
+		let duplicateOf;
+		if (data.closeReason === "duplicate") {
+			if (data.duplicateOf === undefined)
+				throw new Error("duplicateOf required for a duplicate");
+			duplicateOf = issueNumber(data.duplicateOf);
+			if (duplicateOf === t.number)
+				throw new Error("duplicateOf cannot be the ticket itself");
+		} else if (data.duplicateOf !== undefined)
+			throw new Error("duplicateOf only applies to closeReason duplicate");
+		const at = new Date(now).toISOString();
+		Object.assign(t, {
+			status: "completed",
+			workerActive: false,
+			blockKind: null,
+			reason: null,
+			evidence: data.evidence,
+			closeReason: data.closeReason,
+			...(duplicateOf && { duplicateOf }),
+			completedWithoutPr: true,
+			completedAt: at,
+			updatedAt: at,
+		});
+		delete t.previousStatus;
+		delete t.resetAt;
+		delete t.repairLimitReached;
 	} else if (action === "resume") {
 		requireStatus("blocked");
 		if (t.launchUncertain)

@@ -591,3 +591,35 @@ test("GitHub fallback accepts the authored None (can start immediately) declarat
 	);
 	assert.deepEqual(api.issue(14).dependencies, []);
 });
+
+test("a ticket completed without a PR releases dependents; blocked and excluded ones still block", (t) => {
+	const f = fixture(t),
+		existing = join(f.dir, "existing.json");
+	execute("init", existing, { ...f.input, batchId: "existing", tickets: [1] });
+	f.items[3].dependencies = ["1"];
+	f.items[1].state = "CLOSED";
+	// Blocked in its batch (closed without a merged PR), #1 still claims #3.
+	let result = selectNext(f.path, f.input, f.api);
+	assert.deepEqual(result.tickets, ["2"]);
+	assert.equal(result.shortfall, 1);
+
+	const { token } = execute("acquire", existing);
+	execute(
+		"complete",
+		existing,
+		{
+			token,
+			number: 1,
+			evidence: "closed as a duplicate of #2",
+			closeReason: "duplicate",
+			duplicateOf: 2,
+		},
+		f.options,
+	);
+	result = selectNext(f.path, f.input, f.api);
+	assert.deepEqual(result.tickets, ["2", "3"]);
+	assert.deepEqual(
+		selectNext(f.path, { ...f.input, excludeTickets: [1] }, f.api).tickets,
+		["2"],
+	);
+});

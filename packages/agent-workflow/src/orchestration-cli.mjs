@@ -490,6 +490,14 @@ export function execute(command, path, input = {}, options = {}) {
 						requiredChecks: required,
 					};
 				}
+			} else if (command === "complete") {
+				// Only GitHub proves the issue is closed; the state module checks
+				// the rest (no uncertain launch, active worker or linked PR).
+				const t = state.tickets[String(input.number).replace(/^#/, "")];
+				if (!t) throw new Error("ticket outside selected batch");
+				if (api.issue(t.number, false).state !== "CLOSED")
+					throw new Error("issue is still open; close it before completing");
+				output = changeTicket(state, input.number, command, input);
 			} else {
 				const t = state.tickets[String(input.number).replace(/^#/, "")];
 				if (
