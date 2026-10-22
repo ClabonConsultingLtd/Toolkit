@@ -243,12 +243,16 @@ test("host limits are enforced at reserve and when lowering a host's count", (t)
 		s.tickets[4].status = "implementing";
 		s.tickets[4].workerActive = true;
 	});
+	// An unchanged host count syncs while over capacity, so the controller can
+	// reconcile externally restarted workers; only a reduction is refused.
+	assert.equal(intakeCommand("sync-config", f.cwd).workerHosts[0].count, 1);
+	writeConfig(f.cwd, { workerHosts: [{ ...cloud, count: 2 }] });
+	assert.equal(intakeCommand("sync-config", f.cwd).workerHosts[0].count, 2);
+	writeConfig(f.cwd);
 	assert.throws(
 		() => intakeCommand("sync-config", f.cwd),
 		/worker host cloud is below its current active work/,
 	);
-	writeConfig(f.cwd, { workerHosts: [{ ...cloud, count: 2 }] });
-	assert.equal(intakeCommand("sync-config", f.cwd).workerHosts[0].count, 2);
 });
 
 test("reserve refuses a host removed from the config or a newly excluded label", (t) => {
