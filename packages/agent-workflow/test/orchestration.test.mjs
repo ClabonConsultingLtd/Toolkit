@@ -27,8 +27,13 @@ import {
 import { requireNoReportedFailures } from "../src/orchestration-checks.mjs";
 import { execute } from "../src/orchestration-cli.mjs";
 import {
+	createGh,
 	fallbackDependencies,
+	GH_RETRY_BACKOFF_MS,
+	ghRead,
+	ghWrite,
 	github,
+	isTransientGhFailure,
 	parentReference,
 	recommendation,
 	requireReady,
@@ -1357,6 +1362,144 @@ test("cleanup runs the checkout's hook against the ticket worktree and only reco
 	symlinkSync(join(worktree, "cleanup.mjs"), join(checkout, "escape.mjs"));
 	writeConfig({ cleanupCommand: "escape.mjs" });
 	assert.throws(cleanup, /cleanup command escapes the checkout/);
+});
+function ghHarness(outcomes, { kind = "read" } = {}) {
+	const calls = [],
+		sleeps = [],
+		logs = [];
+	const gh = createGh({
+		spawn: (command, args) => {
+			calls.push([command, ...args]);
+			const outcome = outcomes.shift();
+			if (outcome instanceof Error) throw outcome;
+			return outcome;
+		},
+		sleep: (ms) => sleeps.push(ms),
+		log: (line) => logs.push(line),
+	});
+	return {
+		// `kind: null` calls the wrapper with no classification at all.
+		run: () =>
+			kind === null
+				? gh(["issue", "view", "7"])
+				: gh(["issue", "view", "7"], { kind }),
+		calls,
+		sleeps,
+		logs,
+	};
+}
+const ghFailure = (stderr, extra = {}) =>
+	Object.assign(new Error("Command failed: gh"), { stderr, ...extra });
+test("read-only gh calls retry transient failures with backoff and succeed", () => {
+	for (const failure of [
+		ghFailure("HTTP 504: 504 Gateway Timeout (https://api.github.com/graphql)"),
+		ghFailure(
+			'Post "https://api.github.com/graphql": dial tcp 1.2.3.4:443: i/o timeout',
+		),
+		Object.assign(new Error("spawnSync gh ETIMEDOUT"), {
+			code: "ETIMEDOUT",
+			stderr: "",
+		}),
+	]) {
+		assert.ok(isTransientGhFailure(failure));
+		const h = ghHarness([failure, "ok"]);
+		assert.equal(h.run(), "ok");
+		assert.equal(h.calls.length, 2);
+		assert.deepEqual(h.calls[0], ["gh", "issue", "view", "7"]);
+		assert.deepEqual(h.sleeps, [GH_RETRY_BACKOFF_MS[0]]);
+		assert.equal(h.logs.length, 1);
+		assert.match(h.logs[0], /^gh issue view 7: transient failure \(/);
+		assert.match(h.logs[0], /retrying in 2000 ms \(attempt 2 of 3\)$/);
+	}
+});
+test("gh does not retry 404, other 4xx or authentication failures", () => {
+	for (const stderr of [
+		"HTTP 404: Not Found (https://api.github.com/repos/example/project/issues/7)",
+		"HTTP 422: Validation Failed",
+		"gh: Bad credentials (HTTP 401)",
+		"To get started with GitHub CLI, please run:  gh auth login",
+		"HTTP 503 after HTTP 403 rate limit exceeded",
+	]) {
+		const h = ghHarness([ghFailure(stderr), "ok"]);
+		assert.throws(h.run, (error) => error.stderr === stderr);
+		assert.equal(h.calls.length, 1);
+		assert.deepEqual(h.sleeps, []);
+		assert.deepEqual(h.logs, []);
+	}
+	const h = ghHarness([ghFailure("something else went wrong"), "ok"]);
+	assert.throws(h.run, /Command failed/);
+	assert.equal(h.calls.length, 1);
+});
+test("gh write calls are never retried, even on a transient failure", () => {
+	// An unclassified call is treated as a write: never retried.
+	for (const kind of ["write", null]) {
+		const h = ghHarness([ghFailure("HTTP 502: Bad Gateway"), "ok"], { kind });
+		assert.throws(h.run, /Command failed/);
+		assert.equal(h.calls.length, 1);
+		assert.deepEqual(h.sleeps, []);
+		assert.deepEqual(h.logs, []);
+	}
+});
+test("gh gives up after the bounded retry budget and rethrows the last failure", () => {
+	const last = ghFailure("HTTP 500: Internal Server Error (third)");
+	const h = ghHarness([
+		ghFailure("HTTP 500: first"),
+		ghFailure("HTTP 500: second"),
+		last,
+		"never reached",
+	]);
+	assert.throws(h.run, (error) => error === last);
+	assert.equal(h.calls.length, GH_RETRY_BACKOFF_MS.length + 1);
+	assert.deepEqual(h.sleeps, [...GH_RETRY_BACKOFF_MS]);
+	assert.deepEqual(
+		h.logs.map((line) => /\(attempt (\d) of 3\)$/.exec(line)?.[1]),
+		["2", "3"],
+	);
+	// Three 60 s attempts plus backoff stay well inside the 600 s step timeout.
+	assert.ok(
+		GH_RETRY_BACKOFF_MS.reduce((sum, ms) => sum + ms, 0) + 3 * 60_000 <
+			600_000 / 2,
+	);
+});
+test("github() declares every read and write to the gh wrapper and reports progress", () => {
+	const kinds = [],
+		progress = [];
+	const data = {
+		number: 7,
+		title: "t",
+		body: "",
+		comments: [],
+		labels: [{ name: "ready-for-agent" }],
+		state: "OPEN",
+		url: "u",
+		assignees: [],
+	};
+	const api = github(
+		"example/project",
+		(args, options) => {
+			kinds.push([args.slice(0, 2).join(" "), options?.kind]);
+			if (args[0] === "api") return "[[]]";
+			return JSON.stringify(data);
+		},
+		{ progress: (line) => progress.push(line) },
+	);
+	api.issue(7);
+	api.listReady();
+	api.returnToTriage(7, "edited");
+	assert.deepEqual(kinds, [
+		["issue view", "read"],
+		["api --paginate", "read"],
+		["api --paginate", "read"],
+		["issue edit", "write"],
+		["issue comment", "write"],
+	]);
+	assert.deepEqual(progress, [
+		"reading issue #7",
+		"listing open ready-for-agent issues",
+		"returning #7 to triage",
+	]);
+	assert.equal(typeof ghRead, "function");
+	assert.equal(typeof ghWrite, "function");
 });
 test("fix from awaiting_merge needs a free slot, clears the reviewed head and counts a cycle", () => {
 	const s = newBatch({ ...manifest(), tickets: [7, 8, 9, 10] });

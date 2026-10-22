@@ -12,7 +12,7 @@ import {
 	readRepositoryIntakeConfig,
 } from "./intake-config.mjs";
 import { ACTIVE, atomicWrite, newBatch } from "./orchestration.mjs";
-import { github, helperIdentity } from "./orchestration-github.mjs";
+import { gh, github, helperIdentity } from "./orchestration-github.mjs";
 import {
 	batchStates,
 	selectNext,
@@ -232,6 +232,12 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 	const cwd = resolve(checkout),
 		anchor = join(cwd, ".toolkit", "orchestration", "intake-anchor.json");
 	const activeHelper = helperIdentity();
+	// A tick killed by the controller's step timeout leaves no stdout, so each
+	// phase and GitHub lookup is announced on stderr as it starts.
+	const log =
+		command === "tick"
+			? (options.log ?? ((line) => process.stderr.write(`tick: ${line}\n`)))
+			: () => {};
 	if (command === "status") {
 		const policy = readIntake(anchor);
 		const config = readRepositoryIntakeConfig(cwd);
@@ -294,7 +300,9 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				input.excludeTickets ?? [],
 			);
 			atomicWrite(path, policy);
+			log(`schedule reconciled; paused=${policy.paused}`);
 			if (policy.paused) {
+				log("paused; nothing to admit");
 				return {
 					status: "paused",
 					paused: true,
@@ -306,7 +314,8 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 				hour = new Date(now).toISOString().slice(0, 13);
 			const batchId = `intake-${hour.replace(/[-T:]/g, "")}`,
 				batchFile = join(dirname(anchor), `${batchId}.json`);
-			if (policy.lastTick?.hour > hour)
+			if (policy.lastTick?.hour > hour) {
+				log("clock is before the last evaluated hour; replaying");
 				return {
 					...policy.lastTick,
 					status: "replayed",
@@ -314,7 +323,9 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 					reason: "clock is before the last evaluated hour",
 					capacity: capacity(anchor, policy.repository),
 				};
+			}
 			if (policy.lastTick?.hour === hour && policy.lastTick.initialized) {
+				log(`replaying the admission recorded for ${hour}`);
 				if (!existsSync(batchFile))
 					throw new Error(
 						"admitted intake batch is missing; reconcile before retrying",
@@ -335,6 +346,7 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 			const retried = policy.lastTick?.hour === hour;
 			// Atomic batch creation precedes tick bookkeeping. Recover that batch after a crash.
 			if (existsSync(batchFile)) {
+				log(`recovering the batch ${batchId} written before a crash`);
 				const existing = readHourlyBatch(batchFile, policy.repository, hour);
 				policy.lastTick = {
 					hour,
@@ -355,7 +367,8 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 					excludeLabels: h.excludeLabels,
 				}));
 				const count = localCount + hosts.reduce((sum, h) => sum + h.slots, 0);
-				if (count === 0)
+				if (count === 0) {
+					log("capacity full; nothing to admit");
 					policy.lastTick = {
 						hour,
 						status: "capacity-full",
@@ -371,7 +384,7 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 						],
 						capacity: budget,
 					};
-				else {
+				} else {
 					const request = {
 						...policy,
 						batchId,
@@ -388,11 +401,19 @@ export function intakeCommand(command, checkout, input = {}, options = {}) {
 							placement: { local: localCount, hosts },
 						}),
 					};
+					log(`selecting up to ${count} tickets from ${policy.repository}`);
 					const selection = selectNext(
 						batchFile,
 						request,
-						(options.github ?? github)(policy.repository),
+						(options.github ?? github)(policy.repository, gh, {
+							progress: log,
+						}),
 						{ returnToTriage: true },
+					);
+					log(
+						selection.tickets.length
+							? `admitted ${selection.tickets.map((n) => `#${n}`).join(", ")}`
+							: "no eligible tickets",
 					);
 					if (selection.tickets.length) {
 						const state = newBatch({ ...request, tickets: selection.tickets });

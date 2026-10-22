@@ -79,6 +79,7 @@ function fixture(t, labelled = []) {
 	};
 	const options = {
 		github: () => api,
+		log: () => {},
 		now: Date.parse("2026-09-21T09:00:00Z"),
 		schedule: {
 			id: "s1",

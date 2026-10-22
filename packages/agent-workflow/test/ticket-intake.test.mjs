@@ -55,6 +55,7 @@ function fixture(t) {
 	};
 	const options = {
 		github: () => api,
+		log: () => {},
 		now: Date.parse("2026-09-21T09:00:00Z"),
 		schedule: {
 			id: "s1",
@@ -613,6 +614,7 @@ test("live Paseo resume clears a stale policy pause and admits without a helper 
 		{ models: f.models, schedule: f.schedule },
 		{
 			github: f.options.github,
+			log: () => {},
 			now: f.options.now,
 		},
 	);
@@ -647,7 +649,11 @@ test("live Paseo pause overrides a stale active policy; UI resume admits the sam
 test("missing, mismatched, or unreadable schedule state fails before admission", (t) => {
 	const f = fixture(t);
 	const request = { models: f.models };
-	const options = { github: f.options.github, now: f.options.now };
+	const options = {
+		github: f.options.github,
+		log: () => {},
+		now: f.options.now,
+	};
 	assert.throws(
 		() => intakeCommand("tick", f.cwd, request, options),
 		/schedule state is required/,
@@ -772,6 +778,43 @@ test("shared lock blocks both intake and reserve; malformed policy fails closed"
 		() => intakeCommand("tick", f.cwd, { models: f.models }, f.options),
 		/invalid intake/,
 	);
+});
+test("tick reports its phases and each issue it reads on stderr", (t) => {
+	const f = fixture(t);
+	const lines = [];
+	const result = intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models },
+		{
+			...f.options,
+			github: (repository, exec, { progress }) => {
+				assert.equal(repository, "example/project");
+				assert.equal(typeof exec, "function");
+				progress("reading issue #1");
+				return f.api;
+			},
+			log: (line) => lines.push(line),
+		},
+	);
+	assert.equal(result.status, "admitted");
+	assert.deepEqual(lines, [
+		"schedule reconciled; paused=false",
+		"selecting up to 3 tickets from example/project",
+		"reading issue #1",
+		"admitted #1, #2, #3",
+	]);
+	const replayed = [];
+	intakeCommand(
+		"tick",
+		f.cwd,
+		{ models: f.models },
+		{ ...f.options, log: (line) => replayed.push(line) },
+	);
+	assert.deepEqual(replayed, [
+		"schedule reconciled; paused=false",
+		"replaying the admission recorded for 2026-09-21T09",
+	]);
 });
 test("a resolved launch stops counting toward intake capacity and resumes", (t) => {
 	const f = fixture(t),

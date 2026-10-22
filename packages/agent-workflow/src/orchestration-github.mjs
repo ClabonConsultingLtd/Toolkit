@@ -21,14 +21,75 @@ export function helperIdentity() {
 	};
 }
 
-export function gh(args) {
-	return execFileSync("gh", args, {
-		encoding: "utf8",
-		timeout: 60_000,
-		maxBuffer: 64 * 1024 * 1024,
-		stdio: ["ignore", "pipe", "pipe"],
-	});
+// A 4xx, a missing resource or a rejected token will not change on a retry.
+const PERMANENT_GH_FAILURE =
+	/HTTP 4\d\d|gh auth login|not logged in|bad credentials|authentication/i;
+// GitHub 5xx, a connection or dial timeout, or the child killed by the
+// per-call timeout (ETIMEDOUT) usually succeed moments later.
+const TRANSIENT_GH_FAILURE =
+	/HTTP 5\d\d|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|EPIPE|dial tcp|i\/o timeout|TLS handshake timeout|connection reset|unexpected EOF/i;
+export function isTransientGhFailure(error) {
+	const text = `${error?.message ?? ""}\n${error?.stderr ?? ""}`;
+	if (PERMANENT_GH_FAILURE.test(text)) return false;
+	return error?.code === "ETIMEDOUT" || TRANSIENT_GH_FAILURE.test(text);
 }
+// Three attempts at most: with the 60 s per-call timeout the worst case stays
+// far inside the controller's 600 s step limit.
+export const GH_RETRY_BACKOFF_MS = Object.freeze([2_000, 4_000]);
+function blockingSleep(ms) {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function describeGhCall(args) {
+	return args
+		.filter((arg) => !arg.startsWith("--") && arg.length <= 80)
+		.slice(0, 3)
+		.join(" ");
+}
+function failureSummary(error) {
+	const text = `${error?.stderr ?? ""}`.trim() || `${error?.message ?? ""}`;
+	return (
+		text
+			.split("\n")
+			.map((line) => line.trim())
+			.find((line) => line) ?? "unknown error"
+	).slice(0, 160);
+}
+// `kind` is declared by the caller, never inferred from the arguments: only
+// `read` calls are retried. Writes (labels, comments, closes, merges) run
+// once, so a retry can never repeat a side effect that already happened.
+export function createGh({
+	spawn = execFileSync,
+	sleep = blockingSleep,
+	log = (line) => process.stderr.write(`${line}\n`),
+	backoff = GH_RETRY_BACKOFF_MS,
+} = {}) {
+	const run = (args) =>
+		spawn("gh", args, {
+			encoding: "utf8",
+			timeout: 60_000,
+			maxBuffer: 64 * 1024 * 1024,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+	return function gh(args, { kind = "write" } = {}) {
+		if (kind !== "read") return run(args);
+		const attempts = backoff.length + 1;
+		for (let attempt = 1; ; attempt++) {
+			try {
+				return run(args);
+			} catch (error) {
+				if (attempt >= attempts || !isTransientGhFailure(error)) throw error;
+				const delay = backoff[attempt - 1];
+				log(
+					`gh ${describeGhCall(args)}: transient failure (${failureSummary(error)}); retrying in ${delay} ms (attempt ${attempt + 1} of ${attempts})`,
+				);
+				sleep(delay);
+			}
+		}
+	};
+}
+export const gh = createGh();
+export const ghRead = (args) => gh(args, { kind: "read" });
+export const ghWrite = (args) => gh(args, { kind: "write" });
 function dependencyError(message, declaration) {
 	const error = new Error(message);
 	error.code = "INVALID_DEPENDENCY_DECLARATION";
@@ -194,10 +255,15 @@ export function checkApproval(
 	return { refusal, brief: null };
 }
 
-export function github(repository, exec = gh) {
-	const json = (args) => JSON.parse(exec(args));
+// `progress` receives one line per GitHub lookup so a run killed by an outer
+// timeout leaves a trail of what it was waiting on.
+export function github(repository, exec = gh, { progress = () => {} } = {}) {
+	const read = (args) => exec(args, { kind: "read" });
+	const write = (args) => exec(args, { kind: "write" });
+	const json = (args) => JSON.parse(read(args));
 	function issue(number, withDependencies = true) {
 		const n = issueNumber(number);
+		progress(`reading issue #${n}`);
 		const data = json([
 			"issue",
 			"view",
@@ -263,8 +329,9 @@ export function github(repository, exec = gh) {
 		try {
 			if (!parents) {
 				parents = { children: new Map(), native: new Set() };
+				progress("listing all issues for the sub-ticket map");
 				// Project in gh: full issue and PR bodies overflow the exec buffer.
-				const all = exec([
+				const all = read([
 					"api",
 					"--paginate",
 					"--jq",
@@ -287,7 +354,8 @@ export function github(repository, exec = gh) {
 				}
 			}
 			const children = new Set(parents.children.get(n));
-			if (parents.native.has(n))
+			if (parents.native.has(n)) {
+				progress(`reading sub-issues of #${n}`);
 				for (const item of json([
 					"api",
 					"--paginate",
@@ -295,6 +363,7 @@ export function github(repository, exec = gh) {
 					`repos/${repository}/issues/${n}/sub_issues?per_page=100`,
 				]).flat())
 					children.add(String(item.number));
+			}
 			return [...children].sort((a, b) => Number(a) - Number(b));
 		} catch (error) {
 			parents = undefined;
@@ -305,6 +374,7 @@ export function github(repository, exec = gh) {
 		}
 	}
 	function pr(number) {
+		progress(`reading PR #${issueNumber(number)}`);
 		return json([
 			"pr",
 			"view",
@@ -322,6 +392,7 @@ export function github(repository, exec = gh) {
 		const n = issueNumber(number);
 		const [owner, name] = repository.split("/");
 		let pages, events;
+		progress(`reading approval history of #${n}`);
 		try {
 			pages = json([
 				"api",
@@ -375,7 +446,8 @@ export function github(repository, exec = gh) {
 		approval,
 		returnToTriage(number, detail) {
 			const n = issueNumber(number);
-			exec([
+			progress(`returning #${n} to triage`);
+			write([
 				"issue",
 				"edit",
 				n,
@@ -386,7 +458,7 @@ export function github(repository, exec = gh) {
 				"--add-label",
 				"needs-triage",
 			]);
-			exec([
+			write([
 				"issue",
 				"comment",
 				n,
@@ -398,6 +470,7 @@ export function github(repository, exec = gh) {
 		},
 		requiredStatusChecks(branch) {
 			let data;
+			progress(`reading required status checks of ${branch}`);
 			try {
 				data = json([
 					"api",
@@ -429,6 +502,7 @@ export function github(repository, exec = gh) {
 		},
 		subTickets,
 		listReady() {
+			progress("listing open ready-for-agent issues");
 			return json([
 				"api",
 				"--paginate",
@@ -441,6 +515,7 @@ export function github(repository, exec = gh) {
 		hasImplementationPr(number) {
 			const ticketNumber = issueNumber(number);
 			let events;
+			progress(`reading PR timeline of #${ticketNumber}`);
 			try {
 				events = json([
 					"api",
@@ -480,6 +555,7 @@ export function github(repository, exec = gh) {
 				const prNumber = Number(url.pathname.split("/").at(-1));
 				const prUrl = `https://github.com/${apiRepo}/pull/${prNumber}`;
 				let pull;
+				progress(`reading referenced PR ${prUrl}`);
 				try {
 					pull = json(["api", url.pathname.slice(1)]);
 				} catch (error) {
@@ -568,8 +644,9 @@ export function github(repository, exec = gh) {
 			verifyPr(state, ticket, pull);
 			if (pull.state !== "MERGED" || !pull.mergedAt)
 				throw new Error("PR is not merged");
+			progress(`finalizing #${ticket.number}`);
 			beforeWrite();
-			exec([
+			write([
 				"label",
 				"create",
 				"done",
@@ -594,10 +671,10 @@ export function github(repository, exec = gh) {
 			];
 			if (current.labels.includes("ready-for-agent"))
 				edit.push("--remove-label", "ready-for-agent");
-			exec(edit);
+			write(edit);
 			beforeWrite();
 			if (current.state !== "CLOSED")
-				exec([
+				write([
 					"issue",
 					"close",
 					ticket.number,
