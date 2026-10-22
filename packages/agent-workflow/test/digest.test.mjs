@@ -216,6 +216,24 @@ test("a failed worktree cleanup is flagged without changing the ticket", () => {
 		/cleanup-failed/,
 	);
 });
+test("an absent worktree is flagged as a warning, not a cleanup failure", () => {
+	const s = fixtureState();
+	s.tickets[7].cleanup = {
+		at: "2026-01-01T00:00:00Z",
+		ok: false,
+		status: "worktree-absent",
+		worktree: "/tmp/tickets-pilot-7",
+		error: "worktree /tmp/tickets-pilot-7 does not exist",
+	};
+	const digest = buildDigest([s], { now: 10_000, activity: () => null });
+	const seven = digest.batches[0].tickets.find((t) => t.number === "7");
+	assert.equal(seven.worktreeAbsent, true);
+	assert.equal(seven.cleanupFailed, false);
+	assert.equal(seven.status, s.tickets[7].status);
+	const markdown = renderMarkdown(digest);
+	assert.match(markdown, /worktree-absent/);
+	assert.doesNotMatch(markdown, /cleanup-failed/);
+});
 test("digest lists merged tickets whose worktrees can be archived, without archiving", () => {
 	const s = fixtureState();
 	Object.assign(s.tickets[8], {

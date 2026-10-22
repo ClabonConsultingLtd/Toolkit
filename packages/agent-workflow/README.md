@@ -208,7 +208,9 @@ checkout, with the worktree as working directory, after each review, when a
 ticket is blocked, when a stopped or finished worker is reconciled, and after a
 merge is finalized. It must be idempotent and exit zero when there is nothing to
 remove. A failure or timeout is reported (and flagged `cleanup-failed` in the
-digest) but never changes the ticket's state. `examples/intake-cleanup.mjs`
+digest) but never changes the ticket's state; a worktree that has already been
+removed is flagged `worktree-absent` instead and is never recreated.
+`examples/intake-cleanup.mjs`
 tears down the default Compose project. The hook is a backstop: scripts that
 start containers should still tear them down in an exit trap
 (`docker compose -p <project> down --volumes --remove-orphans`).
