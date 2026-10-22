@@ -291,7 +291,14 @@ the fallback in the run report. Never change a running worker's mode.
   `capacity-full`, and `paused`; `capacity` is the current shared limit snapshot,
   and `skipped` explains excluded candidates or a capacity wait. Like
   `init-next`, a tick returns a ticket edited after approval to `needs-triage`
-  with a comment and skips one without a trusted brief.
+  with a comment and skips one without a trusted brief. The tick writes its
+  phases and each GitHub lookup (`tick: reading issue #N`) to stderr while
+  stdout stays JSON, so a run killed by the step timeout leaves a trail.
+  Read-only `gh` calls are retried up to three times with a short backoff on
+  transient failures (HTTP 5xx, connection or dial timeouts, a timed-out
+  child); each retry is logged to stderr with its attempt number. A 4xx,
+  not-found or authentication failure fails immediately, and writes (labels,
+  comments, closes) are never retried.
 - `schedule-prompt`: print the canonical schedule prompt for CHECKOUT from
   `toolkit-intake.json` (or the saved policy). With `--check FILE|-`, compare a
   live prompt, given as raw text or Paseo schedule JSON, ignoring line endings

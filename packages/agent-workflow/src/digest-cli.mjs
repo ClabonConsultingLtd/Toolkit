@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,16 +9,10 @@ import {
 	writeCursor,
 } from "./digest.mjs";
 import { atomicWriteText } from "./orchestration.mjs";
-import { recommendation } from "./orchestration-github.mjs";
+import { ghRead, recommendation } from "./orchestration-github.mjs";
 
-function gh(args) {
-	return execFileSync("gh", args, {
-		encoding: "utf8",
-		timeout: 60_000,
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-}
-export function fetchRecommendation(repository, number, exec = gh) {
+// Read-only lookup: the shared wrapper retries transient GitHub failures.
+export function fetchRecommendation(repository, number, exec = ghRead) {
 	const data = JSON.parse(
 		exec([
 			"issue",
@@ -68,7 +61,8 @@ export function run(checkoutDir, input = {}, options = {}) {
 		stuckHours: input.stuckHours ?? 24,
 		activity: (agentId) => activity[agentId] ?? null,
 		recommendationFor:
-			options.recommendationFor ?? cachedRecommendationFor(options.exec ?? gh),
+			options.recommendationFor ??
+			cachedRecommendationFor(options.exec ?? ghRead),
 	});
 	const markdown = renderMarkdown(digest);
 	writeFile(
