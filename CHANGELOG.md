@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.21.0 - 2026-10-22
+
+- #197: Retry transient gh read failures and log tick progress
+- #196: Add intake reconciliation actions for stuck tickets
+- #195: Accept an unchanged intake limit while over capacity
+- #194: Record an absent worktree as a cleanup warning
+
 ## 0.20.0 - 2026-10-22
 
 - #191: agent-workflow: let attach and resume bind a replacement agent
