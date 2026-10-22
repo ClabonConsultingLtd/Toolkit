@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -38,6 +39,7 @@ import {
 	requireReady,
 	resolveRuntime,
 } from "../src/orchestration-github.mjs";
+import { claimedTickets } from "../src/ticket-selection.mjs";
 import { approved } from "./approval-fixtures.mjs";
 
 const manifest = () => ({
@@ -1498,4 +1500,278 @@ test("github() declares every read and write to the gh wrapper and reports progr
 	]);
 	assert.equal(typeof ghRead, "function");
 	assert.equal(typeof ghWrite, "function");
+});
+test("fix from awaiting_merge needs a free slot, clears the reviewed head and counts a cycle", () => {
+	const s = newBatch({ ...manifest(), tickets: [7, 8, 9, 10] });
+	worker(s, 7);
+	changeTicket(s, 7, "review", { evidence: "tests" });
+	s.tickets[7].pr = 17;
+	changeTicket(s, 7, "ready", { evidence: "review", reviewedHead: "abc" });
+	for (const n of [8, 9, 10]) worker(s, n);
+	assert.throws(
+		() => changeTicket(s, 7, "fix", { reason: "ADR describes wrong order" }),
+		/no execution slot/,
+	);
+	assert.equal(s.tickets[7].status, "awaiting_merge");
+	assert.equal(s.tickets[7].fixCycles, 0);
+	assert.equal(s.tickets[7].reviewedHead, "abc");
+	changeTicket(s, 8, "block", { reason: "stopped", workerStopped: true });
+
+	const fixed = changeTicket(s, 7, "fix", {
+		reason: "ADR describes wrong order",
+	});
+	assert.equal(fixed.status, "implementing");
+	assert.equal(fixed.workerActive, true);
+	assert.equal(fixed.fixCycles, 1);
+	assert.equal(fixed.reviewedHead, null);
+	assert.equal(disposition(s).slots, 0);
+	changeTicket(s, 7, "review", { evidence: "tests" });
+	assert.throws(
+		() => changeTicket(s, 7, "ready", { evidence: "review" }),
+		/reviewedHead required/,
+	);
+	changeTicket(s, 7, "ready", { evidence: "review", reviewedHead: "def" });
+	changeTicket(s, 7, "fix", { reason: "second finding" });
+	changeTicket(s, 7, "review", { evidence: "tests" });
+	changeTicket(s, 7, "ready", { evidence: "review", reviewedHead: "ghi" });
+
+	const blocked = changeTicket(s, 7, "fix", { reason: "third finding" });
+	assert.equal(blocked.status, "blocked");
+	assert.equal(blocked.repairLimitReached, true);
+	assert.equal(blocked.previousStatus, "reviewing");
+	assert.equal(blocked.workerActive, false);
+	assert.equal(blocked.reviewedHead, null);
+	assert.equal(blocked.fixCycles, 2);
+});
+test("fix is still rejected from queued, implementing, blocked and completed", () => {
+	const s = newBatch(manifest());
+	const fix = (n) => () => changeTicket(s, n, "fix", { reason: "finding" });
+	assert.throws(fix(8), /invalid in queued/);
+	worker(s, 7);
+	assert.throws(fix(7), /invalid in implementing/);
+	changeTicket(s, 7, "block", { reason: "permission" });
+	assert.throws(fix(7), /invalid in blocked/);
+	s.tickets[9].status = "completed";
+	assert.throws(fix(9), /invalid in completed/);
+});
+test("block with launchResolved clears an uncertain launch only without a saved or active agent", () => {
+	const s = newBatch(manifest());
+	changeTicket(s, 7, "reserve", runtime);
+	const resolve = (data) =>
+		changeTicket(s, 7, "block", {
+			reason: "issue closed before any agent was created",
+			launchResolved: true,
+			evidence: "list_agents by launchKey is empty; old controller exited",
+			...data,
+		});
+	assert.throws(() => resolve(), /stopped worker/);
+	assert.equal(s.tickets[7].launchUncertain, true);
+	changeTicket(s, 7, "block", { reason: "interrupted", workerStopped: true });
+	assert.equal(s.tickets[7].launchUncertain, true);
+	assert.throws(
+		() => changeTicket(s, 7, "resume", { evidence: "retry" }),
+		/uncertain/,
+	);
+	assert.throws(() => resolve({ launchResolved: false }), /must be true/);
+	assert.throws(() => resolve({ evidence: " " }), /evidence required/);
+	assert.equal(s.tickets[7].launchUncertain, true);
+
+	const cleared = resolve();
+	assert.equal(cleared.status, "blocked");
+	assert.equal(cleared.launchUncertain, false);
+	assert.equal(cleared.workerActive, false);
+	assert.match(cleared.launchResolution.evidence, /launchKey/);
+	assert.ok(Number.isFinite(Date.parse(cleared.launchResolution.at)));
+	const resumed = changeTicket(s, 7, "resume", {
+		evidence: "operator authorised a fresh launch",
+	});
+	assert.equal(resumed.status, "implementing");
+
+	// A saved agent is reconciled through attach, never disowned here.
+	worker(s, 8);
+	changeTicket(s, 8, "block", { reason: "stopped", workerStopped: true });
+	s.tickets[8].launchUncertain = true;
+	assert.throws(
+		() =>
+			changeTicket(s, 8, "block", {
+				reason: "no agent",
+				launchResolved: true,
+				evidence: "listing empty",
+			}),
+		/attach/,
+	);
+	assert.equal(s.tickets[8].launchUncertain, true);
+	// Stopping the reservation and resolving its launch may share one call.
+	changeTicket(s, 9, "reserve", runtime);
+	const single = changeTicket(s, 9, "block", {
+		reason: "launch never happened",
+		workerStopped: true,
+		launchResolved: true,
+		evidence: "no agent for the launchKey; creation call failed",
+	});
+	assert.equal(single.launchUncertain, false);
+	assert.equal(single.workerActive, false);
+});
+test("complete retires a closed ticket without a PR on evidence and refuses unsafe states", () => {
+	const s = newBatch(manifest());
+	const complete = (n, data) => () => changeTicket(s, n, "complete", data);
+	const duplicate = {
+		evidence: "maintainer closed #9 as a duplicate of #2",
+		closeReason: "duplicate",
+		duplicateOf: "#2",
+	};
+	assert.throws(complete(9, { ...duplicate, evidence: "" }), /evidence/);
+	assert.throws(complete(9, { evidence: "e" }), /closeReason required/);
+	assert.throws(complete(9, { evidence: "e", closeReason: "Dup!" }), /slug/);
+	assert.throws(
+		complete(9, { evidence: "e", closeReason: "duplicate" }),
+		/duplicateOf required/,
+	);
+	assert.throws(
+		complete(9, { evidence: "e", closeReason: "manual", duplicateOf: 2 }),
+		/only applies/,
+	);
+	assert.throws(complete(9, { ...duplicate, duplicateOf: 9 }), /itself/);
+	assert.equal(s.tickets[9].status, "queued");
+
+	const done = complete(9, duplicate)();
+	assert.equal(done.status, "completed");
+	assert.equal(done.duplicateOf, "2");
+	assert.equal(done.closeReason, "duplicate");
+	assert.equal(done.completedWithoutPr, true);
+	assert.equal(done.evidence, duplicate.evidence);
+	assert.ok(Number.isFinite(Date.parse(done.completedAt)));
+	assert.equal(done.reason, null);
+	assert.equal(done.blockKind, null);
+	assert.throws(complete(9, duplicate), /already completed/);
+
+	const manual = {
+		evidence: "operator applied it by hand",
+		closeReason: "manual",
+	};
+	changeTicket(s, 7, "reserve", runtime);
+	changeTicket(s, 7, "block", { reason: "closed", workerStopped: true });
+	assert.throws(complete(7, manual), /uncertain launch/);
+	worker(s, 8);
+	assert.throws(complete(8, manual), /worker still active/);
+	changeTicket(s, 8, "review", { evidence: "tests" });
+	s.tickets[8].pr = 17;
+	assert.throws(complete(8, manual), /verified merge/);
+	delete s.tickets[8].pr;
+	changeTicket(s, 8, "block", { reason: "closed by operator" });
+	const finished = complete(8, manual)();
+	assert.equal(finished.status, "completed");
+	assert.equal(finished.duplicateOf, undefined);
+	assert.equal(finished.previousStatus, undefined);
+	assert.equal(finished.workerActive, false);
+});
+test("complete needs a closed issue and releases dependents in sync and selection", (t) => {
+	const { path, token } = fixture(t),
+		issues = snapshot();
+	const options = {
+		github: () => ({
+			approval,
+			snapshot: () => issues,
+			issue: (n) => issues[n],
+			pr: () => pull(),
+		}),
+	};
+	const request = {
+		token,
+		number: 7,
+		evidence: "closed as a duplicate of #2",
+		closeReason: "duplicate",
+		duplicateOf: 2,
+	};
+	assert.throws(
+		() => execute("complete", path, request, options),
+		/still open/,
+	);
+	issues[7].state = "CLOSED";
+	let synced = execute("sync", path, { token }, options);
+	assert.equal(synced.launchable.includes("8"), false);
+	assert.match(execute("status", path).tickets[8].reason, /Waiting for #7/);
+	assert.deepEqual([...claimedTickets(path, "example/project")].sort(), [
+		"7",
+		"8",
+		"9",
+	]);
+
+	const done = execute("complete", path, request, options);
+	assert.equal(done.status, "completed");
+	synced = execute("sync", path, { token }, options);
+	assert.ok(synced.launchable.includes("8"));
+	const state = execute("status", path);
+	assert.equal(state.tickets[7].status, "completed");
+	assert.equal(state.tickets[7].duplicateOf, "2");
+	assert.equal(state.tickets[8].status, "queued");
+	assert.deepEqual([...claimedTickets(path, "example/project")].sort(), [
+		"8",
+		"9",
+	]);
+	assert.throws(() => execute("complete", path, request, options), /already/);
+});
+test("cleanup against an absent worktree records a durable warning instead of throwing", (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cleanup-absent-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const checkout = join(dir, "checkout");
+	mkdirSync(checkout);
+	writeFileSync(
+		join(checkout, "toolkit-intake.json"),
+		JSON.stringify({
+			version: 1,
+			repository: "example/project",
+			baseBranch: "main",
+			codexModel: "test-codex",
+			count: 1,
+			cleanupCommand: "cleanup.mjs",
+		}),
+	);
+	const record = join(dir, "calls.jsonl");
+	writeFileSync(
+		join(checkout, "cleanup.mjs"),
+		`import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(record)}, "ran\\n");\n`,
+	);
+	const path = join(dir, "state.json");
+	execute("init", path, { ...manifest(), cwd: checkout });
+	const { token } = execute("acquire", path);
+	const options = { github: () => ({ approval, snapshot, pr: () => pull() }) };
+	execute("reserve", path, { token, number: 7, models }, options);
+	const statusBefore = execute("status", path).tickets[7].status;
+	const gone = join(dir, "tickets-pilot-7");
+	const cleanup = () =>
+		execute("cleanup", path, { token, number: 7, worktreePath: gone });
+
+	const first = cleanup();
+	assert.deepEqual(first, {
+		ticket: "7",
+		ran: false,
+		ok: false,
+		status: "worktree-absent",
+		worktree: gone,
+		error: `worktree ${gone} does not exist`,
+	});
+	assert.equal(existsSync(gone), false);
+	assert.equal(existsSync(record), false);
+	let ticket = execute("status", path).tickets[7];
+	assert.equal(ticket.status, statusBefore);
+	assert.equal(ticket.cleanup.status, "worktree-absent");
+	assert.equal(ticket.cleanup.ok, false);
+	assert.equal(ticket.cleanup.worktree, gone);
+	assert.match(ticket.cleanup.at, /^\d{4}-/);
+	const { at } = ticket.cleanup;
+
+	// A later call for the same ticket keeps the first sighting rather than
+	// reporting success or restamping it.
+	assert.deepEqual(cleanup(), first);
+	ticket = execute("status", path).tickets[7];
+	assert.deepEqual(ticket.cleanup, {
+		at,
+		ok: false,
+		status: "worktree-absent",
+		worktree: gone,
+		error: `worktree ${gone} does not exist`,
+	});
+	assert.equal(ticket.status, statusBefore);
+	assert.equal(existsSync(gone), false);
 });

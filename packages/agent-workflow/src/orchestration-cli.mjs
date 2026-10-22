@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -146,6 +146,36 @@ function worktreeBranch(worktree) {
 		return null;
 	}
 }
+// A worktree that has already been archived or deleted cannot be cleaned up and
+// must not be recreated. The absence is recorded as a distinct, durable warning
+// on the ticket (keeping the first sighting) so the controller reports it and
+// stops retrying; a later real run of the hook replaces it with its own result.
+function absentWorktree(state, t, worktree) {
+	const previous = t.cleanup;
+	const error = `worktree ${worktree} does not exist`;
+	const warning =
+		previous?.status === "worktree-absent" && previous.worktree === worktree
+			? previous
+			: {
+					at: new Date().toISOString(),
+					ok: false,
+					status: "worktree-absent",
+					worktree,
+					error,
+				};
+	t.cleanup = warning;
+	return {
+		state,
+		output: {
+			ticket: t.number,
+			ran: false,
+			ok: false,
+			status: "worktree-absent",
+			worktree,
+			error,
+		},
+	};
+}
 const CLEANUP_TIMEOUT = 120_000;
 // Runs the repository's cleanupCommand against one ticket's worktree, e.g. to
 // remove Compose projects a worker or review started there. A failure is
@@ -167,6 +197,8 @@ function cleanup(path, input, options) {
 			!isAbsolute(input.worktreePath)
 		)
 			throw new Error("worktreePath must be an absolute path");
+		if (!existsSync(input.worktreePath))
+			return absentWorktree(state, t, input.worktreePath);
 		const worktree = realpathSync(input.worktreePath);
 		if (!statSync(worktree).isDirectory())
 			throw new Error("worktreePath must be a directory");
@@ -490,6 +522,14 @@ export function execute(command, path, input = {}, options = {}) {
 						requiredChecks: required,
 					};
 				}
+			} else if (command === "complete") {
+				// Only GitHub proves the issue is closed; the state module checks
+				// the rest (no uncertain launch, active worker or linked PR).
+				const t = state.tickets[String(input.number).replace(/^#/, "")];
+				if (!t) throw new Error("ticket outside selected batch");
+				if (api.issue(t.number, false).state !== "CLOSED")
+					throw new Error("issue is still open; close it before completing");
+				output = changeTicket(state, input.number, command, input);
 			} else {
 				const t = state.tickets[String(input.number).replace(/^#/, "")];
 				if (
