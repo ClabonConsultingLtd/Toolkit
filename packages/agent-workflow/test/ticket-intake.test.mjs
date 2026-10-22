@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { atomicWrite } from "../src/orchestration.mjs";
+import { atomicWrite, changeTicket } from "../src/orchestration.mjs";
 import { execute } from "../src/orchestration-cli.mjs";
 import { capacity, intakeCommand, intakePath } from "../src/ticket-intake.mjs";
 import { approved } from "./approval-fixtures.mjs";
@@ -772,4 +772,116 @@ test("shared lock blocks both intake and reserve; malformed policy fails closed"
 		() => intakeCommand("tick", f.cwd, { models: f.models }, f.options),
 		/invalid intake/,
 	);
+});
+test("a resolved launch stops counting toward intake capacity and resumes", (t) => {
+	const f = fixture(t),
+		first = intakeCommand("tick", f.cwd, { models: f.models }, f.options),
+		{ token } = execute("acquire", first.batchFile);
+	execute(
+		"reserve",
+		first.batchFile,
+		{ token, number: 1, models: f.models },
+		f.options,
+	);
+	execute(
+		"block",
+		first.batchFile,
+		{ token, number: 1, reason: "creation failed", workerStopped: true },
+		f.options,
+	);
+	assert.equal(capacity(first.batchFile, f.input.repository).active, 1);
+	assert.throws(
+		() =>
+			execute(
+				"resume",
+				first.batchFile,
+				{ token, number: 1, evidence: "retry" },
+				f.options,
+			),
+		/uncertain/,
+	);
+	execute(
+		"block",
+		first.batchFile,
+		{
+			token,
+			number: 1,
+			reason: "creation failed",
+			launchResolved: true,
+			evidence: "no agent carries the launchKey; old controller exited",
+		},
+		f.options,
+	);
+	assert.equal(capacity(first.batchFile, f.input.repository).active, 0);
+	const resumed = execute(
+		"resume",
+		first.batchFile,
+		{ token, number: 1, evidence: "fresh launch authorised" },
+		f.options,
+	);
+	assert.equal(resumed.status, "implementing");
+	assert.equal(capacity(first.batchFile, f.input.repository).active, 1);
+});
+test("fix from awaiting_merge enforces the intake execution limit", (t) => {
+	const f = fixture(t);
+	intakeCommand("configure", f.cwd, { ...f.input, count: 1 });
+	const dir = join(f.cwd, ".toolkit", "orchestration"),
+		paths = [join(dir, "a.json"), join(dir, "b.json")];
+	const tokens = paths.map((path, i) => {
+		execute("init", path, {
+			...f.input,
+			cwd: f.cwd,
+			batchId: `batch-${i}`,
+			tickets: [i + 1],
+		});
+		return execute("acquire", path).token;
+	});
+	execute(
+		"reserve",
+		paths[0],
+		{ token: tokens[0], number: 1, models: f.models },
+		f.options,
+	);
+	execute(
+		"attach",
+		paths[0],
+		{ token: tokens[0], number: 1, workspaceId: "w", agentId: "a" },
+		f.options,
+	);
+	update(paths[0], (s) => {
+		s.tickets[1].pr = 17;
+		changeTicket(s, 1, "review", { evidence: "tests" });
+		changeTicket(s, 1, "ready", { evidence: "review", reviewedHead: "abc" });
+	});
+	execute(
+		"reserve",
+		paths[1],
+		{ token: tokens[1], number: 2, models: f.models },
+		f.options,
+	);
+	const fix = () =>
+		execute(
+			"fix",
+			paths[0],
+			{ token: tokens[0], number: 1, reason: "re-review finding" },
+			f.options,
+		);
+	assert.throws(fix, /execution limit/);
+	assert.equal(execute("status", paths[0]).tickets[1].status, "awaiting_merge");
+	execute(
+		"attach",
+		paths[1],
+		{ token: tokens[1], number: 2, workspaceId: "w2", agentId: "a2" },
+		f.options,
+	);
+	execute(
+		"block",
+		paths[1],
+		{ token: tokens[1], number: 2, reason: "stopped", workerStopped: true },
+		f.options,
+	);
+	const fixed = fix();
+	assert.equal(fixed.status, "implementing");
+	assert.equal(fixed.fixCycles, 1);
+	assert.equal(fixed.reviewedHead, null);
 });
