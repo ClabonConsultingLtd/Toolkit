@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -1566,4 +1567,67 @@ test("complete needs a closed issue and releases dependents in sync and selectio
 		"9",
 	]);
 	assert.throws(() => execute("complete", path, request, options), /already/);
+test("cleanup against an absent worktree records a durable warning instead of throwing", (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cleanup-absent-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const checkout = join(dir, "checkout");
+	mkdirSync(checkout);
+	writeFileSync(
+		join(checkout, "toolkit-intake.json"),
+		JSON.stringify({
+			version: 1,
+			repository: "example/project",
+			baseBranch: "main",
+			codexModel: "test-codex",
+			count: 1,
+			cleanupCommand: "cleanup.mjs",
+		}),
+	);
+	const record = join(dir, "calls.jsonl");
+	writeFileSync(
+		join(checkout, "cleanup.mjs"),
+		`import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(record)}, "ran\\n");\n`,
+	);
+	const path = join(dir, "state.json");
+	execute("init", path, { ...manifest(), cwd: checkout });
+	const { token } = execute("acquire", path);
+	const options = { github: () => ({ approval, snapshot, pr: () => pull() }) };
+	execute("reserve", path, { token, number: 7, models }, options);
+	const statusBefore = execute("status", path).tickets[7].status;
+	const gone = join(dir, "tickets-pilot-7");
+	const cleanup = () =>
+		execute("cleanup", path, { token, number: 7, worktreePath: gone });
+
+	const first = cleanup();
+	assert.deepEqual(first, {
+		ticket: "7",
+		ran: false,
+		ok: false,
+		status: "worktree-absent",
+		worktree: gone,
+		error: `worktree ${gone} does not exist`,
+	});
+	assert.equal(existsSync(gone), false);
+	assert.equal(existsSync(record), false);
+	let ticket = execute("status", path).tickets[7];
+	assert.equal(ticket.status, statusBefore);
+	assert.equal(ticket.cleanup.status, "worktree-absent");
+	assert.equal(ticket.cleanup.ok, false);
+	assert.equal(ticket.cleanup.worktree, gone);
+	assert.match(ticket.cleanup.at, /^\d{4}-/);
+	const { at } = ticket.cleanup;
+
+	// A later call for the same ticket keeps the first sighting rather than
+	// reporting success or restamping it.
+	assert.deepEqual(cleanup(), first);
+	ticket = execute("status", path).tickets[7];
+	assert.deepEqual(ticket.cleanup, {
+		at,
+		ok: false,
+		status: "worktree-absent",
+		worktree: gone,
+		error: `worktree ${gone} does not exist`,
+	});
+	assert.equal(ticket.status, statusBefore);
+	assert.equal(existsSync(gone), false);
 });

@@ -70,7 +70,10 @@ export function ticketRecord(
 		actual,
 		codexFallback,
 		fixCycleCapped: (ticket.fixCycles ?? 0) >= 2,
-		cleanupFailed: ticket.cleanup?.ok === false,
+		cleanupFailed:
+			ticket.cleanup?.ok === false &&
+			ticket.cleanup.status !== "worktree-absent",
+		worktreeAbsent: ticket.cleanup?.status === "worktree-absent",
 		recommendationMismatch:
 			!!recommendation &&
 			!!actual &&
@@ -182,6 +185,7 @@ export function renderMarkdown(digest) {
 				t.recommendationMismatch ? "model-mismatch" : null,
 				t.anomalous ? "stuck" : null,
 				t.cleanupFailed ? "cleanup-failed" : null,
+				t.worktreeAbsent ? "worktree-absent" : null,
 			]
 				.filter(Boolean)
 				.join(", ");
