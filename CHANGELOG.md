@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.21.1 - 2026-10-26
+
+- #205: Intake: after a merge, re-evaluate the remaining awaiting-merge tickets in the same run
+
 ## 0.21.0 - 2026-10-22
 
 - #197: Retry transient gh read failures and log tick progress

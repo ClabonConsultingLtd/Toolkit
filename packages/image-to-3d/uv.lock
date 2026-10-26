@@ -394,7 +394,7 @@ wheels = [
 
 [[package]]
 name = "toolkit-image-to-3d"
-version = "0.21.0"
+version = "0.21.1"
 source = { editable = "." }
 dependencies = [
     { name = "gradio-client" },
