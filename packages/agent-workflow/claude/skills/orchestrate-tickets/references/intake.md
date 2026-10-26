@@ -147,7 +147,11 @@ the run to:
    merging, submit an approval review when GitHub permits it. Then run
    `orchestrate merge-ready STATE.json` with the ticket number and current lease
    token immediately before each merge. Merge only when it returns `mergeReady: true`,
-   using the returned head SHA as the merge command's head match. Leave PRs awaiting
+   using the returned head SHA as the merge command's head match. After a merge, run
+   `merge-ready` again for the batch's remaining awaiting-merge tickets and merge what
+   it accepts, until a pass merges nothing (bounded by the count of awaiting-merge
+   tickets at the start of the run): a merge-train gate accepts the next PR as soon
+   as the one ahead lands. Leave PRs awaiting
    merge when the controller cannot approve its own PR or branch protection requires
    another reviewer, except under `selfAuthoredMerge: "comment-review"`: when GitHub
    refuses the approval only because the controller's account opened the PR, post the
