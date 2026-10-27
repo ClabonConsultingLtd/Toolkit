@@ -280,35 +280,35 @@ jobs:
           merge-multiple: true
       - name: Upload secrets SARIF
         if: ${{ hashFiles('results/secrets.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: results/secrets.sarif
           category: security-gates-secrets
           checkout_path: ${{ github.workspace }}/target
       - name: Upload dependencies SARIF
         if: ${{ hashFiles('results/dependencies.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: results/dependencies.sarif
           category: security-gates-dependencies
           checkout_path: ${{ github.workspace }}/target
       - name: Upload static analysis SARIF
         if: ${{ hashFiles('results/static-analysis.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: results/static-analysis.sarif
           category: security-gates-static-analysis
           checkout_path: ${{ github.workspace }}/target
       - name: Upload image vulnerabilities SARIF
         if: ${{ hashFiles('results/image-vulnerabilities.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: results/image-vulnerabilities.sarif
           category: security-gates-image-vulnerabilities
           checkout_path: ${{ github.workspace }}/target
       - name: Upload image lint SARIF
         if: ${{ hashFiles('results/image-lint.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: results/image-lint.sarif
           category: security-gates-image-lint
